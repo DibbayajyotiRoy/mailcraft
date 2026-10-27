@@ -11,7 +11,7 @@ import { RelativeTime } from "@/components/ui/relative-time";
 import { TrendChart } from "@/components/overview/trend-chart";
 import { NeedsAttention, RangeSwitch, SetupChecklistSlot, Sparkline, type Attention } from "@/components/overview/parts";
 import { OverviewSkeleton } from "@/components/overview/skeleton";
-import { RetryError } from "@/components/monitor/retry-error";
+import { RetryError } from "@/components/ui/error-state";
 import { BOUNCE_LIMIT, COMPLAINT_LIMIT, delta, fmtPct, formatNumber, rangeFor, rate, splitSeries, sum, toDays } from "@/components/monitor/helpers";
 
 export const dynamic = "force-dynamic";
@@ -77,12 +77,12 @@ async function Overview({ searchParams }: Props) {
             <CardBody>{cur.length ? <TrendChart days={cur} label={`Daily volume, last ${range.label}`} /> : <p className="text-sm text-muted">No daily data for this range yet.</p>}</CardBody>
           </Card>
           <Card>
-            <CardHeader title="Recent emails" action={<Link data-ui="link" href="/emails" className="text-sm font-medium text-accent underline-offset-2 hover:underline">View all</Link>} />
+            <CardHeader title="Recent emails" action={<Link href="/emails" className="text-sm font-medium text-accent underline-offset-2 hover:underline">View all</Link>} />
             {rows.length ? (
               <ul className="divide-y divide-border">
                 {rows.map((e) => (
                   <li key={e.id}>
-                    <Link data-ui="link" href={`/emails?open=${encodeURIComponent(e.id)}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm transition-colors duration-[var(--dur-fast)] hover:bg-surface-2">
+                    <Link href={`/emails?open=${encodeURIComponent(e.id)}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm transition-colors duration-[var(--dur-fast)] hover:bg-surface-2">
                       <StatusBadge status={e.status} size="sm" />
                       <span className="min-w-0 flex-1 truncate font-medium">{e.subject || "(no subject)"}</span>
                       <span className="max-w-full truncate font-mono text-xs text-muted">{e.to_addr}</span>

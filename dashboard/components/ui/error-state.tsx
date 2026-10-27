@@ -1,11 +1,14 @@
 "use client";
 import { TriangleAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
 import type { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { Button } from "./button";
 import { CopyButton } from "./copy";
+import { PageHeader } from "./page-header";
 
-/** Human sentence first, code in mono below, hint as a tip. role=alert. Replaces ErrorBanner visually. */
+/** Human sentence first, code in mono below, hint as a tip. role=alert. Also the home of the page-level wrappers below. */
 export function ErrorState({ error, onRetry, className }: { error: ApiError; onRetry?: () => void; className?: string }) {
   return (
     <div role="alert" className={cn("flex gap-3 rounded-lg border border-bad/40 bg-bad-bg p-4 text-bad", className)}>
@@ -21,5 +24,22 @@ export function ErrorState({ error, onRetry, className }: { error: ApiError; onR
         </div>
       </div>
     </div>
+  );
+}
+
+/** ErrorState whose "Try again" re-runs the server component (router.refresh). */
+export function RetryError({ error, className }: { error: ApiError; className?: string }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  return <div aria-busy={pending}><ErrorState className={className} error={error} onRetry={() => start(() => router.refresh())} /></div>;
+}
+
+/** Body of every route-level error.tsx: page title + a generic message (never the raw exception text); next's `reset()` is the retry. */
+export function RouteError({ title, error, reset }: { title: string; error: Error & { digest?: string }; reset: () => void }) {
+  return (
+    <>
+      <PageHeader title={title} />
+      <ErrorState className="max-w-xl" onRetry={reset} error={{ code: error.digest ? `render_failed (${error.digest})` : "render_failed", message: "Something went wrong while loading this page.", hint: "Try again. If it keeps happening, check that the API is reachable." }} />
+    </>
   );
 }

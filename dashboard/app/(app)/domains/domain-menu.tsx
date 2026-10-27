@@ -5,7 +5,7 @@ import { deleteDomain, rotateDkim } from "@/lib/actions";
 import { AlertDialog, AlertDialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown";
-import { TypeNameConfirm } from "@/components/setup/type-name-confirm";
+import { TypeNameConfirm } from "@/components/ui/type-name-confirm";
 
 /** DKIM rotate + delete. Rotate asks first (the old key stops signing once the new record is live); delete needs the name typed. */
 export function DomainMenu({ id, name }: { id: string; name: string }) {

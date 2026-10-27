@@ -62,7 +62,7 @@ export function ApprovalsInbox({ approvals, canDecide, decide }: { approvals: Ap
             const p = a.payload?.preview;
             return (
               <li key={a.id}>
-                <button type="button" data-ui="button" aria-current={a.id === cur?.id ? "true" : undefined} onClick={() => { setSel(a.id); setDrill(true); }}
+                <button type="button" aria-current={a.id === cur?.id ? "true" : undefined} onClick={() => { setSel(a.id); setDrill(true); }}
                   className="grid w-full gap-1 rounded-lg border border-border bg-surface p-3 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 aria-[current=true]:border-accent aria-[current=true]:bg-accent-soft pointer-coarse:min-h-11">
                   <span className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium">{p?.subject ?? KIND[a.kind] ?? a.kind}</span><RelativeTime value={a.created_at} className="shrink-0 text-xs text-muted" /></span>
                   <span className="truncate font-mono text-xs text-muted">{a.payload?.to ?? KIND[a.kind] ?? a.kind}</span>

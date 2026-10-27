@@ -57,7 +57,7 @@ function ContactsTab({ contacts, error, search }: { contacts: Contact[] | null; 
               <TR key={c.id ?? c.email}>
                 <TD label="Contact">
                   <span className="inline-flex items-center gap-2"><Avatar c={c} />
-                    <button type="button" data-ui="link" onClick={() => setOpen(c)} aria-haspopup="dialog" className="rounded-sm text-left font-medium text-accent hover:underline">{c.email}</button>
+                    <button type="button" onClick={() => setOpen(c)} aria-haspopup="dialog" className="rounded-sm text-left font-medium text-accent hover:underline">{c.email}</button>
                   </span>
                 </TD>
                 <TD label="Name">{fullName(c) || <span className="text-subtle">-</span>}</TD>

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -18,12 +19,7 @@ export function MessagePreview({ html, text, title }: { html?: string | null; te
           <TabsTrigger value="preview">Preview</TabsTrigger>
           {text && <TabsTrigger value="text">Text</TabsTrigger>}
         </TabsList>
-        <div role="group" aria-label="Preview width" className="inline-flex gap-1">
-          {([["Desktop", false], ["Mobile", true]] as const).map(([l, v]) => (
-            <button key={l} type="button" data-ui="button" aria-pressed={narrow === v} onClick={() => setNarrow(v)}
-              className="h-7 rounded-sm px-2 text-xs font-medium text-muted transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 aria-pressed:bg-accent-soft aria-pressed:text-fg pointer-coarse:h-11">{l}</button>
-          ))}
-        </div>
+        <SegmentedControl label="Preview width" value={narrow ? "mobile" : "desktop"} onValueChange={(v) => setNarrow(v === "mobile")} options={[{ value: "desktop", label: "Desktop" }, { value: "mobile", label: "Mobile" }]} />
       </div>
       <TabsContent value="preview">
         <iframe title={title} sandbox="" srcDoc={html || textDoc(text ?? "")} className={cn("mx-auto block h-[420px] w-full rounded-md bg-white outline outline-1 -outline-offset-1 outline-black/10 transition-[max-width] duration-[var(--dur-base)]", narrow && "max-w-[375px]")} />

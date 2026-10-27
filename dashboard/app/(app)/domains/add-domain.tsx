@@ -27,7 +27,7 @@ export function AddDomain({ label = "Add domain" }: { label?: string }) {
             <legend className="mb-1.5 text-sm font-medium">Stream</legend>
             {STREAMS.map(([v, t, d], i) => (
               <label key={v} className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3 has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
-                <input data-ui="radio" type="radio" name="stream" value={v} defaultChecked={i === 0} className="mt-1 size-4 accent-[var(--accent)]" />
+                <input type="radio" name="stream" value={v} defaultChecked={i === 0} className="mt-1 size-4 accent-[var(--accent)]" />
                 <span><span className="block text-sm font-medium">{t}</span><span className="block text-xs text-muted">{d}</span></span>
               </label>
             ))}

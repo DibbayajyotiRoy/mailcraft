@@ -1,8 +1,8 @@
 import { Badge, StatusBadge } from "@/components/ui/badge";
+import { CopyField } from "@/components/ui/copy";
 import { EnvChip } from "@/components/ui/env-chip";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { MonoCopy } from "@/components/setup/mono-copy";
 import { RevokeKey } from "./revoke-key";
 
 export type Key = { id: string; name: string; prefix: string; env: "live" | "test"; scopes?: string[]; paused?: boolean; revoked_at?: string | null; created_at?: string; last_used_at?: string | null };
@@ -18,7 +18,7 @@ export function KeysTable({ keys }: { keys: Key[] }) {
         {rows.map((k) => (
           <TR key={k.id} className={k.revoked_at ? "opacity-60" : undefined}>
             <TD label="Name" className="font-medium">{k.name}</TD>
-            <TD label="Prefix"><MonoCopy value={k.prefix} label={`${k.name} prefix`} className="max-md:w-full md:w-44" /></TD>
+            <TD label="Prefix"><CopyField wrap value={k.prefix} label={`${k.name} prefix`} className="max-md:w-full md:w-44" /></TD>
             <TD label="Env"><EnvChip env={k.env} /></TD>
             <TD label="Scopes"><span className="flex flex-wrap gap-1">{(k.scopes ?? []).map((s) => <Badge key={s} className="font-mono">{s}</Badge>)}</span></TD>
             <TD label="Created">{time(k.created_at, false)}</TD>

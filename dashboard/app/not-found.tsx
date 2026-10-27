@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { SearchX } from "lucide-react";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { EmptyState } from "@/components/ui/empty-state";
 
 export const metadata = { title: "Not found · mailcraft" };

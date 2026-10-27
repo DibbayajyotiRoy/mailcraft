@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 export function Table({ className, stack = true, caption, children, ...p }: ComponentProps<"table"> & { stack?: boolean; caption?: string }) {
   return (
     <div className="w-full overflow-x-auto rounded-lg border border-border">
-      <table data-ui="table" data-stack={stack || undefined} className={cn("w-full border-collapse text-sm", className)} {...p}>
+      <table data-stack={stack || undefined} className={cn("w-full border-collapse text-sm", className)} {...p}>
         {caption && <caption className="sr-only">{caption}</caption>}
         {children}
       </table>

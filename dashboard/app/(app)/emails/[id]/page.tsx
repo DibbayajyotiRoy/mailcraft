@@ -8,7 +8,7 @@ import { CopyField } from "@/components/ui/copy";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { EmailTrail, PolicyDecisions, BounceCallout, type MailEvent } from "@/components/emails/trail";
 import { MessagePreview } from "@/components/monitor/message-preview";
-import { RetryError } from "@/components/monitor/retry-error";
+import { RetryError } from "@/components/ui/error-state";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +24,7 @@ export default async function EmailDetail({ params }: { params: Promise<{ id: st
     <>
       <PageHeader title={e.subject || "(no subject)"} breadcrumb={crumb}
         description={<span className="inline-flex flex-wrap items-center gap-2"><StatusBadge status={e.status} /><span>to <span className="font-mono text-xs">{e.to_addr}</span></span><RelativeTime value={e.created_at} /></span>}
-        action={e.status === "pending_approval" ? <Link data-ui="link" href="/approvals" className="text-sm font-medium text-accent underline underline-offset-2">Review approval</Link> : undefined} />
+        action={e.status === "pending_approval" ? <Link href="/approvals" className="text-sm font-medium text-accent underline underline-offset-2">Review approval</Link> : undefined} />
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="grid min-w-0 gap-6">
           <Card>

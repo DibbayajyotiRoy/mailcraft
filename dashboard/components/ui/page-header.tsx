@@ -9,7 +9,7 @@ export function Breadcrumb({ items }: { items: { label: string; href?: string }[
       <ol className="flex flex-wrap items-center gap-1">
         {items.map((it, i) => (
           <li key={i} className="flex items-center gap-1">
-            {it.href ? <Link data-ui="link" href={it.href} className="hover:text-fg hover:underline">{it.label}</Link> : <span aria-current="page" className="text-fg">{it.label}</span>}
+            {it.href ? <Link href={it.href} className="hover:text-fg hover:underline">{it.label}</Link> : <span aria-current="page" className="text-fg">{it.label}</span>}
             {i < items.length - 1 && <ChevronRight aria-hidden className="size-3" />}
           </li>
         ))}

@@ -4,18 +4,18 @@ vi.mock("@/lib/actions", () => ({
   createKey: vi.fn(async () => ({ secret: "mc_test_SECRET123" })), revokeKey: vi.fn(), deleteDomain: vi.fn(), rotateDkim: vi.fn(), verifyDomain: vi.fn(), addDomain: vi.fn(),
 }));
 import { CreateKey } from "@/app/(app)/keys/create-key";
-import { DnsRecordRow } from "@/app/(app)/domains/records";
-import { Meter } from "@/app/(app)/domains/domain-card";
-import { MonoCopy } from "@/components/setup/mono-copy";
-import { TypeNameConfirm } from "@/components/setup/type-name-confirm";
+import { DnsRecordRow } from "@/components/ui/dns-record";
+import { Meter } from "@/components/ui/meter";
+import { CopyField } from "@/components/ui/copy";
+import { TypeNameConfirm } from "@/components/ui/type-name-confirm";
 import { SetupChecklist } from "@/components/onboarding/checklist";
 
 const writeText = vi.fn(async () => {});
 beforeEach(() => { writeText.mockClear(); Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true }); });
 
 describe("setup", () => {
-  it("MonoCopy copies the exact value", async () => {
-    render(<MonoCopy value="v=spf1 include:x ~all" label="SPF value" />);
+  it("CopyField (wrap) copies the exact value", async () => {
+    render(<CopyField wrap value="v=spf1 include:x ~all" label="SPF value" />);
     fireEvent.click(screen.getByRole("button", { name: "Copy SPF value" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("v=spf1 include:x ~all"));
     expect(await screen.findByText("Copied")).toBeTruthy();

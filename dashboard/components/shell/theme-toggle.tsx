@@ -1,7 +1,7 @@
 "use client";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useState } from "react";
-import { cn } from "@/lib/cn";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 
 export const THEME_COOKIE = "mc_theme";
 type Theme = "system" | "light" | "dark";
@@ -15,14 +15,5 @@ export function ThemeToggle({ initial = "system" }: { initial?: Theme }) {
     if (n === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.dataset.theme = n;
     document.cookie = `${THEME_COOKIE}=${n}; path=/; max-age=31536000; samesite=lax`;
   }
-  return (
-    <div role="radiogroup" aria-label="Theme" className="inline-flex rounded-md border border-border bg-surface p-0.5">
-      {OPTS.map(([v, label, Icon]) => (
-        <button key={v} data-ui="theme" type="button" role="radio" aria-checked={t === v} aria-label={label} onClick={() => pick(v)}
-          className={cn("grid size-7 place-items-center rounded-sm text-muted transition-colors duration-[var(--dur-fast)] hover:text-fg pointer-coarse:size-10", t === v && "bg-bg text-fg shadow-[0_0_0_1px_var(--border)]")}>
-          <Icon aria-hidden className="size-4" />
-        </button>
-      ))}
-    </div>
-  );
+  return <SegmentedControl iconOnly label="Theme" value={t} onValueChange={pick} options={OPTS.map(([value, label, icon]) => ({ value, label, icon }))} />;
 }

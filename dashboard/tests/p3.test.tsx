@@ -10,7 +10,7 @@ import { AutomationToggle, nextAction } from "@/app/(app)/automations/Automation
 import { StepFlow } from "@/app/(app)/automations/[id]/StepFlow";
 import { RunsTable, duration } from "@/app/(app)/automations/[id]/RunsTable";
 import { AutomationsList } from "@/app/(app)/automations/AutomationsList";
-import { ruleWords } from "@/app/(app)/_p3/rules";
+import { ruleWords } from "@/lib/rules";
 import { validateImport } from "@/app/(app)/templates/ImportTemplate";
 import { TemplatesView } from "@/app/(app)/templates/TemplatesView";
 import { templateVariables, lintSummary } from "@/app/(app)/templates/[id]/util";
@@ -113,7 +113,7 @@ describe("templates", () => {
     fireEvent.change(screen.getByLabelText("Search templates"), { target: { value: "zzz" } });
     expect(screen.getByText("No templates match")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Search templates"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Table view" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Table view" }));
     expect(screen.getByRole("table")).toBeTruthy();
   });
 });

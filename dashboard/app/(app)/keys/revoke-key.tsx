@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { revokeKey } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import { TypeNameConfirm } from "@/components/setup/type-name-confirm";
+import { TypeNameConfirm } from "@/components/ui/type-name-confirm";
 
 export function RevokeKey({ id, name }: { id: string; name: string }) {
   const [open, setOpen] = useState(false);

@@ -1,7 +1,7 @@
 "use client";
 import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { CopyField } from "@/components/ui/copy";
 import { Dialog, DialogClose, DrawerContent } from "@/components/ui/dialog";
 import { RelativeTime } from "@/components/ui/relative-time";

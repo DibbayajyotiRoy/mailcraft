@@ -5,9 +5,9 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { KeyValue } from "@/components/ui/stat-card";
 import { CodeBlock } from "@/components/ui/copy";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ApiErrorState } from "../../_p3/ApiErrorState";
-import { parseErr } from "../../_p3/err";
-import { ruleWords } from "../../_p3/rules";
+import { RetryError } from "@/components/ui/error-state";
+import { parseErr } from "@/lib/err";
+import { ruleWords } from "@/lib/rules";
 import { AutomationToggle } from "../AutomationToggle";
 import { RunsTable, type Run } from "./RunsTable";
 import { StepFlow } from "./StepFlow";
@@ -25,7 +25,7 @@ export default async function AutomationDetail({ params, searchParams }: { param
   if (a.error || !shaped) return (
     <>
       <PageHeader title="Automation" breadcrumb={[{ label: "Automations", href: "/automations" }, { label: id }]} />
-      <ApiErrorState error={a.error ?? { code: "bad_response", message: "The API returned an unexpected response for this page.", hint: "Check the API base URL and that the server is up to date." }} />
+      <RetryError error={a.error ?? { code: "bad_response", message: "The API returned an unexpected response for this page.", hint: "Check the API base URL and that the server is up to date." }} />
     </>
   );
   const d = { status: "draft", ...a.data };
@@ -47,7 +47,7 @@ export default async function AutomationDetail({ params, searchParams }: { param
         description={d.version != null ? `Version ${d.version}` : undefined}
         action={<div className="inline-flex items-center gap-3 text-sm font-medium"><span aria-hidden>{d.status === "active" ? "Live" : d.status === "paused" ? "Paused" : "Draft"}</span><AutomationToggle id={id} name={name} status={d.status} from={`/automations/${id}`} /></div>}
       />
-      {e && <div className="mb-4"><ApiErrorState error={e} /></div>}
+      {e && <div className="mb-4"><RetryError error={e} /></div>}
       <Tabs defaultValue="flow">
         <TabsList aria-label="Automation sections">
           <TabsTrigger value="flow">Flow</TabsTrigger>
@@ -55,7 +55,7 @@ export default async function AutomationDetail({ params, searchParams }: { param
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="flow"><StepFlow automation={d} slots={slots} /></TabsContent>
-        <TabsContent value="runs">{runs.error ? <ApiErrorState error={runs.error} /> : <RunsTable runs={runList} event={trig?.event ?? trig?.events?.[0]} />}</TabsContent>
+        <TabsContent value="runs">{runs.error ? <RetryError error={runs.error} /> : <RunsTable runs={runList} event={trig?.event ?? trig?.events?.[0]} />}</TabsContent>
         <TabsContent value="settings">
           <div className="grid max-w-3xl gap-4">
             <Card>

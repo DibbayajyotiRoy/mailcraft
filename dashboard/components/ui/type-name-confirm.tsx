@@ -1,9 +1,8 @@
 "use client";
 import { useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { DialogClose, Dialog, DialogContent } from "@/components/ui/dialog";
-import { Field, Input } from "@/components/ui/field";
-import { SubmitButton } from "@/components/ui/button";
+import { Button, SubmitButton } from "./button";
+import { DialogClose, Dialog, DialogContent } from "./dialog";
+import { Field, Input } from "./field";
 
 /** Destructive confirm: the action only enables once the resource name is typed. `action` is a server action; `fields` are posted as hidden inputs. */
 export function TypeNameConfirm({ open, onOpenChange, title, description, expected, confirmLabel, action, fields }: {

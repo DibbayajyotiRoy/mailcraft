@@ -32,7 +32,7 @@ export function EmailTrail({ events, status, approvalHref, label = "Delivery tim
       <>
         {g && <span className="font-mono text-xs" title="Time since the previous event">{g}</span>}
         {PROBLEM.has(x.type) && (x.diagnostic || x.enhanced_code || x.type === "bounced") && <BounceCallout code={x.enhanced_code} text={x.diagnostic} status={x.type} />}
-        {x.type === "pending_approval" && approvalHref && <Link data-ui="link" href={approvalHref} className="ml-2 text-accent underline underline-offset-2">Review approval</Link>}
+        {x.type === "pending_approval" && approvalHref && <Link href={approvalHref} className="ml-2 text-accent underline underline-offset-2">Review approval</Link>}
       </>
     ) : undefined;
     return { status: x.type, at: x.occurred_at, detail };

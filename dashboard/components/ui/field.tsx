@@ -10,14 +10,14 @@ const control = cva(
 
 type Common = { mono?: boolean };
 export function Input({ className, mono, ...p }: ComponentProps<"input"> & Common) {
-  return <input data-ui="input" className={cn(control({ mono }), "h-8 pointer-coarse:h-11", className)} {...p} />;
+  return <input className={cn(control({ mono }), "h-8 pointer-coarse:h-11", className)} {...p} />;
 }
 export function Textarea({ className, mono, ...p }: ComponentProps<"textarea"> & Common) {
-  return <textarea data-ui="textarea" className={cn(control({ mono }), "min-h-20 resize-y py-2", className)} {...p} />;
+  return <textarea className={cn(control({ mono }), "min-h-20 resize-y py-2", className)} {...p} />;
 }
 /** Native <select>: best keyboard/mobile behaviour for free; styled to match. */
 export function Select({ className, ...p }: ComponentProps<"select">) {
-  return <select data-ui="select" className={cn(control(), "h-8 pointer-coarse:h-11 pr-8", className)} {...p} />;
+  return <select className={cn(control(), "h-8 pointer-coarse:h-11 pr-8", className)} {...p} />;
 }
 
 /** Label above, description + error linked via aria-describedby. Pass the control as a render function
@@ -30,7 +30,7 @@ export function Field({ label, description, error, children, className }: {
   const d = [description && `${id}-d`, error && `${id}-e`].filter(Boolean).join(" ") || undefined;
   return (
     <div className={cn("grid gap-1.5", className)}>
-      <label data-ui="label" htmlFor={id} className="text-sm font-medium">{label}</label>
+      <label htmlFor={id} className="text-sm font-medium">{label}</label>
       {children({ id, "aria-describedby": d, "aria-invalid": error ? true : undefined })}
       {description && <p id={`${id}-d`} className="text-xs text-muted">{description}</p>}
       {error && <p id={`${id}-e`} className="text-xs font-medium text-bad">{error}</p>}

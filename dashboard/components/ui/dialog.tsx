@@ -3,7 +3,8 @@ import { X } from "lucide-react";
 import { AlertDialog as Alert, Dialog as D } from "radix-ui";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import { Button, buttonVariants } from "./button";
+import { Button } from "./button";
+import { buttonVariants } from "./button-variants";
 
 export const Dialog = D.Root;
 export const DialogTrigger = D.Trigger;

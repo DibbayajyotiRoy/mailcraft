@@ -21,11 +21,12 @@ export function CopyButton({ value, label = "Copy", className }: { value: string
   );
 }
 
-/** Read-only mono value + copy button. Use for every id / key / DNS value. */
-export function CopyField({ value, label, className }: { value: string; label: string; className?: string }) {
+/** Read-only mono value + copy button. Use for every id / key / DNS value.
+ *  `wrap` breaks long values onto several lines (DNS records, secrets) instead of scrolling sideways. */
+export function CopyField({ value, label, wrap, className }: { value: string; label: string; wrap?: boolean; className?: string }) {
   return (
-    <div className={cn("flex items-center gap-1 rounded-sm border border-border bg-surface-2 pl-3", className)}>
-      <code aria-label={label} className="min-w-0 flex-1 select-all overflow-x-auto whitespace-nowrap py-1.5 text-[12.5px] leading-5">{value}</code>
+    <div role="group" aria-label={label} className={cn("flex gap-1 rounded-sm border border-border bg-surface-2 pl-3", wrap ? "items-start" : "items-center", className)}>
+      <code className={cn("min-w-0 flex-1 select-all py-1.5 text-[12.5px] leading-5", wrap ? "[overflow-wrap:anywhere]" : "overflow-x-auto whitespace-nowrap")}>{value}</code>
       <CopyButton value={value} label={`Copy ${label}`} />
     </div>
   );

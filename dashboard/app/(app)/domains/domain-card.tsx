@@ -2,7 +2,8 @@ import { Clock } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { RelativeTime } from "@/components/ui/relative-time";
-import { DnsRecordRow, type DnsRec } from "./records";
+import { DnsRecordRow, type DnsRec } from "@/components/ui/dns-record";
+import { Meter } from "@/components/ui/meter";
 import { DomainMenu } from "./domain-menu";
 import { VerifyForm } from "./verify-form";
 
@@ -14,20 +15,6 @@ const BANNER: Record<string, string> = {
   verified: "All set. This domain can send.",
   failed: "We could not see your records after repeated checks. Compare them with the values below, check for proxying, then verify again.",
 };
-
-/** "2 of 4 verified" meter. role=progressbar with a text value so it is not colour-only. */
-export function Meter({ done, total }: { done: number; total: number }) {
-  const full = total > 0 && done === total;
-  return (
-    <div>
-      <div role="progressbar" aria-label="Records verified" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-valuetext={`${done} of ${total} verified`}
-        className="h-1.5 overflow-hidden rounded-full bg-surface-3">
-        <div className={`h-full rounded-full transition-[width] duration-[var(--dur-base)] ${full ? "bg-ok" : "bg-accent"}`} style={{ width: total ? `${(done / total) * 100}%` : "0%" }} />
-      </div>
-      <p className="mt-1 text-sm tabular-nums"><strong>{done} of {total}</strong> <span className="text-muted">records verified</span></p>
-    </div>
-  );
-}
 
 export function DomainCard({ d }: { d: Domain }) {
   const recs = d.records ?? [];
