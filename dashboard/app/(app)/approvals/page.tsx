@@ -1,6 +1,6 @@
 import { get } from "@/lib/api";
 import { decide } from "@/lib/actions";
-import { ActionError, ErrorBanner, Json, Preview, StatusBadge } from "@/components/ui";
+import { ActionError, ErrorBanner, Json, StatusBadge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +15,11 @@ export default async function Approvals({ searchParams }: { searchParams: Promis
         <>
           {!(r.data as any[]).length && <p className="muted">The queue is empty.</p>}
           {(r.data as any[]).map((a) => {
-            const html = a.preview?.html ?? a.rendered?.html ?? a.html;
+            const pv = a.payload?.preview; // email approvals carry {subject, text, has_html}
             return (
               <section key={a.id} aria-labelledby={`a-${a.id}`}>
-                <h2 id={`a-${a.id}`}>{a.subject ?? a.summary ?? a.id} {a.status && <StatusBadge status={a.status} />}</h2>
-                {html ? <Preview title={`Preview of ${a.id}`} html={html} /> : <Json value={a} />}
+                <h2 id={`a-${a.id}`}>{pv?.subject ?? a.kind} {a.status && <StatusBadge status={a.status} />}</h2>
+                {pv?.text ? <pre>{pv.text}</pre> : <Json value={a.payload} />}
                 <form action={decide} className="inline">
                   <input type="hidden" name="id" value={a.id} />
                   <button type="submit" name="decision" value="approve">Approve</button>

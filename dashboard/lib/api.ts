@@ -32,6 +32,12 @@ export async function request<T = any>(
   return { data: null, error: e?.code ? e : { code: `http_${res.status}`, message: e?.message ?? "Unexpected response shape" } };
 }
 
+/** POST /v1/keys body: the API requires env and at least one scope (read | send | manage). */
+export function keyBody(name: string, scopes: string, env: string) {
+  const list = scopes.split(/[\s,]+/).filter(Boolean);
+  return { name, env: env || "test", scopes: list.length ? list : ["read", "send"] };
+}
+
 export async function session() {
   const c = await cookies();
   const key = c.get("mc_key")?.value;

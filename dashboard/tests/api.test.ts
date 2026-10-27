@@ -35,3 +35,36 @@ describe("request", () => {
     expect((await request("http://x", "k", "GET", "/v1/keys")).error?.code).toBe("bad_response");
   });
 });
+
+// ---- contract: real envelope shapes (docs/contract/fixtures.json) ----
+import { readFileSync } from "node:fs";
+import { keyBody } from "@/lib/api";
+const fx = JSON.parse(readFileSync("../docs/contract/fixtures.json", "utf8"));
+
+describe("contract", () => {
+  it.each(["GET /v1/emails", "GET /v1/approvals", "GET /v1/keys", "GET /v1/kill-switch", "GET /v1/account/status", "GET /v1/emails/{id}/events"])("unwraps %s", async (k) => {
+    vi.stubGlobal("fetch", reply(fx[k].body, fx[k].status));
+    const r = await request("http://x", "mc_test_k", "GET", "/v1/anything");
+    expect(r.error).toBeNull();
+    expect(r.data).toEqual(fx[k].body.data);
+  });
+  it("pages carry next_cursor", async () => {
+    vi.stubGlobal("fetch", reply(fx["GET /v1/emails"].body));
+    expect((await request("http://x", "k", "GET", "/v1/emails")).next_cursor).toBe(fx["GET /v1/emails"].body.next_cursor);
+  });
+  it("pages read the fields the API really sends", () => {
+    const e = fx["GET /v1/emails"].body.data[0];
+    expect(e.to_addr).toBeTypeOf("string");
+    expect(fx["GET /v1/approvals"].body.data[0].payload.preview.subject).toBeTypeOf("string");
+    expect(fx["POST /v1/keys"].body.data.token).toMatch(/^mc_test_/);
+    expect(fx["GET /v1/kill-switch"].body.data.on).toBe(false);
+  });
+  it("structured error is passed through", async () => {
+    vi.stubGlobal("fetch", reply(fx["ERROR forbidden_scope"].body, 403));
+    expect((await request("http://x", "k", "POST", "/v1/approvals/x/decide", { decision: "approve" })).error?.code).toBe("forbidden_scope");
+  });
+  it("key create body always has env and scopes", () => {
+    expect(keyBody("a", "", "")).toEqual({ name: "a", env: "test", scopes: ["read", "send"] });
+    expect(keyBody("a", "read,manage", "live")).toEqual({ name: "a", env: "live", scopes: ["read", "manage"] });
+  });
+});

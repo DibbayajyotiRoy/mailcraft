@@ -3,8 +3,8 @@ import type { ApiError } from "@/lib/api";
 
 const TONE: Record<string, string> = {
   verified: "ok", delivered: "ok", sent: "ok", active: "ok", published: "ok", approved: "ok", pass: "ok", completed: "ok",
-  pending: "warn", queued: "warn", deferred: "warn", draft: "warn", warn: "warn", paused: "warn", not_started: "warn", running: "warn",
-  failed: "bad", bounced: "bad", complained: "bad", rejected: "bad", fail: "bad", cancelled: "bad", revoked: "bad",
+  pending: "warn", pending_approval: "warn", sending: "warn", expired: "warn", queued: "warn", deferred: "warn", draft: "warn", warn: "warn", paused: "warn", not_started: "warn", running: "warn",
+  failed: "bad", bounced: "bad", complained: "bad", rejected: "bad", fail: "bad", cancelled: "bad", suppressed: "bad", revoked: "bad",
 };
 
 /** Colour is never the only signal: the status text is always shown. */

@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { api, request, type ApiResult } from "./api";
+import { api, keyBody, request, type ApiResult } from "./api";
 
 const f = (d: FormData, k: string) => String(d.get(k) ?? "").trim();
 const cookie = (base: string) => ({ httpOnly: true, sameSite: "strict" as const, secure: base.startsWith("https:"), path: "/", maxAge: 60 * 60 * 12 });
@@ -56,11 +56,10 @@ export async function revokeKey(d: FormData) { done(await api("DELETE", `/v1/key
 
 /** useActionState-shaped so the one-time secret never travels through a URL. */
 export async function createKey(_p: unknown, d: FormData): Promise<{ secret?: string; error?: string }> {
-  const scopes = f(d, "scopes").split(/[\s,]+/).filter(Boolean);
-  const r = await api("POST", "/v1/keys", { name: f(d, "name"), scopes: scopes.length ? scopes : undefined });
+  const r = await api("POST", "/v1/keys", keyBody(f(d, "name"), f(d, "scopes"), f(d, "env")));
   if (r.error) return { error: `${r.error.code}: ${r.error.message}${r.error.hint ? ` (${r.error.hint})` : ""}` };
   revalidatePath("/keys");
-  return { secret: r.data?.secret ?? r.data?.key ?? JSON.stringify(r.data) };
+  return { secret: r.data?.token ?? JSON.stringify(r.data) };
 }
 
 export async function saveLlm(d: FormData) {
