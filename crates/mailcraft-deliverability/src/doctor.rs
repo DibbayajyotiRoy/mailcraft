@@ -301,18 +301,30 @@ pub async fn records<D: Dns>(dns: &D, plan: &Plan, now_unix: u64) -> Vec<Check> 
 /// Full direct-sending doctor run. `plan` is optional (host checks only without it).
 pub async fn run<D: Dns>(
     dns: &D,
-    ip: IpAddr,
+    ip: Option<IpAddr>,
     helo: Option<&str>,
     plan: Option<&Plan>,
     now_unix: u64,
     probe_addr: &str,
 ) -> Vec<Check> {
-    let mut out = vec![
-        port25(probe_addr, Duration::from_secs(8)).await,
-        fcrdns(dns, ip, helo).await,
-    ];
-    out.push(dnsbl(dns, &SPAMHAUS_ZEN, &ip.to_string()).await);
-    out.push(dnsbl(dns, &BARRACUDA, &ip.to_string()).await);
+    let mut out = vec![port25(probe_addr, Duration::from_secs(8)).await];
+    match ip {
+        Some(ip) => {
+            out.push(fcrdns(dns, ip, helo).await);
+            out.push(dnsbl(dns, &SPAMHAUS_ZEN, &ip.to_string()).await);
+            out.push(dnsbl(dns, &BARRACUDA, &ip.to_string()).await);
+        }
+        // Not a failure: without an egress IP there is nothing to look up.
+        None => {
+            for n in ["fcrdns", "dnsbl:zen", "dnsbl:barracuda"] {
+                out.push(chk(
+                    n,
+                    Level::Unknown,
+                    "skipped: egress IP unknown; set MAILCRAFT_EGRESS_IP (or pass --ip) to the public IP mail leaves from",
+                ));
+            }
+        }
+    }
     if let Some(p) = plan {
         out.push(dnsbl(dns, &SPAMHAUS_DBL, &p.sending_domain).await);
         out.extend(records(dns, p, now_unix).await);
@@ -457,5 +469,17 @@ mod tests {
             chk("b", Level::Unknown, "")
         ]));
         assert!(!ready_for_direct(&[chk("a", Level::Fail, "")]));
+    }
+
+    #[tokio::test]
+    async fn no_egress_ip_skips_ip_checks_instead_of_failing() {
+        let out = run(&Mock::default(), None, None, None, 0, "127.0.0.1:1").await;
+        let ip_checks: Vec<_> = out.iter().filter(|c| c.name != "port25_egress").collect();
+        assert_eq!(ip_checks.len(), 3);
+        assert!(
+            ip_checks
+                .iter()
+                .all(|c| c.level == Level::Unknown && c.detail.contains("MAILCRAFT_EGRESS_IP"))
+        );
     }
 }

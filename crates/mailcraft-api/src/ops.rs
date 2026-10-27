@@ -113,7 +113,7 @@ pub async fn approvals_decide(
     .bind(auth.0.workspace_id)
     .fetch_optional(&mut *tx)
     .await?;
-    let (kind, status, _subject, payload) = row.ok_or_else(|| not_found("approval"))?;
+    let (kind, status, subject, payload) = row.ok_or_else(|| not_found("approval"))?;
     if status != "pending" {
         return Err(err(
             "approval_already_decided",
@@ -122,21 +122,26 @@ pub async fn approvals_decide(
         ));
     }
     let approve = body.decision == Decision::Approve;
+    // Every kind that gates queued mail: `email` lists its ids, `automation_first_send` is one email.
+    let mut gated = email_ids(&payload);
+    if kind == "automation_first_send" {
+        gated.extend(subject.map(|s| s.to_string()));
+    }
     match (kind.as_str(), approve) {
-        ("email", true) => {
+        ("email" | "automation_first_send", true) => {
             sqlx::query(
                 "UPDATE emails SET status = 'queued', next_attempt_at = COALESCE(scheduled_at, now()) \
                  WHERE workspace_id = $1 AND status = 'pending_approval' AND id::text = ANY($2)",
             )
             .bind(auth.0.workspace_id)
-            .bind(email_ids(&payload))
+            .bind(&gated)
             .execute(&mut *tx)
             .await?;
         }
-        ("email", false) => {
+        ("email" | "automation_first_send", false) => {
             sqlx::query("UPDATE emails SET status = 'cancelled' WHERE workspace_id = $1 AND status = 'pending_approval' AND id::text = ANY($2)")
                 .bind(auth.0.workspace_id)
-                .bind(email_ids(&payload))
+                .bind(&gated)
                 .execute(&mut *tx)
                 .await?;
         }

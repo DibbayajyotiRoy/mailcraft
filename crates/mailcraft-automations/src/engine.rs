@@ -602,7 +602,8 @@ impl Engine {
         };
         let attempts = ctx.get("_attempts").and_then(Value::as_u64).unwrap_or(0) as u32 + 1;
         ctx["_attempts"] = json!(attempts);
-        let failed = attempts >= self.cfg.max_attempts;
+        // Config/data errors will not fix themselves: fail the run now, with the reason in the step log.
+        let failed = attempts >= self.cfg.max_attempts || !matches!(err, AutomationError::Db(_));
         let wake = now + Duration::minutes(1 << attempts.min(10));
         sqlx::query(
             "UPDATE automation_runs SET context = $2, state = CASE WHEN $3 THEN 'failed' ELSE state END,
@@ -870,10 +871,13 @@ impl Engine {
         };
 
         // 1. kill switch / paused automation
-        let kill: bool = sqlx::query_scalar("SELECT kill_switch FROM workspaces WHERE id = $1")
-            .bind(auto.workspace_id)
-            .fetch_one(&mut *tx)
-            .await?;
+        let (kill, live): (bool, bool) =
+            sqlx::query_as("SELECT kill_switch, live_enabled FROM workspaces WHERE id = $1")
+                .bind(auto.workspace_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        // A workspace that has not gone live only has the sandbox: its mail is `test` env.
+        let env = if live { "live" } else { "test" };
         if kill {
             return Ok(defer(now + self.cfg.gate_retry, "kill_switch"));
         }
@@ -1009,15 +1013,18 @@ impl Engine {
             }
         }
 
-        // 4. quiet hours
-        if let Some(at) =
+        // 4. quiet hours (sandbox mail reaches no one, so never wait for it)
+        if env == "test" {
+            decisions.push(json!({"gate":"quiet_hours","decision":"skipped_test"}));
+        } else if let Some(at) =
             self.cfg
                 .quiet
                 .next_send_time(contact.timezone.as_deref(), c.weekend_ok, now)
         {
             return Ok(defer(at, "quiet_hours"));
+        } else {
+            decisions.push(json!({"gate":"quiet_hours","decision":"pass"}));
         }
-        decisions.push(json!({"gate":"quiet_hours","decision":"pass"}));
 
         // 5. daily send cap for this automation
         if let Some(cap) = auto.caps.0.daily_sends {
@@ -1033,6 +1040,25 @@ impl Engine {
                 return Ok(defer(now + Duration::hours(1), "daily_send_cap"));
             }
         }
+
+        // sender (resolved first: a config error must not cost an LLM call)
+        let domain: Option<(Uuid, String)> = sqlx::query_as(
+            "SELECT id, name FROM domains WHERE workspace_id = $1 AND stream = $2 AND status = 'verified' ORDER BY created_at LIMIT 1",
+        )
+        .bind(auto.workspace_id)
+        .bind(stream_s)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let from = match (&c.from, &domain) {
+            (Some(f), _) => f.clone(),
+            (None, Some((_, d))) => format!("hello@{d}"),
+            (None, None) => {
+                return Err(AutomationError::invalid(format!(
+                    "step `{}`: no `from` and no verified {stream_s} domain to send from",
+                    step.key
+                )))
+            }
+        };
 
         // content: variables, optional LLM slots, subject
         let mut vars = Map::new();
@@ -1147,25 +1173,6 @@ impl Engine {
         };
         decisions.push(json!({"gate":"approval","decision": if pending_approval {"needs_approval"} else {"auto"}}));
 
-        // sender
-        let domain: Option<(Uuid, String)> = sqlx::query_as(
-            "SELECT id, name FROM domains WHERE workspace_id = $1 AND stream = $2 AND status = 'verified' ORDER BY created_at LIMIT 1",
-        )
-        .bind(auto.workspace_id)
-        .bind(stream_s)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let from = match (&c.from, &domain) {
-            (Some(f), _) => f.clone(),
-            (None, Some((_, d))) => format!("hello@{d}"),
-            (None, None) => {
-                return Err(AutomationError::invalid(format!(
-                    "step `{}`: no `from` and no verified {stream_s} domain to send from",
-                    step.key
-                )))
-            }
-        };
-
         // enqueue
         let mut tags = vec![json!("lifecycle"), json!(format!("automation:{}", auto.id))];
         if c.cap_exempt {
@@ -1181,8 +1188,8 @@ impl Engine {
         let inserted: Option<Uuid> = sqlx::query_scalar(
             "INSERT INTO emails (id, workspace_id, domain_id, stream, source, from_addr, to_addr, reply_to, subject,
                template_id, template_vars, tags, contact_id, automation_run_id, generation_id, idempotency_key, status,
-               policy_decisions, next_attempt_at, max_age_at, created_at)
-             VALUES ($1,$2,$3,$4,'automation',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$18)
+               policy_decisions, next_attempt_at, max_age_at, created_at, env)
+             VALUES ($1,$2,$3,$4,'automation',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$18,$20)
              ON CONFLICT (workspace_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id",
         )
         .bind(email_id)
@@ -1204,6 +1211,7 @@ impl Engine {
         .bind(Value::Array(decisions))
         .bind(now)
         .bind(now + Duration::hours(72))
+        .bind(env)
         .fetch_optional(&mut *tx)
         .await?;
         let Some(email_id) = inserted else {
