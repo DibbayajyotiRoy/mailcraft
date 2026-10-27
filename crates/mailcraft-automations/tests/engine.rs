@@ -69,7 +69,7 @@ async fn setup_with(p: Arc<dyn Personalizer>) -> Option<Fx> {
     .run(&pool)
     .await
     .unwrap();
-    let ws: Uuid = sqlx::query_scalar("INSERT INTO workspaces (name, legal_name, postal_address) VALUES ('Acme','Acme Inc','1 Main St') RETURNING id")
+    let ws: Uuid = sqlx::query_scalar("INSERT INTO workspaces (name, legal_name, postal_address, live_enabled) VALUES ('Acme','Acme Inc','1 Main St', true) RETURNING id")
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1073,4 +1073,126 @@ async fn example_pack_installs() {
         }
     }
     assert!(n >= 12, "J1-J12 produce at least 12 automations, got {n}");
+}
+
+struct Counting(std::sync::atomic::AtomicUsize);
+#[async_trait::async_trait]
+impl Personalizer for Counting {
+    async fn personalize(
+        &self,
+        _: PersonalizeRequest,
+    ) -> std::result::Result<Personalized, PersonalizeError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Personalized::default())
+    }
+}
+
+#[tokio::test]
+async fn not_live_workspace_mail_is_test_env_and_skips_quiet_hours() {
+    let f = fx!();
+    let d = def(
+        "env",
+        json!([{"key":"t","type":"trigger","config":{"event":"go"},"next":"m"}, send("m", "plain", "product", None)]),
+        json!({"entry_rule":"always"}),
+    );
+    install(&f.pool, f.ws, &d).await.unwrap();
+    let early = "2026-10-27T09:00:00Z".parse::<DateTime<Utc>>().unwrap(); // outside 13-17Z
+
+    // live workspace: env=live, still waits for the window
+    f.engine
+        .ingest(f.ws, ev("go", "live@x.com", json!({}), None), early)
+        .await
+        .unwrap();
+    f.engine.tick(early).await.unwrap();
+    assert!(emails(&f.pool, "live@x.com").await.is_empty());
+    f.engine.tick(early + Duration::hours(4)).await.unwrap();
+    let env: String = sqlx::query_scalar("SELECT env FROM emails WHERE to_addr = 'live@x.com'")
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert_eq!(env, "live");
+
+    // not live: sandbox env, sent immediately
+    sqlx::query("UPDATE workspaces SET live_enabled = false")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    f.engine
+        .ingest(f.ws, ev("go", "test@x.com", json!({}), None), early)
+        .await
+        .unwrap();
+    f.engine.tick(early).await.unwrap();
+    let env: String = sqlx::query_scalar("SELECT env FROM emails WHERE to_addr = 'test@x.com'")
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert_eq!(env, "test");
+}
+
+#[tokio::test]
+async fn missing_from_fails_fast_without_calling_the_llm() {
+    let c = Arc::new(Counting(Default::default()));
+    let f = setup_with(c.clone()).await.unwrap();
+    sqlx::query("DELETE FROM domains")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let steps = json!([{"key":"t","type":"trigger","config":{"event":"go"},"next":"m"},
+        {"key":"m","type":"send_email","config":{"template":"welcome","topic":"product","mode":"llm"}}]);
+    let (auto, _) = install(&f.pool, f.ws, &def("nofrom", steps, json!({})))
+        .await
+        .unwrap();
+    f.engine
+        .ingest(f.ws, ev("go", "n@x.com", json!({}), None), t0())
+        .await
+        .unwrap();
+    f.engine.tick(t0()).await.unwrap();
+    assert_eq!(
+        c.0.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no LLM call for a config error"
+    );
+    let (state, ..) = run_of(&f.pool, auto).await;
+    assert_eq!(state, "failed", "permanent error: no backoff retries");
+    let err: String = sqlx::query_scalar(
+        "SELECT result->>'error' FROM automation_run_steps WHERE result->>'decision' = 'error'",
+    )
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    assert!(err.contains("no `from`"), "{err}");
+}
+
+#[tokio::test]
+async fn contact_timezone_column_filled_from_properties_and_validated() {
+    let f = fx!();
+    let up = |tz: Option<&str>, props: Value| ContactInput {
+        email: "tz@x.com".into(),
+        timezone: tz.map(Into::into),
+        properties: Some(props),
+        ..Default::default()
+    };
+    let c = contacts::upsert_contact(
+        &f.pool,
+        f.ws,
+        &up(None, json!({"timezone":"Asia/Tokyo"})),
+        t0(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(c.timezone.as_deref(), Some("Asia/Tokyo"));
+    let c = contacts::upsert_contact(&f.pool, f.ws, &up(Some("Europe/Berlin"), json!({})), t0())
+        .await
+        .unwrap();
+    assert_eq!(c.timezone.as_deref(), Some("Europe/Berlin"));
+    assert!(
+        contacts::upsert_contact(&f.pool, f.ws, &up(Some("Mars/Base"), json!({})), t0())
+            .await
+            .is_err()
+    );
+    assert!(
+        contacts::upsert_contact(&f.pool, f.ws, &up(None, json!({"timezone":"nope"})), t0())
+            .await
+            .is_err()
+    );
 }

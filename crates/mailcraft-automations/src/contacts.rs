@@ -75,6 +75,25 @@ pub async fn upsert_contact(
             return Err(AutomationError::invalid("properties must be a JSON object"));
         }
     }
+    // `properties.timezone` is lifted into the column that quiet hours read; both spellings are IANA-checked.
+    let tz = input
+        .timezone
+        .clone()
+        .or_else(|| {
+            input
+                .properties
+                .as_ref()
+                .and_then(|p| p["timezone"].as_str().map(str::to_owned))
+        })
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty());
+    if let Some(t) = &tz {
+        t.parse::<chrono_tz::Tz>().map_err(|_| {
+            AutomationError::invalid(format!(
+                "`{t}` is not an IANA timezone (e.g. Europe/Berlin)"
+            ))
+        })?;
+    }
     Ok(sqlx::query_as::<_, Contact>(
         "INSERT INTO contacts (workspace_id, email, first_name, last_name, timezone, properties, consent, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, COALESCE($6, '{}'::jsonb), $7, $8, $8)
@@ -91,7 +110,7 @@ pub async fn upsert_contact(
     .bind(email)
     .bind(&input.first_name)
     .bind(&input.last_name)
-    .bind(&input.timezone)
+    .bind(&tz)
     .bind(input.properties.as_ref().map(sqlx::types::Json))
     .bind(input.consent.as_ref().map(sqlx::types::Json))
     .bind(now)
