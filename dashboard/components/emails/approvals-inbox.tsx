@@ -1,7 +1,8 @@
 "use client";
 import { ArrowLeft, Check, X } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { AlertDialog, AlertDialogContent } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogContent, Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
+import { Field, Textarea } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { KeyValue } from "@/components/ui/stat-card";
@@ -10,7 +11,7 @@ import { MessagePreview } from "@/components/monitor/message-preview";
 import { cn } from "@/lib/cn";
 import { truncateId } from "@/lib/format";
 
-export type Approval = { id: string; kind: string; status: string; requested_by?: string | null; created_at: string; payload?: any };
+export type Approval = { id: string; kind: string; status: string; requested_by?: string | null; created_at: string; reason?: string | null; payload?: any };
 type Decision = "approve" | "reject";
 const WHY: Record<string, string> = { email: "Policy requires approval", automation_first_send: "First send of an automation", go_live: "Request to go live" };
 const KIND: Record<string, string> = { email: "Email", automation_first_send: "Automation", go_live: "Go live" };
@@ -23,6 +24,7 @@ export function ApprovalsInbox({ approvals, canDecide, decide }: { approvals: Ap
   const [drill, setDrill] = useState(false);
   const [confirm, setConfirm] = useState<Decision | null>(null);
   const [busy, start] = useTransition();
+  const [reason, setReason] = useState("");
   const lastIdx = useRef(0);
   const idx = Math.max(0, approvals.findIndex((a) => a.id === sel));
   // After a decision the item leaves the list: auto-advance to whatever now sits at the same position.
@@ -46,6 +48,7 @@ export function ApprovalsInbox({ approvals, canDecide, decide }: { approvals: Ap
   function submit(decision: Decision) {
     if (!cur) return;
     const fd = new FormData(); fd.set("id", cur.id); fd.set("decision", decision);
+    if (decision === "reject" && reason.trim()) fd.set("reason", reason.trim());
     start(() => decide(fd));
   }
 
@@ -80,8 +83,8 @@ export function ApprovalsInbox({ approvals, canDecide, decide }: { approvals: Ap
               <h2 className="text-md font-semibold">{pv?.subject ?? KIND[cur.kind] ?? cur.kind}</h2>
               <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted"><StatusBadge status={cur.status} /><span>{WHY[cur.kind] ?? "Held for review"}</span></p>
             </div>
-            {pv ? <MessagePreview text={pv.text} title={`Preview of ${pv.subject ?? "email"}`} /> : null}
-            {pv && !pv.text && <p className="text-sm text-muted">This email has an HTML body only; open it after approval to see it rendered.</p>}
+            {pv ? <MessagePreview html={pv.html} text={pv.text ?? pv.text_full} title={`Preview of ${pv.subject ?? "email"}`} /> : null}
+            {pv && !pv.text && !pv.html && <p className="text-sm text-muted">This email has an HTML body only; open it after approval to see it rendered.</p>}
             <KeyValue items={[
               ["Kind", KIND[cur.kind] ?? cur.kind],
               ...(cur.payload?.from ? [["From", <span key="f" className="font-mono text-xs">{cur.payload.from}</span>] as [string, React.ReactNode]] : []),
@@ -101,15 +104,19 @@ export function ApprovalsInbox({ approvals, canDecide, decide }: { approvals: Ap
         </section>
       )}
 
-      <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null); }}>
-        {confirm && (
-          <AlertDialogContent
-            title={confirm === "approve" ? "Approve this email?" : "Reject this email?"}
-            description={confirm === "approve" ? "It is queued and sent right away." : "It is cancelled and will not be sent. This cannot be undone."}
-            confirmLabel={confirm === "approve" ? "Approve" : "Reject"} destructive={confirm === "reject"}
-            onConfirm={() => submit(confirm)} />
+      <AlertDialog open={confirm === "approve"} onOpenChange={(o) => { if (!o) setConfirm(null); }}>
+        {confirm === "approve" && (
+          <AlertDialogContent title="Approve this email?" description="It is queued and sent right away." confirmLabel="Approve" destructive={false} onConfirm={() => submit("approve")} />
         )}
       </AlertDialog>
+      <Dialog open={confirm === "reject"} onOpenChange={(o) => { if (!o) { setConfirm(null); setReason(""); } }}>
+        <DialogContent title="Reject this email?" description="It is cancelled and will not be sent. This cannot be undone."
+          footer={<><DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose><Button variant="danger" onClick={() => submit("reject")}>Reject</Button></>}>
+          <Field label="Reason (optional)" description={`${reason.length}/500. Recorded in the audit log and shown to the requester.`}>
+            {(a) => <Textarea {...a} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />}
+          </Field>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

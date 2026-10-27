@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Search, Users } from "lucide-react";
 import type { ApiError } from "@/lib/api";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip } from "@/components/ui/tooltip";
 import { formatNumber } from "@/lib/format";
 import { ContactDrawer } from "./ContactDrawer";
-import { fullName, initials, isSuppressed, matches, memberCount, segmentRule, type Contact, type Segment } from "./util";
+import { fullName, initials, isSuppressed, memberCount, segmentRule, type Contact, type Segment } from "./util";
 
 export type { Contact, Segment };
 
@@ -27,12 +27,11 @@ export function SuppressedBadge({ c }: { c: Contact }) {
   return c.suppression_reason ? <Tooltip content={c.suppression_reason}>{badge}</Tooltip> : badge;
 }
 
-function ContactsTab({ contacts, error }: { contacts: Contact[] | null; error: ApiError | null }) {
-  const [q, setQ] = useState("");
+function ContactsTab({ contacts, error, search }: { contacts: Contact[] | null; error: ApiError | null; search: string }) {
   const [open, setOpen] = useState<Contact | null>(null);
-  const shown = useMemo(() => (contacts ?? []).filter((c) => matches(c, q)), [contacts, q]);
+  const shown = contacts ?? []; // already filtered by the API (?q=)
   if (error || !contacts) return <ErrorState error={error ?? { code: "unknown", message: "Contacts could not be loaded." }} />;
-  if (!contacts.length) {
+  if (!contacts.length && !search) {
     return (
       <div className="mx-auto grid max-w-2xl gap-4">
         <EmptyState icon={Users} title="No contacts yet" description="Contacts arrive through the API, the CLI, or when an event names an email address. Add your first one:" className="border-0 pb-2" />
@@ -43,13 +42,13 @@ function ContactsTab({ contacts, error }: { contacts: Contact[] | null; error: A
   }
   return (
     <div className="grid gap-4">
-      <div className="relative w-full max-w-sm">
+      <form action="/contacts" method="get" role="search" className="relative w-full max-w-sm">
         <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
-        <Input type="search" aria-label="Search contacts" placeholder="Search by email or name" className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
-      <p role="status" className="sr-only">{shown.length} of {contacts.length} contacts</p>
+        <Input type="search" name="q" aria-label="Search contacts" placeholder="Search by email or name, then Enter" className="pl-9" defaultValue={search} />
+      </form>
+      <p role="status" className="sr-only">{shown.length} contacts{search ? ` matching ${search}` : ""}</p>
       {!shown.length ? (
-        <EmptyState variant="no-results" title="No contacts match" description={`Nothing on this page matches “${q}”.`} action={<Button variant="secondary" onClick={() => setQ("")}>Clear search</Button>} />
+        <EmptyState variant="no-results" title="No contacts match" description={`No contact has “${search}” in their email or name.`} action={<Button asChild variant="secondary"><a href="/contacts">Clear search</a></Button>} />
       ) : (
         <Table caption="Contacts">
           <THead><TR><TH>Contact</TH><TH>Name</TH><TH>Status</TH><TH>Added</TH></TR></THead>
@@ -103,8 +102,8 @@ function SegmentsTab({ segments, error }: { segments: Segment[] | null; error: A
   );
 }
 
-export function ContactsView({ contacts, segments, contactsError, segmentsError, tab }: {
-  contacts: Contact[] | null; segments: Segment[] | null; contactsError: ApiError | null; segmentsError: ApiError | null; tab: "contacts" | "segments";
+export function ContactsView({ contacts, segments, contactsError, segmentsError, tab, search = "" }: {
+  search?: string; contacts: Contact[] | null; segments: Segment[] | null; contactsError: ApiError | null; segmentsError: ApiError | null; tab: "contacts" | "segments";
 }) {
   const [value, setValue] = useState(tab);
   function change(v: string) {
@@ -119,7 +118,7 @@ export function ContactsView({ contacts, segments, contactsError, segmentsError,
         <TabsTrigger value="contacts">Contacts{contacts && <span className="ml-1.5 text-xs text-subtle">{contacts.length}</span>}</TabsTrigger>
         <TabsTrigger value="segments">Segments{segments && <span className="ml-1.5 text-xs text-subtle">{segments.length}</span>}</TabsTrigger>
       </TabsList>
-      <TabsContent value="contacts"><ContactsTab contacts={contacts} error={contactsError} /></TabsContent>
+      <TabsContent value="contacts"><ContactsTab contacts={contacts} error={contactsError} search={search} /></TabsContent>
       <TabsContent value="segments"><SegmentsTab segments={segments} error={segmentsError} /></TabsContent>
     </Tabs>
   );
