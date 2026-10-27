@@ -1,56 +1,44 @@
-//! Queue worker skeleton. Postgres is the queue (SPEC section 8, `emails` + `jobs`).
-use mailcraft_core::transport::Transport;
-use std::{sync::Arc, time::Duration};
+//! Queue worker (SPEC 8.3). Postgres is the queue: workers claim due `emails` rows with
+//! `FOR UPDATE SKIP LOCKED`, run the dequeue gates, assemble MIME, hand it to the `Finalizer`
+//! (DKIM etc.), deliver through a transport and record the outcome plus `email_events` rows
+//! (the webhook outbox). A reaper requeues rows whose lease expired.
+//!
+//! Redis (via [`Limits`]) only holds volatile caps/throttles/pauses; without it the engine
+//! degrades to Postgres counts and in-process limiters, and mail is never lost.
 
-/// Claim due rows without blocking other workers. The lease (`locked_until`) lets a
-/// reaper requeue rows from crashed workers. Partial index: `emails_due_idx`.
-pub const CLAIM_SQL: &str = "\
-UPDATE emails SET status = 'sending', locked_by = $1, locked_until = now() + interval '5 minutes', attempts = attempts + 1
-WHERE id IN (
-  SELECT id FROM emails
-  WHERE status IN ('queued','deferred') AND next_attempt_at <= now()
-  ORDER BY next_attempt_at
-  FOR UPDATE SKIP LOCKED
-  LIMIT $2)
-RETURNING id";
+mod limits;
+mod metrics;
+pub mod mime;
+mod traits;
+mod worker;
 
-pub struct Worker {
-    pub pool: sqlx::PgPool,
-    pub transport: Arc<dyn Transport>,
-    pub id: String,
-    pub batch: i64,
-    pub poll: Duration,
+pub use limits::Limits;
+pub use metrics::Metrics;
+pub use traits::{
+    FinalizeCtx, Finalizer, NoopFinalizer, PgSuppressions, ResolvedTransport, StaticResolver,
+    SuppressionCheck, TransportResolver,
+};
+pub use worker::{CapStorePg, Engine, EngineConfig, CLAIM_SQL};
+
+/// Envelope sender: VERP `bounce+<email id>@<return path host>` (deliverability.md 4.1).
+/// The bounce processor recovers the email from the token.
+pub fn verp_mail_from(email_id: uuid::Uuid, return_path_host: &str) -> String {
+    format!("bounce+{}@{return_path_host}", email_id.simple())
 }
 
-impl Worker {
-    /// One claim pass. Skeleton: claims rows, does not yet render/send (engine work package).
-    pub async fn tick(&self) -> Result<usize, sqlx::Error> {
-        let rows = sqlx::query(CLAIM_SQL)
-            .bind(&self.id)
-            .bind(self.batch)
-            .fetch_all(&self.pool)
-            .await?;
-        tracing::debug!(
-            claimed = rows.len(),
-            transport = self.transport.id(),
-            "tick"
-        );
-        Ok(rows.len())
-    }
-
-    pub async fn run(&self) -> Result<(), sqlx::Error> {
-        loop {
-            if self.tick().await? == 0 {
-                tokio::time::sleep(self.poll).await;
-            }
-        }
-    }
+/// Recover the email id from a VERP local part (`bounce+<token>`), the inverse of [`verp_mail_from`].
+pub fn parse_verp(addr: &str) -> Option<uuid::Uuid> {
+    let tok = addr.split('@').next()?.strip_prefix("bounce+")?;
+    uuid::Uuid::parse_str(tok).ok()
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn claim_uses_skip_locked() {
-        assert!(super::CLAIM_SQL.contains("FOR UPDATE SKIP LOCKED"));
+    fn verp_roundtrip() {
+        let id = uuid::Uuid::new_v4();
+        let a = super::verp_mail_from(id, "bounce.example.com");
+        assert_eq!(super::parse_verp(&a), Some(id));
+        assert_eq!(super::parse_verp("someone@x.com"), None);
     }
 }

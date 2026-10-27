@@ -4,13 +4,23 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Delivery transports (smtp-relay, ses, gmail-oauth, direct)"
+description = "Delivery transports (smtp-relay, ses, gmail-oauth, sandbox)"
 
 [dependencies]
 mailcraft-core.workspace = true
 async-trait.workspace = true
+reqwest.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "sync", "time"] }
+uuid.workspace = true
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+time = "0.3"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls", "aws-lc-rs", "webpki-roots", "builder"] }
 
 [dev-dependencies]
-tokio.workspace = true
-uuid.workspace = true
+wiremock = "0.6"
