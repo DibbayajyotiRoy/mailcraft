@@ -1,0 +1,87 @@
+{
+  "journey": "J8",
+  "title": "Returning after 14 idle days / lapsed check-in",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J8 Returned after idle",
+      "status": "draft",
+      "entry_rule": "always",
+      "approval": "first_n:5",
+      "caps": {
+        "per_contact": {
+          "max": 2,
+          "window_days": 90
+        }
+      },
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "returned_after_idle"
+          },
+          "next": "wait"
+        },
+        {
+          "key": "wait",
+          "type": "delay",
+          "config": {
+            "duration": "1d"
+          },
+          "next": "hello"
+        },
+        {
+          "key": "hello",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-welcome-back",
+            "topic": "product",
+            "mode": "llm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "J8a Lapsed check-in",
+      "status": "draft",
+      "entry_rule": "always",
+      "goal": {
+        "events": [
+          "usage_resumed"
+        ]
+      },
+      "approval": "first_n:5",
+      "caps": {
+        "per_contact": {
+          "max": 2,
+          "window_days": 90
+        }
+      },
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "usage_lapsed",
+            "filter": {
+              "field": "event.days_idle",
+              "op": "gte",
+              "value": 14
+            }
+          },
+          "next": "ask"
+        },
+        {
+          "key": "ask",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-checkin",
+            "topic": "product",
+            "mode": "llm"
+          }
+        }
+      ]
+    }
+  ]
+}

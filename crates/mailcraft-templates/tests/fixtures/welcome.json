@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "subject": "Welcome {{ first_name }}",
+  "preheader": "Your account is ready",
+  "blocks": [
+    {"type": "heading", "text": "Hi {{ first_name }}"},
+    {"type": "paragraph", "text": "Thanks for joining & welcome."},
+    {"type": "slot", "name": "intro", "max_len": 200, "instructions": "One friendly sentence.", "fallback": "Thanks for joining."},
+    {"type": "image", "src": "https://example.com/logo.png", "alt": "Logo", "width": "120px"},
+    {"type": "button", "label": "Open app", "url": "{{ app_url }}"},
+    {"type": "divider"},
+    {"type": "spacer", "height": "10px"},
+    {"type": "columns", "columns": [
+      [{"type": "paragraph", "text": "Left"}],
+      [{"type": "paragraph", "text": "Right"}]
+    ]}
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mailcraft.dev/schema/template-v1.json",
+  "title": "mailcraft template (canonical block tree)",
+  "type": "object",
+  "required": ["version", "subject", "blocks"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "subject": { "type": "string", "description": "minijinja expression string; strict undefined" },
+    "preheader": { "type": "string" },
+    "head": { "type": "string", "description": "verbatim mj-head content (MJML imports)" },
+    "blocks": { "type": "array", "items": { "$ref": "#/$defs/block" } }
+  },
+  "$defs": {
+    "block": {
+      "oneOf": [
+        { "type": "object", "required": ["type", "text"], "additionalProperties": false,
+          "properties": { "type": { "const": "heading" }, "text": { "type": "string" } } },
+        { "type": "object", "required": ["type", "text"], "additionalProperties": false,
+          "properties": { "type": { "enum": ["paragraph", "text"] }, "text": { "type": "string" } } },
+        { "type": "object", "required": ["type", "label", "url"], "additionalProperties": false,
+          "properties": { "type": { "const": "button" }, "label": { "type": "string" }, "url": { "type": "string" } } },
+        { "type": "object", "required": ["type", "src"], "additionalProperties": false,
+          "properties": { "type": { "const": "image" }, "src": { "type": "string" }, "alt": { "type": "string" },
+                          "href": { "type": "string" }, "width": { "type": "string" } } },
+        { "type": "object", "required": ["type"], "additionalProperties": false,
+          "properties": { "type": { "const": "divider" } } },
+        { "type": "object", "required": ["type"], "additionalProperties": false,
+          "properties": { "type": { "const": "spacer" }, "height": { "type": "string", "default": "20px" } } },
+        { "type": "object", "required": ["type", "columns"], "additionalProperties": false,
+          "properties": { "type": { "const": "columns" },
+                          "columns": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/block" } } } } },
+        { "type": "object", "required": ["type", "html"], "additionalProperties": false,
+          "properties": { "type": { "const": "raw_html" }, "html": { "type": "string" } } },
+        { "type": "object", "required": ["type", "mjml"], "additionalProperties": false,
+          "properties": { "type": { "const": "raw_mjml" }, "mjml": { "type": "string" } } },
+        { "type": "object", "required": ["type", "name"], "additionalProperties": false,
+          "properties": { "type": { "const": "slot" }, "name": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+                          "max_len": { "type": "integer", "minimum": 1 }, "instructions": { "type": "string" },
+                          "fallback": { "type": "string" } } }
+      ]
+    }
+  }
+}

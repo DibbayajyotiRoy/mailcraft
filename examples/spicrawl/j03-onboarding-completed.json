@@ -1,0 +1,65 @@
+{
+  "journey": "J3",
+  "title": "Completed onboarding, no first request",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J3 Onboarding completed",
+      "status": "draft",
+      "entry_rule": "once",
+      "goal": {
+        "events": [
+          "first_request_made"
+        ]
+      },
+      "approval": "first_n:5",
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "onboarding_completed"
+          },
+          "next": "settle"
+        },
+        {
+          "key": "settle",
+          "type": "delay",
+          "config": {
+            "duration": "10m"
+          },
+          "next": "watch"
+        },
+        {
+          "key": "watch",
+          "type": "wait_for_event",
+          "config": {
+            "event": "first_request_made",
+            "timeout": "24h"
+          },
+          "next": {
+            "event": "done",
+            "timeout": "nudge"
+          }
+        },
+        {
+          "key": "nudge",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-first-call",
+            "topic": "product",
+            "mode": "llm"
+          },
+          "next": "done"
+        },
+        {
+          "key": "done",
+          "type": "exit",
+          "config": {
+            "reason": "finished"
+          }
+        }
+      ]
+    }
+  ]
+}

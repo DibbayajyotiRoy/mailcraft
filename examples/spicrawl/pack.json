@@ -1,0 +1,139 @@
+{
+  "name": "spicrawl-lifecycle",
+  "description": "Spicrawl lifecycle journeys J1-J12 (data only). Install topics, then templates, then automations.",
+  "topics": [
+    {
+      "key": "product",
+      "name": "Product & tips",
+      "default_opt_in": true,
+      "can_unsubscribe": true
+    },
+    {
+      "key": "digest",
+      "name": "Usage digest",
+      "default_opt_in": false,
+      "can_unsubscribe": true
+    },
+    {
+      "key": "account",
+      "name": "Account & usage alerts",
+      "default_opt_in": true,
+      "can_unsubscribe": false
+    }
+  ],
+  "events": [
+    {
+      "name": "signed_up",
+      "source": "dashboard"
+    },
+    {
+      "name": "onboarding_step_saved",
+      "source": "dashboard"
+    },
+    {
+      "name": "onboarding_completed",
+      "source": "dashboard"
+    },
+    {
+      "name": "api_key_created",
+      "source": "dashboard"
+    },
+    {
+      "name": "signed_in",
+      "source": "dashboard"
+    },
+    {
+      "name": "first_request_made",
+      "source": "sync"
+    },
+    {
+      "name": "first_successful_request",
+      "source": "sync"
+    },
+    {
+      "name": "request_failed_notable",
+      "source": "sync"
+    },
+    {
+      "name": "first_use_batch",
+      "source": "sync"
+    },
+    {
+      "name": "first_use_mcp",
+      "source": "sync"
+    },
+    {
+      "name": "first_use_cli",
+      "source": "sync"
+    },
+    {
+      "name": "first_use_sdk",
+      "source": "sync"
+    },
+    {
+      "name": "first_use_session",
+      "source": "sync"
+    },
+    {
+      "name": "first_use_browser",
+      "source": "sync"
+    },
+    {
+      "name": "credits_threshold_reached",
+      "source": "sync"
+    },
+    {
+      "name": "credits_reset",
+      "source": "sync"
+    },
+    {
+      "name": "usage_lapsed",
+      "source": "sync"
+    },
+    {
+      "name": "returned_after_idle",
+      "source": "sync"
+    },
+    {
+      "name": "usage_resumed",
+      "source": "sync (not in journeys.md; a requests>0 day after a lapse; goal of J5/J8a)"
+    },
+    {
+      "name": "host_recovered",
+      "source": "sync (not in journeys.md; success on a host that failed; goal of J6)"
+    },
+    {
+      "name": "weekly_digest_due",
+      "source": "sync (Monday 09:00; carries requests_7d)"
+    },
+    {
+      "name": "hosts_milestone",
+      "source": "sync (hosts_count 1->2 or 5)"
+    }
+  ],
+  "templates_needed": [
+    "spicrawl-checkin",
+    "spicrawl-credits-80",
+    "spicrawl-credits-exhausted",
+    "spicrawl-credits-reset",
+    "spicrawl-feature-tip",
+    "spicrawl-first-call",
+    "spicrawl-first-success",
+    "spicrawl-nudge-completed",
+    "spicrawl-nudge-key-waiting",
+    "spicrawl-nudge-second",
+    "spicrawl-onboarding-abandoned",
+    "spicrawl-site-failure",
+    "spicrawl-stalled",
+    "spicrawl-weekly-digest",
+    "spicrawl-welcome",
+    "spicrawl-welcome-back"
+  ],
+  "segments": [
+    {
+      "name": "multi-host-users",
+      "filter": null
+    }
+  ],
+  "notes": "Every send_email step with mode llm needs a template whose slots all have fallback copy (install refuses otherwise). Frequency caps default to 1 per 48h and 3 per 7 days; cap_exempt marks account mail."
+}

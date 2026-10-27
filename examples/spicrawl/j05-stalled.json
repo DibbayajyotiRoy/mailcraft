@@ -1,0 +1,88 @@
+{
+  "journey": "J5",
+  "title": "3-6 requests then 48h of silence",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J5 Stalled",
+      "status": "draft",
+      "entry_rule": "after_days",
+      "goal": {
+        "events": [
+          "usage_resumed"
+        ]
+      },
+      "approval": "first_n:5",
+      "entry_days": 30,
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "usage_lapsed",
+            "filter": {
+              "and": [
+                {
+                  "field": "event.requests_total",
+                  "op": "gte",
+                  "value": 3
+                },
+                {
+                  "field": "event.requests_total",
+                  "op": "lte",
+                  "value": 6
+                },
+                {
+                  "field": "event.days_idle",
+                  "op": "gte",
+                  "value": 2
+                }
+              ]
+            }
+          },
+          "next": "gate"
+        },
+        {
+          "key": "gate",
+          "type": "condition",
+          "config": {
+            "rule": {
+              "and": [
+                {
+                  "field": "sent_count:3d",
+                  "op": "eq",
+                  "value": 0
+                },
+                {
+                  "field": "event_count:request_failed_notable",
+                  "op": "eq",
+                  "value": 0
+                }
+              ]
+            }
+          },
+          "next": {
+            "true": "help",
+            "false": "done"
+          }
+        },
+        {
+          "key": "help",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-stalled",
+            "topic": "product",
+            "mode": "llm"
+          }
+        },
+        {
+          "key": "done",
+          "type": "exit",
+          "config": {
+            "reason": "finished"
+          }
+        }
+      ]
+    }
+  ]
+}

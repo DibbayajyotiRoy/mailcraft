@@ -1,0 +1,121 @@
+{
+  "journey": "J7",
+  "title": "Credits at 80%, exhausted, reset (account category; owners only, deduped per period)",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J7 Credits 80",
+      "status": "draft",
+      "entry_rule": "always",
+      "approval": "first_n:5",
+      "caps": {
+        "per_contact": {
+          "max": 1,
+          "window_days": 28
+        }
+      },
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "credits_threshold_reached",
+            "filter": {
+              "field": "event.threshold",
+              "op": "eq",
+              "value": 80
+            }
+          },
+          "next": "mail"
+        },
+        {
+          "key": "mail",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-credits-80",
+            "topic": "account",
+            "cap_exempt": true,
+            "weekend_ok": true,
+            "mode": "llm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "J7 Credits 100",
+      "status": "draft",
+      "entry_rule": "always",
+      "approval": "first_n:5",
+      "caps": {
+        "per_contact": {
+          "max": 1,
+          "window_days": 28
+        }
+      },
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "credits_threshold_reached",
+            "filter": {
+              "field": "event.threshold",
+              "op": "eq",
+              "value": 100
+            }
+          },
+          "next": "mail"
+        },
+        {
+          "key": "mail",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-credits-exhausted",
+            "topic": "account",
+            "cap_exempt": true,
+            "weekend_ok": true,
+            "mode": "llm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "J7 Credits reset",
+      "status": "draft",
+      "entry_rule": "always",
+      "approval": "first_n:5",
+      "caps": {
+        "per_contact": {
+          "max": 1,
+          "window_days": 28
+        }
+      },
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "credits_reset",
+            "filter": {
+              "field": "event.was_exhausted",
+              "op": "eq",
+              "value": true
+            }
+          },
+          "next": "mail"
+        },
+        {
+          "key": "mail",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-credits-reset",
+            "topic": "account",
+            "cap_exempt": true,
+            "weekend_ok": true,
+            "mode": "llm"
+          }
+        }
+      ]
+    }
+  ]
+}

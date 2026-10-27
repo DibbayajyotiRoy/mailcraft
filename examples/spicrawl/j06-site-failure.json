@@ -1,0 +1,57 @@
+{
+  "journey": "J6",
+  "title": "Request blocked or failed on a specific site",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J6 Site failure",
+      "status": "draft",
+      "entry_rule": "always",
+      "goal": {
+        "events": [
+          "host_recovered"
+        ]
+      },
+      "approval": "first_n:5",
+      "caps": {
+        "per_contact": {
+          "max": 1,
+          "window_days": 7
+        }
+      },
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "request_failed_notable",
+            "filter": {
+              "field": "event.count",
+              "op": "gte",
+              "value": 2
+            }
+          },
+          "next": "batch"
+        },
+        {
+          "key": "batch",
+          "type": "delay",
+          "config": {
+            "duration": "2h"
+          },
+          "next": "help"
+        },
+        {
+          "key": "help",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-site-failure",
+            "topic": "product",
+            "instructions": "Phrase the code-chosen advice in event.allowed_advice. Never name internal engines.",
+            "mode": "llm"
+          }
+        }
+      ]
+    }
+  ]
+}
