@@ -20,7 +20,7 @@ export function KillSwitchControl({ on }: { on: boolean | null }) {
       <form ref={form} action={setKill} hidden><input type="hidden" name="on" value={String(!on)} /></form>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button type="button" aria-label="Kill switch actions" className="rounded-full pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center"><KillSwitchPill on={on} /></button>
+          <button data-ui="kill" type="button" aria-label="Kill switch actions" className="rounded-full pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center"><KillSwitchPill on={on} /></button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
           <DropdownMenuLabel>{on ? "All sending is stopped" : "Sending is live"}</DropdownMenuLabel>

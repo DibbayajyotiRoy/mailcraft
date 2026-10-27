@@ -18,7 +18,7 @@ export function ThemeToggle({ initial = "system" }: { initial?: Theme }) {
   return (
     <div role="radiogroup" aria-label="Theme" className="inline-flex rounded-md border border-border bg-surface p-0.5">
       {OPTS.map(([v, label, Icon]) => (
-        <button key={v} type="button" role="radio" aria-checked={t === v} aria-label={label} onClick={() => pick(v)}
+        <button key={v} data-ui="theme" type="button" role="radio" aria-checked={t === v} aria-label={label} onClick={() => pick(v)}
           className={cn("grid size-7 place-items-center rounded-sm text-muted transition-colors duration-[var(--dur-fast)] hover:text-fg pointer-coarse:size-10", t === v && "bg-bg text-fg shadow-[0_0_0_1px_var(--border)]")}>
           <Icon aria-hidden className="size-4" />
         </button>

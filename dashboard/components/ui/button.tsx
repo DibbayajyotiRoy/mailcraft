@@ -42,7 +42,7 @@ export function Button({ className, variant, size, asChild, loading, children, d
       aria-busy={loading || undefined} {...(!asChild && { type: p.type ?? "button" })} {...p}>
       {asChild ? children : (
         <>
-          <span className={cn("inline-flex items-center gap-2", loading && "invisible")}>{children}</span>
+          <span className={cn("inline-flex items-center gap-2", loading && "opacity-0")}>{children}</span>
           {loading && <Loader2 aria-hidden className="absolute animate-spin" />}
         </>
       )}

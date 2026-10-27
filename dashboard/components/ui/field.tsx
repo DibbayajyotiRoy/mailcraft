@@ -30,7 +30,7 @@ export function Field({ label, description, error, children, className }: {
   const d = [description && `${id}-d`, error && `${id}-e`].filter(Boolean).join(" ") || undefined;
   return (
     <div className={cn("grid gap-1.5", className)}>
-      <label htmlFor={id} className="text-sm font-medium">{label}</label>
+      <label data-ui="label" htmlFor={id} className="text-sm font-medium">{label}</label>
       {children({ id, "aria-describedby": d, "aria-invalid": error ? true : undefined })}
       {description && <p id={`${id}-d`} className="text-xs text-muted">{description}</p>}
       {error && <p id={`${id}-e`} className="text-xs font-medium text-bad">{error}</p>}
