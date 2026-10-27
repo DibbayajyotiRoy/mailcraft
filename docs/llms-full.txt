@@ -55,11 +55,13 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `templates import <file> [--name] [--format html\|mjml\|json]` | Format inferred from extension if omitted. |
 | `templates export <id> [--format html\|mjml\|json]` | Default `json`. |
 | `templates list` | |
+| `templates publish <id\|alias> [--version N]` | Makes a version live; sends use the published version. |
 | `templates preview <id> --data '<json>'` | Returns subject, html, text, lint. |
-| `contacts` (`list`, `get <email>`, `upsert`) | |
+| `contacts` (`list`, `get <email>`, `upsert <email> [--first-name <n>] [--data <json>] [--timezone <IANA>]`) | `--timezone` sets the contact timezone that quiet hours use. |
 | `events track <name> --contact <email> --data '<json>'` | Add `--dry-run` to list the emails it would trigger. |
 | `automations list` | |
-| `automations enable <id>` / `disable <id>` | |
+| `automations publish <id\|name> [--backfill-suppress]` | Activates a draft. Run `templates publish` first. |
+| `automations enable <id>` / `disable <id>` | Resume / pause. A draft needs `publish`, not `enable`. |
 | `automations import <file.json>` | See llms-full.txt for the format. First sends go to approval. |
 | `keys create --name <n> --scopes read,send --env test\|live` | Secret is shown once. `admin` scope needs a human. |
 | `keys list`, `keys revoke <id>` | |
@@ -81,7 +83,7 @@ Absent from agent sessions: approval_decide, policy_set, kill_switch_set to off,
 ## Onboarding flow for agents
 ### Init flow
 
-1. `mailcraft init --all --non-interactive --json` (secret key, migrations, admin, test key to `.mailcraft/` mode 0600, port probes, skills, MCP registration, AGENTS.md snippet).
+1. `mailcraft init --non-interactive --json` (first run: creates the test and admin keys; saves both in the CLI config, mode 0600, as profiles `default` = test key and `admin` = admin key; the admin key is returned once in `data.admin_key`, hand it to the human). Select the admin profile with `--profile admin` or `MAILCRAFT_PROFILE=admin`.
 2. Define events and templates; import an automation with `approval: first_n:5`.
 3. `mailcraft send --to delivered@test.mailcraft.local ... --json`; `events track ... --dry-run`.
 4. `mailcraft domain add example.com`; apply DNS if you hold a token, otherwise give the human the block; `mailcraft domain verify` until verified.
@@ -103,35 +105,36 @@ Consent/OTP, go-live approval, approval decisions, raising limits or caps, issui
   {"type": "divider"},
   {"type": "raw_mjml", "mjml": "<mj-text>...</mj-text>"}]}
 ```
-Reserved variables: `first_name`, `last_name`, `email`, `unsubscribe_url`, `preferences_url`, `workspace.name`. Planned (not in the scaffold): `image`, `if`/`for`, `slot` (LLM slot), `raw_html`, `footer`.
+Reserved variables: `first_name`, `last_name`, `email`, `unsubscribe_url`, `preferences_url`, `workspace.name`. LLM text goes in a `slot` block: `{"type": "slot", "name": "intro", "max_len": 240, "instructions": "...", "fallback": "static copy"}`. Planned (not in the scaffold): `image`, `if`/`for`, `footer`.
 
 Render pipeline: blocks -> MJML -> variables (strict undefined, autoescape) -> inlined responsive HTML -> plain-text part -> multipart/alternative. Import: html -> raw_html, mjml -> raw_mjml, json canonical. Export: html, mjml, json.
 
 ## Automations (JSON pack)
 ```json
-{"name": "welcome", "trigger": {"event": "signed_up"}, "entry_rule": "once",
+{"name": "welcome", "trigger": "signed_up", "entry_rule": "once",
  "goal": {"event": "first_request_made"},
  "approval": "first_n:5",
- "caps": {"per_contact_per_day": 1},
  "steps": [
-  {"key": "wait", "type": "delay", "config": {"duration": "5m"}, "next": "check"},
-  {"key": "check", "type": "condition", "config": {"rule": {"field": "contact.onboarding_step", "op": "lt", "value": 5}}, "next": {"true": "mail", "false": null}},
+  {"key": "wait", "type": "delay", "config": {"duration": "5m"}, "next": "mail"},
   {"key": "mail", "type": "send_email", "config": {
       "template": "welcome", "stream": "marketing", "topic": "product", "mode": "llm",
-      "llm": {"instructions": "Warm, plain, two sentences. Mention the next step only.",
-              "context": ["contact.first_name", "event.plan"], "max_tokens": 300},
-      "fallback": "static"}}]}
+      "from": "hello@example.com",
+      "instructions": "Warm, plain, two sentences. Mention the next step only."}}]}
 ```
+
+The LLM writes into `slot` blocks of the template, not in the step: `{"type": "slot", "name": "intro", "max_len": 240, "instructions": "...", "fallback": "Static copy used when generation fails."}`. The step takes a plain `instructions` string (max 1,000 chars) and `mode: "llm"`; there is no `llm{}` object and no `fallback: "static"` key (unknown keys are dropped). `trigger` is an event name (or a config object with `event`/`events`/`segment`/`filter`). `from` is required unless the workspace has a verified transactional domain. The step's `next` is a step key; `condition` and `wait_for_event` use named edges (`{"true": "a", "false": "b"}`, `{"event": "a", "timeout": "b"}`); omit an edge to end the run.
+
+Publish both before anything sends: `mailcraft templates publish welcome` then `mailcraft automations publish welcome` (REST: `POST /v1/templates/{id}/publish`, `POST /v1/automations/{id}/publish`, optional `{"backfill_suppress": true}`). Import only creates a draft; `automations enable` resumes a paused one and fails on a draft.
 
 ### Semantics
 - Step types: `delay` (max 30 days), `condition` (ops `eq neq lt gt in contains exists`, evaluated after delays), `wait_for_event` (timeout edge), `send_email`, `update_contact`, `add_to_segment`.
 - `entry_rule`: `once | always | after_days:N | if_no_active_run`. A matching `goal` event exits the run.
-- Send gates: kill switch, suppression, frequency caps (default 1 lifecycle email per 48h, 3 per 7 days), quiet hours (09:00-18:00 recipient-local, weekdays), approval, send caps.
+- Send gates: kill switch, suppression, frequency caps (default 1 lifecycle email per 48h, 3 per 7 days), quiet hours (09:00-18:00 recipient-local, weekdays; 13:00-17:00 UTC when the contact has no timezone, test keys too), approval, send caps.
 - A new template version, prompt change or new automation resets to approval.
 
-Import with `mailcraft automations import welcome-automation.json`. Trigger with `mailcraft events track signed_up --contact ana@example.org --data '{"plan":"free"}'`. Approval: `always | first_n:N | never` (default `first_n:5`; `never` needs admin). Guarantees: at-least-once steps, effectively once via keys `run_id:step_key:attempt_group`. A step failing after retries ends the run `failed` and emits `automation.run.failed`.
+Import with `mailcraft automations import welcome-automation.json`, then `mailcraft automations publish welcome`. Trigger with `mailcraft events track signed_up --contact ana@example.org --data '{"plan":"free"}'`. Approval: `always | first_n:N | never` (default `first_n:5`; `never` needs admin). Guarantees: at-least-once steps, effectively once via keys `run_id:step_key:attempt_group`. A step failing after retries ends the run `failed` and emits `automation.run.failed`.
 
-LLM contract: the model returns JSON `{subject (<=60), preheader (<=100), slots{...}}` only. A code validator checks numbers and dates against `context`, links against an allowlist, token leaks, banned terms and policy lint. One retry, then static fallback copy (required for publish). Never sends a failed generation.
+LLM contract: the model returns JSON `{subject (<=60), preheader (<=100), slots{...}}` only. A code validator checks numbers and dates against `context`, links against an allowlist, token leaks, banned terms and policy lint. One retry, then the slot `fallback` copy (give every slot a fallback). Never sends a failed generation.
 
 ## Errors (core codes)
 Every error is `{"ok": false, "error": {"code", "message", "field?", "hint", "doc_url", "retryable"}, "request_id"}`. `code` strings are stable. Read `hint` first.

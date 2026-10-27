@@ -20,11 +20,16 @@
 ```bash
 echo "MAILCRAFT_SECRET_KEY=$(openssl rand -base64 32)" > .env   # the one required secret
 docker compose up -d                # postgres, redis, mailcraft (API :8080), dashboard (:3000)
-mailcraft init                      # keys, migrations, test-mode key, next steps (an agent can run this)
+alias mailcraft='docker compose run --rm cli'   # the CLI from the image, nothing to install (see below)
+mailcraft init                      # first run only: creates the test + admin keys, saves both, sends a test email
 mailcraft domain add example.com    # prints (or auto-creates via a Cloudflare token) SPF / DKIM / DMARC / return-path records, then verifies
 ```
 
-No domain? `mailcraft connect gmail` (test/low volume). Have a relay? `mailcraft connect relay <preset>` (SES, Postmark, Mailgun, Brevo, SMTP2GO, any SMTP). Details and honest limits: [docs/QUICKSTART.md](docs/QUICKSTART.md). The `mailcraft` CLI is built by `cargo install --path crates/mailcraft-cli` (or the image: `docker compose run --rm --entrypoint mailcraft mailcraft ...`).
+`mailcraft init` prints the **admin key once** ("store this now, it won't be shown again") and saves both keys in the CLI config as profiles: `default` (the `mc_test_` key) and `admin` (approvals, go-live, dashboard login). Select it with `mailcraft --profile admin ...` or `MAILCRAFT_PROFILE=admin`. `init` works once per database.
+
+No domain? `mailcraft connect gmail` (test/low volume). Have a relay? `mailcraft connect relay <preset>` (SES, Postmark, Mailgun, Brevo, SMTP2GO, any SMTP). Details and honest limits: [docs/QUICKSTART.md](docs/QUICKSTART.md). 
+
+**CLI install, do this before `init`.** Either use the `cli` compose service (the alias above; it points at `http://mailcraft:8080` and keeps `~/.config/mailcraft` in the `mc-config` volume so keys survive `--rm`; files like `welcome.json` are read from the current directory), or build it natively: `cargo install --path crates/mailcraft-cli` (then drop the alias).
 
 Test send, no DNS needed:
 
@@ -32,7 +37,47 @@ Test send, no DNS needed:
 mailcraft send --to delivered@test.mailcraft.local --subject "hello" --text "it works" --json
 ```
 
-> Not yet verified end to end: `mailcraft init` against the compose stack, `domain add`, `send`. Health: `http://localhost:8080/healthz`.
+Verified end to end on a fresh clone: compose up, `init`, test send (delivered), dashboard login. Not verified: `domain add` (needs a real domain). Health: `http://localhost:8080/healthz`.
+
+Dashboard: `http://localhost:3000/login` (port: `MAILCRAFT_DASHBOARD_PORT`; API port: `MAILCRAFT_PORT`). Leave the API base URL at the pre-filled `http://mailcraft:8080` (the server-side address) and log in with the **admin key** (profile `admin`) to approve things; the `mc_test_` key only shows data.
+
+### Your first automation
+
+A welcome email whose intro line is written by the LLM inside a fixed slot, with static fallback copy. Needs `OPENROUTER_API_KEY` in `.env` (see `.env.example`); without it the fallback text is sent.
+
+`welcome.json` (template; the `slot` block is where the model writes):
+
+```json
+{"version": 1, "subject": "Welcome {{ first_name }}",
+ "blocks": [
+  {"type": "heading", "text": "Hi {{ first_name }}"},
+  {"type": "slot", "name": "intro", "max_len": 240,
+   "instructions": "One warm sentence welcoming them and naming the next step.",
+   "fallback": "Thanks for signing up. Your account is ready."}]}
+```
+
+`welcome-automation.json` (the step takes a plain `instructions` string and a `from`; there is no `llm{}` object):
+
+```json
+{"name": "welcome", "trigger": "signed_up", "approval": "first_n:5",
+ "steps": [
+  {"key": "mail", "type": "send_email", "config": {
+    "template": "welcome", "mode": "llm", "from": "hello@example.com",
+    "instructions": "Friendly and brief. Mention the product name once."}}]}
+```
+
+```bash
+mailcraft templates import welcome.json --name welcome      # draft
+mailcraft templates publish welcome                          # sends use the published version
+mailcraft automations import welcome-automation.json         # draft
+mailcraft automations publish welcome                        # activates (add --backfill-suppress to skip existing matches)
+mailcraft contacts upsert ana@test.mailcraft.local --first-name Ana --timezone Europe/Berlin
+mailcraft events track signed_up --contact ana@test.mailcraft.local
+mailcraft --profile admin approvals list                     # the first 5 sends wait for a human with the admin key
+```
+
+`from` must be an address on a verified domain; without one the step fails with `no from and no verified transactional domain`. Quiet hours (09:00-18:00 contact-local, 13:00-17:00 UTC when the contact has no timezone) apply to test keys too, so set `--timezone` or a first run can wait hours. `mailcraft automations enable` only resumes a paused automation; a draft needs `publish`.
+
 
 ## Build from source
 

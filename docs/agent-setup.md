@@ -19,7 +19,7 @@ Agent sessions never get `approval_decide`, `policy_set`, `go_live_approve`, or 
 
 ## Init flow
 
-1. `mailcraft init --all --non-interactive --json` (secret key, migrations, admin, test key to `.mailcraft/` mode 0600, port probes, skills, MCP registration, AGENTS.md snippet).
+1. `mailcraft init --non-interactive --json` (first run: creates the test and admin keys, saves both mode 0600 as config profiles `default` / `admin`; the admin key is returned once in `data.admin_key`, give it to the human).
 2. Define events and templates; import an automation with `approval: first_n:5`.
 3. `mailcraft send --to delivered@test.mailcraft.local ... --json`; `events track ... --dry-run`.
 4. `mailcraft domain add example.com`; apply DNS if you hold a token, otherwise give the human the block; `mailcraft domain verify` until verified.

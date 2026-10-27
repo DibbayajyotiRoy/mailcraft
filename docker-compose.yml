@@ -67,7 +67,8 @@ services:
       MAILCRAFT_API_URL: http://mailcraft:8080
       MAILCRAFT_CONFIG_DIR: /config
       MAILCRAFT_EGRESS_IP: ${MAILCRAFT_EGRESS_IP:-}
-    volumes: [mc-config:/config]
+    working_dir: /work   # `templates import x.json` / `automations import y.json` read from your project dir
+    volumes: [mc-config:/config, ".:/work:ro"]
     depends_on: [mailcraft]
 
 volumes:

@@ -253,6 +253,8 @@ enum ContactsCmd {
         /// Properties as JSON (or @file).
         #[arg(long)]
         data: Option<String>,
+        #[arg(long)]
+        first_name: Option<String>,
         /// IANA timezone (e.g. Europe/Berlin); drives quiet hours.
         #[arg(long)]
         timezone: Option<String>,
@@ -649,9 +651,13 @@ fn run(cli: &Cli) -> R {
                 ContactsCmd::Upsert {
                     email,
                     data,
+                    first_name,
                     timezone,
                 } => {
                     let mut b = json!({"email": email, "properties": json_arg(data, "--data")?});
+                    if let Some(f) = first_name {
+                        b["first_name"] = json!(f);
+                    }
                     if let Some(tz) = timezone {
                         b["timezone"] = json!(tz);
                     }

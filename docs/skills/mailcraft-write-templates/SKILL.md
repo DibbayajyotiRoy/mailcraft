@@ -21,7 +21,7 @@ description: Write mailcraft email templates in the JSON block format, preview a
   {"type": "divider"},
   {"type": "raw_mjml", "mjml": "<mj-text>...</mj-text>"}]}
 ```
-Reserved variables: `first_name`, `last_name`, `email`, `unsubscribe_url`, `preferences_url`, `workspace.name`. Planned (not in the scaffold): `image`, `if`/`for`, `slot` (LLM slot), `raw_html`, `footer`.
+Reserved variables: `first_name`, `last_name`, `email`, `unsubscribe_url`, `preferences_url`, `workspace.name`. LLM text goes in a `slot` block: `{"type": "slot", "name": "intro", "max_len": 240, "instructions": "...", "fallback": "static copy"}`. Planned (not in the scaffold): `image`, `if`/`for`, `footer`. A template must be published (`mailcraft templates publish <alias>`) before sends and automations use it.
 
 ## Steps
 ```
