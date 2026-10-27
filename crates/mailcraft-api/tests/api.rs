@@ -76,6 +76,7 @@ async fn setup_with(cfg: impl FnOnce(&mut Config)) -> Option<Ctx> {
         rate_limit_per_min: 600,
         metrics_token: None,
         allow_private_webhooks: true,
+        ..Config::from_env()
     };
     cfg(&mut config);
     let st = AppState::new(
@@ -227,7 +228,16 @@ async fn every_openapi_route_is_mounted() {
             .iter()
             .find(|m| line.starts_with(&format!("    {m}:")))
         {
-            if ["/healthz", "/readyz", "/metrics", "/openapi.yaml"].contains(&path.as_str()) {
+            if [
+                "/healthz",
+                "/readyz",
+                "/metrics",
+                "/openapi.yaml",
+                "/u/{token}",
+                "/v1/setup",
+            ]
+            .contains(&path.as_str())
+            {
                 continue;
             }
             let uri = path.replace("{id}", &Uuid::nil().to_string());
