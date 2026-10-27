@@ -5,25 +5,23 @@
 Use test keys (`mc_test_...`) until a human approves go-live. Never print or ask for API keys. Always pass `--json`. Mutating calls accept `idempotency_key` and `dry_run`.
 
 ## Start here
-- [Quickstart](/docs/quickstart.md): docker compose up -d, mailcraft init, mailcraft domain add
-- [Agent setup](/docs/agents.md): MCP URL, init flow, what needs a human
+- [Quickstart](QUICKSTART.md): docker compose up -d, mailcraft init, mailcraft domain add; no-domain Gmail path
+- [Agent setup](agent-setup.md): MCP URL and config, init flow, what needs a human
+- [AGENTS.md snippet](AGENTS.md): what `mailcraft init` appends to a project
 - [OpenAPI](/openapi.json): single source of truth for REST, CLI and MCP
 - [MCP server](/mcp): Streamable HTTP; OAuth or `Authorization: Bearer mc_...`
 
-## Concepts
-- [Streams](/docs/streams.md): transactional vs marketing (separate subdomains, no tracking or unsubscribe on transactional)
-- [Policy and approvals](/docs/safety.md): auto / needs_approval / blocked, caps, allowlists, kill switch
-- [Automations](/docs/automations.md): trigger, condition, delay, wait_for_event, send_email, update_contact, add_to_segment
-- [LLM emails](/docs/llm.md): slots, validator, fallback copy, approval
-- [Templates](/docs/templates.md): JSON block tree, variables, import/export
-- [Domains and DNS](/docs/domains.md): SPF/DKIM/DMARC/return-path records, verification
-- [Transports](/docs/transports.md): Gmail OAuth (test / low volume), SES, SMTP presets, direct (after doctor)
+## Skills
+- [mailcraft](SKILL.md): overview, rules, setup flow
+- [mailcraft-send-email](skills/mailcraft-send-email/SKILL.md): send, dry-run, test addresses, idempotency
+- [mailcraft-setup-domain](skills/mailcraft-setup-domain/SKILL.md): add a domain, DNS, verify, doctor, no-domain Gmail
+- [mailcraft-build-automation](skills/mailcraft-build-automation/SKILL.md): events, JSON automation pack, approvals
+- [mailcraft-write-templates](skills/mailcraft-write-templates/SKILL.md): JSON block format, variables, import/export
 
 ## Reference
-- [Errors](/errors/index.md): every code with a fix; each error has `hint` and `doc_url`
-- [Webhooks](/docs/webhooks.md): Standard Webhooks signing, retry schedule
-- [CLI](/docs/cli.md): commands and exit codes (0 ok, 2 usage, 3 auth, 4 policy/approval, 5 retryable, 6 not found, 7 checks failed)
+- [CLI](cli.md): commands, flags, exit codes (0 ok, 1 failure, 2 usage, 3 auth, 4 policy/approval, 5 retryable, 6 not found, 7 checks failed)
+- [Errors](errors/index.md): every core code with a fix; each error has `hint` and `doc_url`
 
 ## Optional
-- [Full docs in one file](/llms-full.txt)
-- [Spec](https://github.com/DibbayajyotiRoy/mailcraft/blob/main/SPEC.md)
+- [Full docs in one file](llms-full.txt)
+- [Spec](https://github.com/DibbayajyotiRoy/mailcraft/blob/main/SPEC.md): streams, LLM contract, webhooks, deliverability, data model

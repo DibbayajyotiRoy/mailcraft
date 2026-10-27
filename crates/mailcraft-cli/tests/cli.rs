@@ -1,0 +1,455 @@
+//! End-to-end: run the real binary against a tiny in-process mock API.
+use serde_json::{json, Value};
+use std::{
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    process::{Command, Output},
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
+
+#[derive(Clone, Debug)]
+struct Req {
+    path: String,
+    headers: String,
+    body: Value,
+}
+
+struct Mock {
+    url: String,
+    seen: Arc<Mutex<Vec<Req>>>,
+}
+
+/// routes: (method, path, status, body). First match wins; unmatched -> 404 not_found.
+fn mock(routes: Vec<(&'static str, &'static str, u16, Value)>) -> Mock {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    let seen = Arc::new(Mutex::new(vec![]));
+    let s2 = seen.clone();
+    thread::spawn(move || {
+        for conn in l.incoming() {
+            let Ok(mut c) = conn else { continue };
+            let mut buf = vec![];
+            let mut chunk = [0u8; 4096];
+            let (head_end, len) = loop {
+                let n = c.read(&mut chunk).unwrap_or(0);
+                buf.extend_from_slice(&chunk[..n]);
+                let txt = String::from_utf8_lossy(&buf).to_string();
+                if let Some(i) = txt.find("\r\n\r\n") {
+                    let len = txt[..i]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if buf.len() >= i + 4 + len {
+                        break (i, len);
+                    }
+                }
+                if n == 0 {
+                    break (0, 0);
+                }
+            };
+            let txt = String::from_utf8_lossy(&buf).to_string();
+            let mut first = txt.lines().next().unwrap_or("").split_whitespace();
+            let (method, path) = (
+                first.next().unwrap_or("").to_string(),
+                first.next().unwrap_or("").to_string(),
+            );
+            let body = serde_json::from_slice(
+                &buf[(head_end + 4).min(buf.len())..(head_end + 4 + len).min(buf.len())],
+            )
+            .unwrap_or(Value::Null);
+            s2.lock().unwrap().push(Req {
+                path: path.clone(),
+                headers: txt[..head_end].to_lowercase(),
+                body,
+            });
+            let (st, b) = routes
+                .iter()
+                .find(|(m, p, _, _)| *m == method && path.split('?').next() == Some(*p))
+                .map(|(_, _, s, b)| (*s, b.to_string()))
+                .unwrap_or((
+                    404,
+                    json!({"ok": false, "error": {"code": "not_found", "message": "nope"}})
+                        .to_string(),
+                ));
+            let _ = write!(c, "HTTP/1.1 {st} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len());
+        }
+    });
+    Mock { url, seen }
+}
+
+fn conf_dir(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("mc-cli-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    d
+}
+
+fn run(m: &Mock, dir: &std::path::Path, key: Option<&str>, args: &[&str]) -> Output {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_mailcraft"));
+    c.env("MAILCRAFT_CONFIG_DIR", dir)
+        .env("MAILCRAFT_API_URL", &m.url)
+        .env_remove("MAILCRAFT_API_KEY")
+        .args(args)
+        .arg("--json");
+    if let Some(k) = key {
+        c.env("MAILCRAFT_API_KEY", k);
+    }
+    c.output().unwrap()
+}
+
+fn out(o: &Output) -> Value {
+    serde_json::from_slice(&o.stdout)
+        .unwrap_or_else(|_| panic!("stdout not JSON: {}", String::from_utf8_lossy(&o.stdout)))
+}
+
+fn env_ok(data: Value) -> Value {
+    json!({"ok": true, "request_id": "req_1", "data": data})
+}
+
+#[test]
+fn send_sends_auth_and_idempotency_key() {
+    let m = mock(vec![(
+        "POST",
+        "/v1/emails",
+        202,
+        env_ok(json!({"id": "em_1", "status": "queued"})),
+    )]);
+    let o = run(
+        &m,
+        &conf_dir("send"),
+        Some("mc_test_abc"),
+        &[
+            "send",
+            "--to",
+            "a@x.org,b@x.org",
+            "--subject",
+            "Hi",
+            "--text",
+            "yo",
+            "--idempotency-key",
+            "k1",
+            "--dry-run",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let v = out(&o);
+    assert_eq!(v["schema"], 1);
+    assert_eq!(v["data"]["id"], "em_1");
+    let r = m.seen.lock().unwrap()[0].clone();
+    assert!(r.headers.contains("authorization: bearer mc_test_abc"));
+    assert!(r.headers.contains("idempotency-key: k1"));
+    assert_eq!(r.body["to"], json!(["a@x.org", "b@x.org"]));
+    assert_eq!(r.body["dry_run"], true);
+}
+
+#[test]
+fn send_with_template_and_data() {
+    let m = mock(vec![(
+        "POST",
+        "/v1/emails",
+        202,
+        env_ok(json!({"id": "em_1", "status": "queued"})),
+    )]);
+    let o = run(
+        &m,
+        &conf_dir("tpl"),
+        Some("k"),
+        &[
+            "send",
+            "--to",
+            "a@x.org",
+            "--template",
+            "welcome",
+            "--data",
+            r#"{"name":"Ana"}"#,
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    assert_eq!(
+        m.seen.lock().unwrap()[0].body["template"],
+        json!({"id": "welcome", "variables": {"name": "Ana"}})
+    );
+}
+
+#[test]
+fn pending_approval_exits_4() {
+    let m = mock(vec![(
+        "POST",
+        "/v1/emails",
+        202,
+        env_ok(json!({"id": "em_1", "status": "pending_approval"})),
+    )]);
+    let o = run(
+        &m,
+        &conf_dir("pa"),
+        Some("k"),
+        &["send", "--to", "a@x.org", "--subject", "s", "--text", "t"],
+    );
+    assert_eq!(o.status.code(), Some(4));
+    assert_eq!(out(&o)["data"]["status"], "pending_approval");
+}
+
+#[test]
+fn error_exit_codes() {
+    let err = |c: &str| json!({"ok": false, "error": {"code": c, "message": "m", "hint": "h", "retryable": c == "rate_limited"}});
+    for (status, code, want) in [
+        (403, "forbidden_scope", 3),
+        (401, "unauthenticated", 3),
+        (404, "not_found", 6),
+        (429, "rate_limited", 5),
+        (501, "not_implemented", 1),
+        (409, "idempotency_key_reused", 1),
+    ] {
+        let m = mock(vec![("GET", "/v1/emails/em_1", status, err(code))]);
+        let o = run(&m, &conf_dir("err"), Some("k"), &["emails", "get", "em_1"]);
+        assert_eq!(o.status.code(), Some(want), "{code}");
+        let v = out(&o);
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"]["code"], code);
+        assert_eq!(v["error"]["hint"], "h");
+    }
+}
+
+#[test]
+fn usage_and_missing_key() {
+    let m = mock(vec![]);
+    let o = run(
+        &m,
+        &conf_dir("use"),
+        Some("k"),
+        &["send", "--to", "a@x.org"],
+    );
+    assert_eq!(o.status.code(), Some(2));
+    let o = run(&m, &conf_dir("nokey"), None, &["emails", "list"]);
+    assert_eq!(o.status.code(), Some(3));
+    assert_eq!(out(&o)["error"]["code"], "unauthenticated");
+}
+
+#[test]
+fn unreachable_is_retryable() {
+    let m = Mock {
+        url: "http://127.0.0.1:1".into(),
+        seen: Default::default(),
+    };
+    let o = run(&m, &conf_dir("down"), Some("k"), &["emails", "list"]);
+    assert_eq!(o.status.code(), Some(5));
+}
+
+#[test]
+fn domain_verify_resolves_id_and_exits_7_until_verified() {
+    let m = mock(vec![
+        (
+            "GET",
+            "/v1/domains",
+            200,
+            env_ok(json!([{"id": "dom_1", "name": "example.com"}])),
+        ),
+        (
+            "POST",
+            "/v1/domains/dom_1/verify",
+            200,
+            env_ok(json!({"status": "pending", "records": []})),
+        ),
+    ]);
+    let o = run(
+        &m,
+        &conf_dir("dv"),
+        Some("k"),
+        &["domain", "verify", "example.com"],
+    );
+    assert_eq!(o.status.code(), Some(7));
+    let o = run(
+        &m,
+        &conf_dir("dv"),
+        Some("k"),
+        &["domain", "verify", "nope.com"],
+    );
+    assert_eq!(o.status.code(), Some(6));
+}
+
+#[test]
+fn domain_add_and_kill_switch_and_approvals() {
+    let m = mock(vec![
+        (
+            "POST",
+            "/v1/domains",
+            201,
+            env_ok(json!({"id": "dom_1", "status": "not_started", "records": []})),
+        ),
+        ("POST", "/v1/kill-switch", 200, env_ok(json!({"on": true}))),
+        (
+            "POST",
+            "/v1/approvals/ap_1/decide",
+            403,
+            json!({"ok": false, "error": {"code": "forbidden_scope", "message": "agent keys cannot decide"}}),
+        ),
+    ]);
+    let d = conf_dir("misc");
+    assert_eq!(
+        run(&m, &d, Some("k"), &["domain", "add", "example.com"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        run(&m, &d, Some("k"), &["kill-switch", "on"]).status.code(),
+        Some(0)
+    );
+    assert_eq!(
+        run(&m, &d, Some("k"), &["approvals", "approve", "ap_1"])
+            .status
+            .code(),
+        Some(3)
+    );
+    let seen = m.seen.lock().unwrap();
+    assert_eq!(seen[0].body["domain"], "example.com");
+    assert_eq!(seen[1].body, json!({"on": true}));
+    assert_eq!(seen[2].body["decision"], "approve");
+}
+
+#[test]
+fn init_creates_key_saves_0600_and_never_prints_it() {
+    let m = mock(vec![
+        ("GET", "/healthz", 200, json!({"ok": true})),
+        (
+            "POST",
+            "/v1/setup",
+            201,
+            env_ok(
+                json!({"admin_key": "mc_live_ADMINSECRET", "test_key": "mc_test_TESTSECRET0123456789"}),
+            ),
+        ),
+        (
+            "GET",
+            "/v1/account/status",
+            200,
+            env_ok(json!({"env": "test", "delivery_path": {"kind": "sandbox"}})),
+        ),
+        (
+            "POST",
+            "/v1/emails",
+            202,
+            env_ok(json!({"id": "em_1", "status": "queued"})),
+        ),
+    ]);
+    let d = conf_dir("init");
+    let o = run(
+        &m,
+        &d,
+        None,
+        &["init", "--non-interactive", "--delivery", "sandbox"],
+    );
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&o.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(!stdout.contains("TESTSECRET0123456789") && !stdout.contains("ADMINSECRET"));
+    let cfg: Value =
+        serde_json::from_str(&std::fs::read_to_string(d.join("config.json")).unwrap()).unwrap();
+    assert_eq!(cfg["api_key"], "mc_test_TESTSECRET0123456789");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(d.join("config.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    let seen = m.seen.lock().unwrap();
+    let send = seen.iter().find(|r| r.path == "/v1/emails").unwrap();
+    assert_eq!(send.body["to"], json!(["delivered@test.mailcraft.local"]));
+    assert!(out(&o)["data"]["next_steps"].as_array().unwrap().len() >= 2);
+}
+
+#[test]
+fn connect_gmail_loopback() {
+    let m = mock(vec![
+        (
+            "POST",
+            "/v1/transports/gmail/oauth/start",
+            200,
+            env_ok(json!({"auth_url": "https://accounts.google.com/x", "state": "s1"})),
+        ),
+        (
+            "POST",
+            "/v1/transports/gmail/oauth/complete",
+            200,
+            env_ok(json!({"id": "tr_1", "kind": "gmail-oauth"})),
+        ),
+    ]);
+    let seen = m.seen.clone();
+    // Play the browser: wait for the start call, then hit the loopback redirect it announced.
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(100));
+        let uri = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|r| r.path.ends_with("/oauth/start"))
+            .map(|r| r.body["redirect_uri"].as_str().unwrap().to_string());
+        if let Some(u) = uri {
+            thread::sleep(Duration::from_millis(300));
+            let addr = u
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap()
+                .to_string();
+            let mut s = TcpStream::connect(addr).unwrap();
+            let _ = write!(
+                s,
+                "GET /callback?code=4%2Fcode&state=s1 HTTP/1.1\r\nHost: x\r\n\r\n"
+            );
+            let mut r = String::new();
+            let _ = s.read_to_string(&mut r);
+            return;
+        }
+    });
+    let o = run(
+        &m,
+        &conf_dir("gm"),
+        Some("k"),
+        &["connect", "gmail", "--timeout", "20"],
+    );
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&o.stdout)
+    );
+    let seen = m.seen.lock().unwrap();
+    let c = seen.iter().find(|r| r.path.ends_with("/complete")).unwrap();
+    assert_eq!(c.body["code"], "4/code");
+    assert_eq!(c.body["state"], "s1");
+}
+
+#[test]
+fn doctor_reports_check_failure_exit_7() {
+    // API down => api_reachable fails => exit 7 regardless of local network.
+    let m = Mock {
+        url: "http://127.0.0.1:1".into(),
+        seen: Default::default(),
+    };
+    let o = run(&m, &conf_dir("doc"), Some("k"), &["doctor"]);
+    assert_eq!(o.status.code(), Some(7));
+    let v = out(&o);
+    let ids: Vec<&str> = v["data"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"port25_outbound") && ids.contains(&"api_reachable"));
+}
