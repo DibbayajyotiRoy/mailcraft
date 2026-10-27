@@ -94,7 +94,7 @@ async fn rows(pool: &PgPool) -> Vec<(i32, bool)> {
 }
 
 #[tokio::test]
-async fn valid_output_fills_known_slots_and_logs() {
+async fn valid_output_fills_every_declared_slot_and_logs() {
     let Some((pool, ws)) = pool().await else {
         return;
     };
@@ -102,7 +102,8 @@ async fn valid_output_fills_known_slots_and_logs() {
     Mock::given(method("POST"))
         .respond_with(llm_body(json!({
             "subject": "Welcome aboard, Ana", "preheader": "Getting started", "greeting": "Hi Ana,",
-            "body_paragraphs": ["Glad you joined.", "Reply if you need help."], "cta_label": "Open dashboard"
+            "body": "Glad you joined.\n\nReply if you need help.", "cta_label": "Open dashboard",
+            "custom_extra": "Here is a tip."
         })))
         .mount(&srv)
         .await;
@@ -115,10 +116,7 @@ async fn valid_output_fills_known_slots_and_logs() {
         out.slots["body"],
         "Glad you joined.\n\nReply if you need help."
     );
-    assert!(
-        !out.slots.contains_key("custom_extra"),
-        "unmapped slot keeps its fallback"
-    );
+    assert_eq!(out.slots["custom_extra"], "Here is a tip.");
     let id = out.generation_id.unwrap();
     assert_eq!(rows(&pool).await, vec![(1, false)]);
     let (ok,): (bool,) =

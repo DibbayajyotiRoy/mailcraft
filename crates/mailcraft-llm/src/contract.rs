@@ -2,6 +2,7 @@
 //! unsubscribe belong to the template.
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,5 +72,94 @@ impl EmailTemplate {
             self.footer,
             self.unsubscribe_url
         )
+    }
+}
+
+/// A template-declared slot (the dynamic contract). `subject` and `preheader` are always
+/// generated and need no spec.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SlotSpec {
+    pub name: String,
+    pub max_len: Option<usize>,
+    pub instructions: Option<String>,
+    pub fallback: Option<String>,
+}
+
+/// Declared slots minus the always-present subject/preheader, first occurrence of a name wins.
+pub fn declared(specs: &[SlotSpec]) -> Vec<&SlotSpec> {
+    let mut out: Vec<&SlotSpec> = vec![];
+    for s in specs {
+        if s.name != "subject" && s.name != "preheader" && !out.iter().any(|o| o.name == s.name) {
+            out.push(s);
+        }
+    }
+    out
+}
+
+fn desc(s: &SlotSpec) -> String {
+    let mut d = s.instructions.clone().unwrap_or_default();
+    if let Some(m) = s.max_len {
+        d.push_str(&format!(" Max {m} characters."));
+    }
+    d.trim().to_string()
+}
+
+/// Strict JSON Schema with exactly subject, preheader and the declared slots, all plain strings.
+pub fn dynamic_schema(specs: &[SlotSpec]) -> serde_json::Value {
+    let mut props = serde_json::Map::new();
+    props.insert(
+        "subject".into(),
+        json!({"type": "string", "description": "Plain text, <= 60 chars"}),
+    );
+    props.insert(
+        "preheader".into(),
+        json!({"type": "string", "description": "Plain text preview line, <= 110 chars"}),
+    );
+    for s in declared(specs) {
+        props.insert(
+            s.name.clone(),
+            json!({"type": "string", "description": desc(s)}),
+        );
+    }
+    let required: Vec<&String> = props.keys().collect();
+    json!({"type": "object", "additionalProperties": false, "required": required, "properties": props})
+}
+
+/// Prompt section naming every key and what it holds.
+pub fn dynamic_prompt(specs: &[SlotSpec]) -> String {
+    let mut p = String::from(
+        "SLOTS: return JSON with exactly these keys, each a plain-text string:\n- subject (max 60 characters)\n- preheader (max 110 characters)",
+    );
+    for s in declared(specs) {
+        let mut line = format!("\n- {}", s.name);
+        if let Some(m) = s.max_len {
+            line.push_str(&format!(" (max {m} characters)"));
+        }
+        if let Some(i) = s.instructions.as_deref().filter(|i| !i.trim().is_empty()) {
+            line.push_str(&format!(": {}", i.trim()));
+        }
+        p.push_str(&line);
+    }
+    p
+}
+
+/// Rule override appended to the system prompt in dynamic mode: the base rules name the legacy slots.
+pub const DYNAMIC_SYSTEM_NOTE: &str = "Fill exactly the keys listed under SLOTS in the user message. The rules above about greeting, body and cta_label apply to the listed slots that play those roles; ignore slots that are not listed.";
+
+impl Slots {
+    /// Spam-scoring view of a dynamic result: declared slots other than greeting/cta_label become body paragraphs.
+    pub fn from_values(values: &BTreeMap<String, String>, specs: &[SlotSpec]) -> Self {
+        let get = |k: &str| values.get(k).cloned().unwrap_or_default();
+        Self {
+            subject: get("subject"),
+            preheader: get("preheader"),
+            greeting: get("greeting"),
+            body_paragraphs: declared(specs)
+                .iter()
+                .filter(|s| s.name != "greeting" && s.name != "cta_label")
+                .map(|s| get(&s.name))
+                .collect(),
+            cta_label: get("cta_label"),
+        }
     }
 }

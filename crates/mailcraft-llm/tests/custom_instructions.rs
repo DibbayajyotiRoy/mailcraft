@@ -69,6 +69,7 @@ fn run(outs: Vec<Slots>, custom: Option<String>, ctx: Value) -> (Report, Vec<Gen
         renderer: None,
         model: None,
         custom_instructions: custom,
+        slot_specs: vec![],
     }));
     let seen = rec.seen.lock().unwrap().clone();
     (r, seen)

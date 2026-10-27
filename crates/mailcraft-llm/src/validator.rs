@@ -1,10 +1,10 @@
 //! Pure validator: no I/O. Every number, host, URL, error code and parameter
 //! name in the slots must exist in the context JSON or an allowlist.
-use crate::contract::Slots;
+use crate::contract::{declared, SlotSpec, Slots};
 use crate::personalize::EXAMPLE_SENTENCES;
 use regex::Regex;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Violation {
@@ -340,169 +340,310 @@ impl Validator {
             .filter(|_| g.contains(' '))
             .unwrap_or("");
         for (i, p) in slots.body_paragraphs.iter().enumerate() {
-            let p = p.trim().to_lowercase();
-            let repeats = |t: &str| {
-                !t.is_empty()
-                    && p.strip_prefix(t)
-                        .is_some_and(|r| !r.starts_with(|c: char| c.is_alphanumeric()))
-            };
-            if repeats(&g)
-                || (!name.is_empty() && p.strip_prefix(name).is_some_and(|r| r.starts_with(',')))
-            {
-                v(
-                    "greeting_repeat",
-                    &format!("body_paragraphs[{i}]"),
-                    "do not repeat the greeting or the name at the start of a paragraph".into(),
-                );
-            }
+            Self::check_greeting_repeat(&format!("body_paragraphs[{i}]"), p, &g, name, &mut out);
         }
 
         // voice: no first-person observation, no apology openers, no copying the prompt example
         for (i, p) in slots.body_paragraphs.iter().enumerate() {
-            let slot = format!("body_paragraphs[{i}]");
-            let plain: String = p
-                .to_lowercase()
-                .chars()
-                .map(|c| {
-                    if c.is_alphanumeric() || c == '\'' {
-                        c
-                    } else {
-                        ' '
-                    }
-                })
-                .collect();
-            let plain = format!(
-                " {} ",
-                plain.split_whitespace().collect::<Vec<_>>().join(" ")
-            );
-            for ph in VOICE_PHRASES {
-                if plain.contains(&format!(" {ph} ")) {
-                    v("voice", &slot, format!("avoid {ph:?}"));
-                }
-            }
-            if EXAMPLE_SENTENCES.iter().any(|e| p.contains(e)) {
-                v("example_leak", &slot, "copied the prompt example".into());
-            }
+            Self::check_voice(&format!("body_paragraphs[{i}]"), p, &mut out);
         }
 
         for (slot, text) in slots.texts() {
-            let slot = slot.as_str();
-            // placeholders, HTML, emoji, exclamation
-            for m in self.re_placeholder.find_iter(text) {
-                v(
-                    "placeholder",
-                    slot,
-                    format!("leftover placeholder {:?}", m.as_str()),
-                );
-            }
-            if let Some(m) = self.re_html.find(text) {
-                v(
-                    "html",
-                    slot,
-                    format!("markup not allowed: {:?}", m.as_str()),
-                );
-            }
-            if self.re_emoji.is_match(text) {
-                v("emoji", slot, "emoji not allowed".into());
-            }
-            if !c.allow_exclamation && text.contains('!') {
-                v("exclamation", slot, "exclamation marks not allowed".into());
-            }
-            // banned terms
-            let lower = text.to_lowercase();
-            for re in &self.banned {
-                if let Some(m) = re.find(text) {
-                    if !f.allowed_terms.contains(&m.as_str().to_lowercase()) {
-                        v("banned_term", slot, format!("banned term {:?}", m.as_str()));
-                    }
-                }
-            }
-            for p in &c.spam_phrases {
-                if lower.contains(&p.to_lowercase()) {
-                    v("spam_phrase", slot, format!("spam phrase {p:?}"));
-                }
-            }
-            // shouting (URLs and error codes are legitimately upper-case)
-            let plain = self
-                .re_err
-                .replace_all(&self.re_url.replace_all(text, " "), "")
-                .into_owned();
-            let letters: Vec<char> = plain.chars().filter(|c| c.is_alphabetic()).collect();
-            if letters.len() >= 8 {
-                let caps = letters.iter().filter(|c| c.is_uppercase()).count() as f32
-                    / letters.len() as f32;
-                if caps > c.max_caps_ratio {
-                    v("caps", slot, format!("caps ratio {caps:.2}"));
-                }
-            }
-
-            // facts: URLs, hosts, error codes, params, numbers
-            let mut rest = text.to_string();
-            for m in self.re_url.find_iter(text) {
-                let u = m.as_str().trim_end_matches(['.', ',']);
-                if !f.urls.contains(u) {
-                    v("url", slot, format!("url not in context: {u}"));
-                }
-                if u.to_lowercase().starts_with("http://") {
-                    v("url", slot, format!("insecure url: {u}"));
-                }
-            }
-            rest = self.re_url.replace_all(&rest, " ").into_owned();
-            for m in self.re_host.find_iter(&rest) {
-                if !self.host_ok(m.as_str(), &f) {
-                    v(
-                        "host",
-                        slot,
-                        format!("host not in context/allowlist: {}", m.as_str()),
-                    );
-                }
-            }
-            rest = self.re_host.replace_all(&rest, " ").into_owned();
-            for m in self.re_err.find_iter(&rest) {
-                if !f.errors.contains(m.as_str())
-                    && !c.allowed_error_codes.iter().any(|e| e == m.as_str())
-                {
-                    v(
-                        "error_code",
-                        slot,
-                        format!("error code not in context: {}", m.as_str()),
-                    );
-                }
-            }
-            rest = self.re_err.replace_all(&rest, " ").into_owned();
-            let param_ok =
-                |p: &str| f.idents.contains(p) || c.allowed_params.iter().any(|a| a == p);
-            for m in self.re_ident.find_iter(&rest) {
-                if !param_ok(m.as_str()) {
-                    v(
-                        "param",
-                        slot,
-                        format!("parameter name not in context: {}", m.as_str()),
-                    );
-                }
-            }
-            for cap in self.re_param_eq.captures_iter(&rest) {
-                if !param_ok(&cap[1]) {
-                    v(
-                        "param",
-                        slot,
-                        format!("parameter name not in context: {}", &cap[1]),
-                    );
-                }
-            }
-            for m in self.re_num.find_iter(&rest) {
-                let n = norm_num(m.as_str());
-                if !f.numbers.contains(&n) && !c.allowed_numbers.iter().any(|a| norm_num(a) == n) {
-                    v(
-                        "number",
-                        slot,
-                        format!("number not in context: {}", m.as_str()),
-                    );
-                }
-            }
+            self.check_text(&f, slot.as_str(), text, &mut out);
         }
         out
     }
+
+    /// Placeholder, markup, banned/spam terms, shouting and fact checks for one slot value.
+    fn check_text(&self, f: &Facts, slot: &str, text: &str, out: &mut Vec<Violation>) {
+        let c = &self.cfg;
+        let mut v = |rule, slot: &str, detail: String| {
+            out.push(Violation {
+                rule,
+                slot: slot.to_string(),
+                detail,
+            })
+        };
+        // placeholders, HTML, emoji, exclamation
+        for m in self.re_placeholder.find_iter(text) {
+            v(
+                "placeholder",
+                slot,
+                format!("leftover placeholder {:?}", m.as_str()),
+            );
+        }
+        if let Some(m) = self.re_html.find(text) {
+            v(
+                "html",
+                slot,
+                format!("markup not allowed: {:?}", m.as_str()),
+            );
+        }
+        if self.re_emoji.is_match(text) {
+            v("emoji", slot, "emoji not allowed".into());
+        }
+        if !c.allow_exclamation && text.contains('!') {
+            v("exclamation", slot, "exclamation marks not allowed".into());
+        }
+        // banned terms
+        let lower = text.to_lowercase();
+        for re in &self.banned {
+            if let Some(m) = re.find(text) {
+                if !f.allowed_terms.contains(&m.as_str().to_lowercase()) {
+                    v("banned_term", slot, format!("banned term {:?}", m.as_str()));
+                }
+            }
+        }
+        for p in &c.spam_phrases {
+            if lower.contains(&p.to_lowercase()) {
+                v("spam_phrase", slot, format!("spam phrase {p:?}"));
+            }
+        }
+        // shouting (URLs and error codes are legitimately upper-case)
+        let plain = self
+            .re_err
+            .replace_all(&self.re_url.replace_all(text, " "), "")
+            .into_owned();
+        let letters: Vec<char> = plain.chars().filter(|c| c.is_alphabetic()).collect();
+        if letters.len() >= 8 {
+            let caps =
+                letters.iter().filter(|c| c.is_uppercase()).count() as f32 / letters.len() as f32;
+            if caps > c.max_caps_ratio {
+                v("caps", slot, format!("caps ratio {caps:.2}"));
+            }
+        }
+
+        // facts: URLs, hosts, error codes, params, numbers
+        let mut rest = text.to_string();
+        for m in self.re_url.find_iter(text) {
+            let u = m.as_str().trim_end_matches(['.', ',']);
+            if !f.urls.contains(u) {
+                v("url", slot, format!("url not in context: {u}"));
+            }
+            if u.to_lowercase().starts_with("http://") {
+                v("url", slot, format!("insecure url: {u}"));
+            }
+        }
+        rest = self.re_url.replace_all(&rest, " ").into_owned();
+        for m in self.re_host.find_iter(&rest) {
+            if !self.host_ok(m.as_str(), f) {
+                v(
+                    "host",
+                    slot,
+                    format!("host not in context/allowlist: {}", m.as_str()),
+                );
+            }
+        }
+        rest = self.re_host.replace_all(&rest, " ").into_owned();
+        for m in self.re_err.find_iter(&rest) {
+            if !f.errors.contains(m.as_str())
+                && !c.allowed_error_codes.iter().any(|e| e == m.as_str())
+            {
+                v(
+                    "error_code",
+                    slot,
+                    format!("error code not in context: {}", m.as_str()),
+                );
+            }
+        }
+        rest = self.re_err.replace_all(&rest, " ").into_owned();
+        let param_ok = |p: &str| f.idents.contains(p) || c.allowed_params.iter().any(|a| a == p);
+        for m in self.re_ident.find_iter(&rest) {
+            if !param_ok(m.as_str()) {
+                v(
+                    "param",
+                    slot,
+                    format!("parameter name not in context: {}", m.as_str()),
+                );
+            }
+        }
+        for cap in self.re_param_eq.captures_iter(&rest) {
+            if !param_ok(&cap[1]) {
+                v(
+                    "param",
+                    slot,
+                    format!("parameter name not in context: {}", &cap[1]),
+                );
+            }
+        }
+        for m in self.re_num.find_iter(&rest) {
+            let n = norm_num(m.as_str());
+            if !f.numbers.contains(&n) && !c.allowed_numbers.iter().any(|a| norm_num(a) == n) {
+                v(
+                    "number",
+                    slot,
+                    format!("number not in context: {}", m.as_str()),
+                );
+            }
+        }
+    }
+
+    fn check_greeting_repeat(slot: &str, p: &str, g: &str, name: &str, out: &mut Vec<Violation>) {
+        let p = p.trim().to_lowercase();
+        let repeats = |t: &str| {
+            !t.is_empty()
+                && p.strip_prefix(t)
+                    .is_some_and(|r| !r.starts_with(|c: char| c.is_alphanumeric()))
+        };
+        if repeats(g)
+            || (!name.is_empty() && p.strip_prefix(name).is_some_and(|r| r.starts_with(',')))
+        {
+            out.push(Violation {
+                rule: "greeting_repeat",
+                slot: slot.into(),
+                detail: "do not repeat the greeting or the name at the start of a paragraph".into(),
+            });
+        }
+    }
+
+    fn check_voice(slot: &str, p: &str, out: &mut Vec<Violation>) {
+        let plain: String = p
+            .to_lowercase()
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '\'' {
+                    c
+                } else {
+                    ' '
+                }
+            })
+            .collect();
+        let plain = format!(
+            " {} ",
+            plain.split_whitespace().collect::<Vec<_>>().join(" ")
+        );
+        let mut v = |rule, detail: String| {
+            out.push(Violation {
+                rule,
+                slot: slot.into(),
+                detail,
+            })
+        };
+        for ph in VOICE_PHRASES {
+            if plain.contains(&format!(" {ph} ")) {
+                v("voice", format!("avoid {ph:?}"));
+            }
+        }
+        if EXAMPLE_SENTENCES.iter().any(|e| p.contains(e)) {
+            v("example_leak", "copied the prompt example".into());
+        }
+    }
+
+    /// Dynamic-slot contract: `values` must hold exactly subject, preheader and every declared
+    /// slot. Same checks as [`Self::validate`], per slot, with each slot's own `max_len`.
+    pub fn validate_values(
+        &self,
+        values: &BTreeMap<String, String>,
+        specs: &[SlotSpec],
+        context: &Value,
+    ) -> Vec<Violation> {
+        let c = &self.cfg;
+        let f = self.facts(context);
+        let mut out = vec![];
+        let decl = declared(specs);
+        for k in values.keys() {
+            if k != "subject" && k != "preheader" && !decl.iter().any(|s| &s.name == k) {
+                bad(&mut out, "unexpected_slot", k, "not a declared slot".into());
+            }
+        }
+        let mut required = vec![
+            ("subject", Some(c.max_subject_chars)),
+            ("preheader", Some(c.max_preheader_chars)),
+        ];
+        required.extend(decl.iter().map(|s| (s.name.as_str(), s.max_len)));
+        let greet = values
+            .get("greeting")
+            .map(|s| s.trim().to_lowercase())
+            .unwrap_or_default();
+        let g = greet.trim_end_matches(',').trim().to_string();
+        let name = g
+            .split_whitespace()
+            .last()
+            .filter(|_| g.contains(' '))
+            .unwrap_or("")
+            .to_string();
+        let mut words = 0;
+        let mut texts = vec![];
+        for (key, max) in required {
+            let Some(t) = values.get(key) else {
+                bad(
+                    &mut out,
+                    "missing",
+                    key,
+                    "declared slot not in the output".into(),
+                );
+                continue;
+            };
+            if t.trim().is_empty() && key != "preheader" {
+                bad(&mut out, "empty", key, format!("{key} is empty"));
+            }
+            let n = t.chars().count();
+            if let Some(m) = max.filter(|m| n > *m) {
+                bad(&mut out, "length", key, format!("{n} chars, max {m}"));
+            }
+            match key {
+                "subject" | "preheader" => {}
+                "greeting" => {
+                    let gt = t.trim();
+                    if !gt.is_empty() && !gt.ends_with(',') {
+                        bad(
+                            &mut out,
+                            "greeting",
+                            key,
+                            "greeting must end with a comma".into(),
+                        );
+                    }
+                    if n > c.max_greeting_chars {
+                        bad(
+                            &mut out,
+                            "length",
+                            key,
+                            format!("{n} chars, max {}", c.max_greeting_chars),
+                        );
+                    }
+                }
+                "cta_label" => {
+                    let w = t.split_whitespace().count();
+                    if !t.trim().is_empty() && !(2..=4).contains(&w) {
+                        bad(&mut out, "length", key, format!("{w} words, need 2-4"));
+                    }
+                    if n > c.max_cta_chars {
+                        bad(
+                            &mut out,
+                            "length",
+                            key,
+                            format!("{n} chars, max {}", c.max_cta_chars),
+                        );
+                    }
+                }
+                _ => {
+                    words += t.split_whitespace().count();
+                    Self::check_greeting_repeat(key, t, &g, &name, &mut out);
+                    Self::check_voice(key, t, &mut out);
+                }
+            }
+            texts.push((key, t));
+        }
+        if words > c.max_body_words {
+            out.push(Violation {
+                rule: "length",
+                slot: "-".into(),
+                detail: format!("{words} words across the slots, max {}", c.max_body_words),
+            });
+        }
+        for (k, t) in texts {
+            self.check_text(&f, k, t, &mut out);
+        }
+        out
+    }
+}
+
+fn bad(out: &mut Vec<Violation>, rule: &'static str, slot: &str, detail: String) {
+    out.push(Violation {
+        rule,
+        slot: slot.into(),
+        detail,
+    })
 }
 
 /// Prompt-injection hygiene (journeys.md 4.2 rule 7): strip control chars and

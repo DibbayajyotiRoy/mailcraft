@@ -15,7 +15,7 @@ pub use mailcraft_core::llm::{GenerateRequest, GenerateResult, LlmError, LlmProv
 
 pub use budget::{BudgetExceeded, BudgetGuard, BudgetLimits, InMemoryBudget, NoBudget, PgBudget};
 pub use config::LlmSettings;
-pub use contract::{EmailTemplate, Slots};
+pub use contract::{declared, EmailTemplate, SlotSpec, Slots};
 pub use personalize::{
     Guardrails, LlmPersonalizer, PersonalizeRequest, Personalizer, EXAMPLE_SENTENCES,
     NO_REPLY_LINE, PROMPT_VERSION, REPLY_LINE, SYSTEM_PROMPT,
