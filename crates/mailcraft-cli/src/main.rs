@@ -26,6 +26,9 @@ struct Cli {
     /// API base URL (default: MAILCRAFT_API_URL, config file, http://localhost:8080).
     #[arg(long, global = true)]
     url: Option<String>,
+    /// Config profile: `default` (test key) or `admin` (approvals, go-live). Env: MAILCRAFT_PROFILE.
+    #[arg(long, global = true)]
+    profile: Option<String>,
     /// Never prompt.
     #[arg(long, global = true)]
     non_interactive: bool,
@@ -225,6 +228,13 @@ enum TemplatesCmd {
         #[arg(long)]
         data: Option<String>,
     },
+    /// Make a template version live (what sends use). Defaults to the newest version.
+    Publish {
+        /// Template id or alias.
+        id: String,
+        #[arg(long)]
+        version: Option<i32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -243,6 +253,9 @@ enum ContactsCmd {
         /// Properties as JSON (or @file).
         #[arg(long)]
         data: Option<String>,
+        /// IANA timezone (e.g. Europe/Berlin); drives quiet hours.
+        #[arg(long)]
+        timezone: Option<String>,
     },
     Delete {
         email: String,
@@ -267,8 +280,17 @@ enum EventsCmd {
 #[derive(Subcommand)]
 enum AutomationsCmd {
     List,
+    /// Resume a paused automation. A draft needs `publish` first.
     Enable {
         id: String,
+    },
+    /// Activate a draft (or newly imported version): `POST /v1/automations/{id}/publish`.
+    Publish {
+        /// Automation id or name.
+        id: String,
+        /// Do not mail contacts that already match the trigger.
+        #[arg(long)]
+        backfill_suppress: bool,
     },
     Disable {
         id: String,
@@ -455,7 +477,7 @@ pub fn prompt(q: &str, default: &str, interactive: bool) -> String {
 }
 
 fn run(cli: &Cli) -> R {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load(cli.profile.as_deref());
     if let Some(u) = &cli.url {
         cfg.base_url = Some(u.clone());
     }
@@ -603,6 +625,13 @@ fn run(cli: &Cli) -> R {
                     }
                     ok(r)
                 }
+                TemplatesCmd::Publish { id, version } => {
+                    let b = match version {
+                        Some(v) => json!({"version": v}),
+                        None => json!({}),
+                    };
+                    ok(api.post(&format!("/v1/templates/{}/publish", enc(id)), &b, None)?)
+                }
                 TemplatesCmd::Preview { id, data } => ok(api.post(
                     &format!("/v1/templates/{}/preview", enc(id)),
                     &json!({"variables": json_arg(data, "--data")?}),
@@ -617,12 +646,17 @@ fn run(cli: &Cli) -> R {
                     ok(api.get(&page("/v1/contacts", None, *limit, cursor.as_ref()))?)
                 }
                 ContactsCmd::Get { email } => ok(api.get(&format!("/v1/contacts/{}", enc(email)))?),
-                ContactsCmd::Upsert { email, data } => ok(api.call(
-                    "PUT",
-                    "/v1/contacts",
-                    Some(&json!({"email": email, "properties": json_arg(data, "--data")?})),
-                    None,
-                )?),
+                ContactsCmd::Upsert {
+                    email,
+                    data,
+                    timezone,
+                } => {
+                    let mut b = json!({"email": email, "properties": json_arg(data, "--data")?});
+                    if let Some(tz) = timezone {
+                        b["timezone"] = json!(tz);
+                    }
+                    ok(api.call("PUT", "/v1/contacts", Some(&b), None)?)
+                }
                 ContactsCmd::Delete { email } => {
                     if !cli.yes
                         && !cli.non_interactive
@@ -658,9 +692,27 @@ fn run(cli: &Cli) -> R {
             let api = require_key(&cfg)?;
             match cmd {
                 AutomationsCmd::List => ok(api.get("/v1/automations")?),
-                AutomationsCmd::Enable { id } => ok(api.post(
-                    &format!("/v1/automations/{}/resume", enc(id)),
-                    &json!({}),
+                AutomationsCmd::Enable { id } => ok(api
+                    .post(
+                        &format!("/v1/automations/{}/resume", enc(id)),
+                        &json!({}),
+                        None,
+                    )
+                    .map_err(|e| {
+                        if e.code == "invalid_state" && e.message.contains("`draft`") {
+                            e.hint(&format!(
+                                "a draft is not live yet: run `mailcraft automations publish {id}` (publishes and activates)"
+                            ))
+                        } else {
+                            e
+                        }
+                    })?),
+                AutomationsCmd::Publish {
+                    id,
+                    backfill_suppress,
+                } => ok(api.post(
+                    &format!("/v1/automations/{}/publish", enc(id)),
+                    &json!({"backfill_suppress": backfill_suppress}),
                     None,
                 )?),
                 AutomationsCmd::Disable { id } => ok(api.post(
@@ -761,7 +813,7 @@ fn init(
     let mut steps = vec![json!({"step": "api_reachable", "status": "pass", "url": base})];
     cfg.base_url = Some(base.clone());
 
-    let mut created = false;
+    let mut admin_key: Option<String> = None;
     let key = key_flag.or(cfg.api_key.clone());
     let key = match key {
         Some(k) => k,
@@ -774,7 +826,7 @@ fn init(
                     e
                 }
             })?;
-            created = true;
+            admin_key = r.data()["admin_key"].as_str().map(String::from);
             r.data()["test_key"]
                 .as_str()
                 .ok_or_else(|| {
@@ -784,8 +836,17 @@ fn init(
         }
     };
     cfg.api_key = Some(key.clone());
-    let path = cfg.save()?;
-    steps.push(json!({"step": "key", "status": "pass", "created": created, "env": if key.starts_with("mc_live_") { "live" } else { "test" },
+    // `default` = test key, `admin` = admin key; `--profile admin` / MAILCRAFT_PROFILE=admin selects it.
+    cfg.profile = "default".into();
+    let extra: Vec<(&str, &str)> = admin_key.iter().map(|k| ("admin", k.as_str())).collect();
+    let path = cfg.save(&extra)?;
+    if let Some(k) = &admin_key {
+        eprintln!(
+            "\nADMIN KEY (shown once, store it now, it won't be shown again):\n  {k}\nSaved as profile `admin` in {}; use `--profile admin` for approvals / go-live.\n",
+            path.display()
+        );
+    }
+    steps.push(json!({"step": "key", "status": "pass", "created": admin_key.is_some(), "env": if key.starts_with("mc_live_") { "live" } else { "test" },
                       "prefix": key.chars().take(12).collect::<String>(), "config": path}));
     let api = Api::new(&base, Some(key));
     let status = api.get("/v1/account/status")?;
@@ -838,13 +899,20 @@ fn init(
         _ => vec!["`mailcraft domain add example.com` to send from your own domain, or `mailcraft connect gmail` for a no-domain test path".into()],
     };
     let mut next_steps = next;
+    if admin_key.is_some() {
+        next_steps.push(
+            "Approvals and go-live need the admin key: `mailcraft --profile admin approvals list`"
+                .into(),
+        );
+    }
     next_steps.extend([
         "`mailcraft doctor --json` to check the environment".into(),
         "Use the test key until a human approves go-live".into(),
     ]);
     let failed = steps.iter().any(|s| s["status"] == "fail");
     Ok(Out {
-        data: json!({"steps": steps, "account": sd, "next_steps": next_steps}),
+        data: json!({"steps": steps, "account": sd, "next_steps": next_steps,
+            "admin_key": admin_key, "admin_key_notice": admin_key.as_ref().map(|_| "store this now, it won't be shown again; also saved as profile `admin`")}),
         request_id: None,
         exit: if failed { exit::CHECK_FAILED } else { exit::OK },
     })
