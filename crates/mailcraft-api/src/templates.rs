@@ -333,6 +333,48 @@ pub async fn get(State(st): State<AppState>, auth: Auth, Path(id): Path<String>)
     Ok(envelope(StatusCode::OK, out))
 }
 
+/// Version history, newest first. `published` marks the version sends use right now;
+/// `published_at` is when a version was last published (it may since have been superseded).
+pub async fn versions(State(st): State<AppState>, auth: Auth, Path(id): Path<String>) -> ApiResult {
+    auth.require(Scope::Read)?;
+    let t = find(&st, auth.0.workspace_id, &id).await?;
+    type Row = (i32, String, Option<DateTime<Utc>>, DateTime<Utc>);
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT version, source_format, published_at, created_at FROM template_versions \
+         WHERE template_id = $1 ORDER BY version DESC",
+    )
+    .bind(t.id)
+    .fetch_all(&st.db)
+    .await?;
+    let items: Vec<Value> = rows
+        .into_iter()
+        .map(|(v, f, pa, at)| json!({"version": v, "source_format": f, "created_at": at, "published_at": pa, "published": t.published_version == Some(v)}))
+        .collect();
+    Ok(envelope_list(items, None))
+}
+
+pub async fn version_get(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path((id, version)): Path<(String, i32)>,
+) -> ApiResult {
+    auth.require(Scope::Read)?;
+    let t = find(&st, auth.0.workspace_id, &id).await?;
+    let (v, tpl) = load(&st, &t, Some(version)).await?;
+    let (pa, at): (Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+        "SELECT published_at, created_at FROM template_versions WHERE template_id = $1 AND version = $2",
+    )
+    .bind(t.id)
+    .bind(v)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(envelope(
+        StatusCode::OK,
+        json!({"id": t.id, "alias": t.alias, "version": v, "subject": tpl.subject, "created_at": at,
+               "published_at": pa, "published": t.published_version == Some(v), "template": tpl}),
+    ))
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct PatchTemplate {

@@ -159,9 +159,68 @@ pub async fn get(State(st): State<AppState>, auth: Auth, Path(id): Path<String>)
     .fetch_one(&st.db)
     .await?;
     let mut out = serde_json::to_value(&a).unwrap_or_default();
+    out["stats"] = step_stats(&st, a.id).await?;
     out["steps"] = steps;
     out["trigger"] = json!(a.trigger_event);
     Ok(envelope(StatusCode::OK, out))
+}
+
+/// Per step key, over every run of every version: `entered` runs that reached the step (ran it or
+/// sit on it), `active` still on it (active or waiting), `failed` hit a fatal error there, `exited`
+/// left the automation while on it, `completed` = the rest (moved past it).
+async fn step_stats(st: &AppState, automation: Uuid) -> ApiResult<Value> {
+    use std::collections::{BTreeMap, BTreeSet};
+    // (step, run, fatal error logged there)
+    let logged: Vec<(String, Uuid, bool)> = sqlx::query_as(
+        "SELECT s.step_key, s.run_id, bool_or(COALESCE((s.result->>'failed')::boolean, false)) \
+         FROM automation_run_steps s JOIN automation_runs r ON r.id = s.run_id \
+         WHERE r.automation_id = $1 AND s.step_key NOT LIKE '\\_%' GROUP BY 1, 2",
+    )
+    .bind(automation)
+    .fetch_all(&st.db)
+    .await?;
+    let on: Vec<(String, Uuid, String)> = sqlx::query_as(
+        "SELECT current_step, id, state FROM automation_runs WHERE automation_id = $1 AND current_step IS NOT NULL",
+    )
+    .bind(automation)
+    .fetch_all(&st.db)
+    .await?;
+    #[derive(Default)]
+    struct S {
+        runs: BTreeSet<Uuid>,
+        failed: BTreeSet<Uuid>,
+        active: u64,
+        exited: u64,
+    }
+    let mut m: BTreeMap<String, S> = BTreeMap::new();
+    for (k, run, failed) in logged {
+        let e = m.entry(k).or_default();
+        e.runs.insert(run);
+        if failed {
+            e.failed.insert(run);
+        }
+    }
+    for (k, run, state) in on {
+        let e = m.entry(k).or_default();
+        e.runs.insert(run);
+        match state.as_str() {
+            "active" | "waiting" => e.active += 1,
+            "exited" => e.exited += 1,
+            "failed" => {
+                e.failed.insert(run);
+            }
+            _ => {}
+        }
+    }
+    Ok(Value::Object(
+        m.into_iter()
+            .map(|(k, s)| {
+                let (entered, failed) = (s.runs.len() as u64, s.failed.len() as u64);
+                let completed = entered.saturating_sub(s.active + s.exited + failed);
+                (k, json!({"entered": entered, "completed": completed, "failed": failed, "active": s.active, "exited": s.exited}))
+            })
+            .collect(),
+    ))
 }
 
 #[derive(Deserialize, Default)]

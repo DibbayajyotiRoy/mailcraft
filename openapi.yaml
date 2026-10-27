@@ -70,8 +70,14 @@ paths:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string } }
+        - { name: stream, in: query, schema: { type: string, enum: [transactional, marketing] } }
+        - { name: env, in: query, schema: { type: string, enum: [test, live] } }
+        - { name: q, in: query, description: "Case-insensitive substring of to / from / subject, or an exact email id", schema: { type: string } }
+        - { name: from, in: query, description: "created_at >= (YYYY-MM-DD or RFC 3339)", schema: { type: string } }
+        - { name: to, in: query, description: "created_at <= (RFC 3339), or the end of that day (YYYY-MM-DD)", schema: { type: string } }
       responses:
         "200": { description: page of emails }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
   /v1/emails/batch:
     post:
@@ -94,7 +100,11 @@ paths:
   /v1/emails/{id}:
     get:
       operationId: email_get
-      summary: Email status (scope read)
+      summary: Email status and stored body (scope read)
+      description: |
+        Adds `html` and `text` (the body as sent, or as rendered by the worker for template mail; each
+        capped at 200000 characters, `body_truncated` says when cut). Both are null until a body exists
+        (a template email is rendered at send time). `html` is untrusted: show it in a sandboxed iframe.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200": { description: email }
@@ -128,7 +138,7 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
     get:
       operationId: api_key_list
-      summary: List keys (scope admin); never returns secrets
+      summary: List keys (scope admin); never returns secrets. `last_used_at` is stamped at most once a minute per key.
       responses:
         "200": { description: keys }
   /v1/keys/{id}:
@@ -209,6 +219,9 @@ paths:
     post:
       operationId: domain_verify
       summary: Re-check DNS now (scope manage)
+      description: |
+        Sets `last_checked_at`. Each record carries `checked_at`, `detail` (why it is not verified) and,
+        when the record is wrong, `found` (what DNS returned at that name).
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200": { description: domain with updated records }
@@ -249,6 +262,7 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: q, in: query, description: "Case-insensitive substring of email, first or last name", schema: { type: string } }
       responses:
         "200": { description: page of contacts }
         "501": { $ref: "#/components/responses/Error" }
@@ -290,7 +304,7 @@ paths:
         "501": { $ref: "#/components/responses/Error" }
     get:
       operationId: segment_list
-      summary: List segments (scope manage)
+      summary: List segments with `member_count` (scope manage)
       responses:
         "200": { description: segments }
         "501": { $ref: "#/components/responses/Error" }
@@ -343,6 +357,10 @@ paths:
     get:
       operationId: approval_get
       summary: One approval with preview payload (scope read). Agents poll this.
+      description: |
+        For email approvals `payload.preview.html` / `text_full` hold the stored body of the first gated
+        email when one exists (capped at 200000 characters). Untrusted: render in a sandboxed iframe.
+        `reason` is the decider's note.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200": { description: approval }
@@ -354,7 +372,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/Id" }]
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [approve, reject] } } } } }
+        content: { application/json: { schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [approve, reject] }, reason: { type: string, maxLength: 500 } } } } }
       responses:
         "200": { description: decided }
         "403": { $ref: "#/components/responses/Error" }
@@ -663,6 +681,24 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PatchTemplate" } } } }
       responses:
         "200": { description: updated }
+  /v1/templates/{id}/versions:
+    get:
+      operationId: template_versions
+      summary: Version history, newest first (scope read). `published` marks the live version.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: "[{version, source_format, created_at, published_at, published}]" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/templates/{id}/versions/{version}:
+    get:
+      operationId: template_version_get
+      summary: One version with its block tree (scope read)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: version, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: "{id, alias, version, subject, created_at, published_at, published, template}" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/templates/{id}/publish:
     post:
       operationId: template_publish
@@ -936,6 +972,12 @@ components:
         trigger: { type: string }
         version: { type: integer }
         steps: { type: array, items: { type: object } }
+        stats:
+          type: object
+          description: Per step key, over all runs. completed = entered minus active, exited and failed.
+          additionalProperties:
+            type: object
+            properties: { entered: { type: integer }, completed: { type: integer }, failed: { type: integer }, active: { type: integer }, exited: { type: integer } }
     KeyPolicy:
       type: object
       description: action -> decision

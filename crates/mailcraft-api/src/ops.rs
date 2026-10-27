@@ -34,11 +34,12 @@ struct ApprovalView {
     payload: Value,
     decided_by_key: Option<Uuid>,
     decided_at: Option<DateTime<Utc>>,
+    reason: Option<String>,
     created_at: DateTime<Utc>,
 }
 
 const APPROVAL_COLS: &str =
-    "id, kind, status, subject_id, requested_by, payload, decided_by_key, decided_at, created_at";
+    "id, kind, status, subject_id, requested_by, payload, decided_by_key, decided_at, reason, created_at";
 
 #[derive(Deserialize)]
 pub struct ApprovalQ {
@@ -78,6 +79,29 @@ pub async fn approvals_get(
     .fetch_optional(&st.db)
     .await?
     .ok_or_else(|| not_found("approval"))?;
+    let mut row = row;
+    // Rendered body of the first gated email, when stored. Untrusted HTML: show it in a sandboxed
+    // iframe (`sandbox=""`), never inline.
+    if let Some(eid) = email_ids(&row.payload)
+        .first()
+        .and_then(|s| s.parse::<Uuid>().ok())
+    {
+        let body: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT left(b.html, $3), left(b.text, $3) FROM email_bodies b JOIN emails e ON e.id = b.email_id \
+             WHERE b.email_id = $1 AND e.workspace_id = $2",
+        )
+        .bind(eid)
+        .bind(auth.0.workspace_id)
+        .bind(crate::emails::BODY_CAP)
+        .fetch_optional(&st.db)
+        .await?;
+        if let (Some((html, text)), Some(p)) = (body, row.payload["preview"].as_object_mut()) {
+            p.insert("html".into(), json!(html));
+            if let Some(t) = text {
+                p.insert("text_full".into(), json!(t));
+            }
+        }
+    }
     Ok(envelope(StatusCode::OK, row))
 }
 
@@ -85,6 +109,9 @@ pub async fn approvals_get(
 #[serde(deny_unknown_fields)]
 pub struct Decide {
     pub decision: Decision,
+    /// Why (shown to the requester; max 500 chars).
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +132,14 @@ pub async fn approvals_decide(
         forbidden_scope("admin")
             .hint_in("approvals are decided by humans; agents poll GET /v1/approvals/{id}")
     })?;
+    let reason = body
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty());
+    if reason.is_some_and(|r| r.chars().count() > 500) {
+        return Err(invalid("`reason` is at most 500 characters").field("reason"));
+    }
     let mut tx = st.db.begin().await?;
     let row: Option<(String, String, Option<Uuid>, Value)> = sqlx::query_as(
         "SELECT kind, status, subject_id, payload FROM approvals WHERE id = $1 AND workspace_id = $2 FOR UPDATE",
@@ -166,11 +201,12 @@ pub async fn approvals_decide(
     }
     let new_status = if approve { "approved" } else { "rejected" };
     sqlx::query(
-        "UPDATE approvals SET status = $2, decided_by_key = $3, decided_at = now() WHERE id = $1",
+        "UPDATE approvals SET status = $2, decided_by_key = $3, decided_at = now(), reason = $4 WHERE id = $1",
     )
     .bind(id)
     .bind(new_status)
     .bind(auth.0.id)
+    .bind(reason)
     .execute(&mut *tx)
     .await?;
     audit::append(
@@ -179,7 +215,7 @@ pub async fn approvals_decide(
         Actor::Key(&auth.0),
         Entry {
             action: "approval.decide",
-            args: json!({"approval_id": id, "kind": kind}),
+            args: json!({"approval_id": id, "kind": kind, "reason": reason}),
             decision: new_status,
             approval_id: Some(id),
         },
@@ -189,13 +225,13 @@ pub async fn approvals_decide(
         &mut tx,
         auth.0.workspace_id,
         "approval.decided",
-        json!({"approval_id": id, "kind": kind, "status": new_status}),
+        json!({"approval_id": id, "kind": kind, "status": new_status, "reason": reason}),
     )
     .await?;
     tx.commit().await?;
     Ok(envelope(
         StatusCode::OK,
-        json!({"id": id, "status": new_status}),
+        json!({"id": id, "status": new_status, "reason": reason}),
     ))
 }
 

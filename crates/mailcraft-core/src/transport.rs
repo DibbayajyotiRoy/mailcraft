@@ -45,6 +45,13 @@ pub struct DnsRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<u16>,
     pub status: String, // "not_started" | "pending" | "verified" | "failed"
+    /// Diagnostics from the last check: why it is not verified, and what DNS returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub found: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Delivery plugin. Implementations: smtp-relay, ses, gmail-oauth, direct, (later) kumomta.

@@ -206,7 +206,7 @@ impl DomainStore for PgDomains {
         let mut tx = self.pool.begin().await.map_err(db)?;
         for c in checks {
             sqlx::query(
-                "UPDATE domain_records SET status = $1, detail = $2, checked_at = now() \
+                "UPDATE domain_records SET status = $1, detail = $2, checked_at = now(), found = $7 \
                  WHERE domain_id = $3 AND name = $4 AND type = $5 AND purpose = $6",
             )
             .bind(record_status(c.status))
@@ -215,6 +215,7 @@ impl DomainStore for PgDomains {
             .bind(&c.name)
             .bind(c.rtype.as_str())
             .bind(purpose_str(c.purpose))
+            .bind(&c.found)
             .execute(&mut *tx)
             .await
             .map_err(db)?;
@@ -222,7 +223,7 @@ impl DomainStore for PgDomains {
         let _ = RType::Txt; // RType::as_str gives the CHECK-constrained TXT/CNAME/MX spelling
         let st = domain_status(checks);
         let n = sqlx::query(
-            "UPDATE domains SET status = $1, \
+            "UPDATE domains SET status = $1, last_checked_at = now(), \
              verified_at = CASE WHEN $1 = 'verified' THEN COALESCE(verified_at, to_timestamp($2)) ELSE verified_at END \
              WHERE id = $3",
         )

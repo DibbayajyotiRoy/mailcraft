@@ -141,6 +141,11 @@ pub fn router(st: AppState) -> Router {
             "/v1/templates/{id}",
             get(templates::get).patch(templates::patch),
         )
+        .route("/v1/templates/{id}/versions", get(templates::versions))
+        .route(
+            "/v1/templates/{id}/versions/{version}",
+            get(templates::version_get),
+        )
         .route("/v1/templates/{id}/publish", post(templates::publish))
         .route("/v1/templates/{id}/preview", post(templates::preview))
         .route("/v1/templates/{id}/export", get(templates::export))

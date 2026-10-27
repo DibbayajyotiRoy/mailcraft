@@ -240,7 +240,9 @@ async fn every_openapi_route_is_mounted() {
             {
                 continue;
             }
-            let uri = path.replace("{id}", &Uuid::nil().to_string());
+            let uri = path
+                .replace("{id}", &Uuid::nil().to_string())
+                .replace("{version}", "1");
             let (s, _, b) = call_on(&app, &m.to_uppercase(), &uri, None, &[], None).await;
             assert_eq!(
                 s,
@@ -1914,6 +1916,7 @@ impl DomainService for MockDomains {
             name: r.domain,
             stream: "transactional".into(),
             status: "not_started".into(),
+            last_checked_at: None,
             records: vec![],
         })
     }
