@@ -818,6 +818,7 @@ components:
         delivery_path: { $ref: "#/components/schemas/DeliveryPath" }
         default_from: { type: [string, "null"] }
         reply_to: { type: [string, "null"] }
+        custom_instructions: { type: [string, "null"], maxLength: 2000, description: Workspace writing instructions for LLM emails }
     SettingsUpdate:
       type: object
       additionalProperties: false
@@ -825,6 +826,7 @@ components:
         llm_provider: { type: object, additionalProperties: false, properties: { kind: { type: string }, model: { type: string }, base_url: { type: string }, api_key: { type: string, description: write-only } } }
         default_from: { type: string }
         reply_to: { type: string }
+        custom_instructions: { type: string, maxLength: 2000, description: "Trimmed; empty string clears; over 2000 chars is 422 custom_instructions_too_long. Cannot override safety rules." }
     PolicyView:
       type: object
       properties:

@@ -100,6 +100,15 @@ impl Personalizer for LlmAdapter {
             .flatten()
             .collect();
 
+        let settings: Value = sqlx::query_scalar("SELECT settings FROM workspaces WHERE id = $1")
+            .bind(req.workspace_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(err)?;
+        let custom_instructions = mailcraft_llm::merge_custom_instructions(
+            settings["llm"]["custom_instructions"].as_str(),
+            req.custom_instructions.as_deref(),
+        );
         let mut instructions = req.instructions.clone().unwrap_or_default();
         for s in specs {
             if let Some(i) = &s.instructions {
@@ -137,7 +146,7 @@ impl Personalizer for LlmAdapter {
                 fallback,
                 renderer: None,
                 model: None,
-                custom_instructions: None,
+                custom_instructions,
             })
             .await;
         let generation_id = self.record(&req, &report).await.map_err(err)?;

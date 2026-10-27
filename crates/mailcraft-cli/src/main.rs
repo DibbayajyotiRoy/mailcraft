@@ -108,6 +108,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: KeysCmd,
     },
+    /// Workspace settings.
+    Settings {
+        #[command(subcommand)]
+        cmd: SettingsCmd,
+    },
     /// Approval queue (the API refuses agent keys for approve/reject).
     Approvals {
         #[command(subcommand)]
@@ -288,6 +293,27 @@ enum KeysCmd {
     Revoke {
         id: String,
     },
+}
+
+#[derive(Subcommand)]
+enum SettingsCmd {
+    /// Writing instructions for LLM-written emails (admin key to change).
+    Instructions {
+        #[command(subcommand)]
+        cmd: InstructionsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum InstructionsCmd {
+    /// Set the workspace instructions (max 2,000 characters), from the argument or --file.
+    Set {
+        text: Option<String>,
+        #[arg(long, conflicts_with = "text")]
+        file: Option<String>,
+    },
+    Get,
+    Clear,
 }
 
 #[derive(Subcommand)]
@@ -662,6 +688,34 @@ fn run(cli: &Cli) -> R {
                     ok(api.call("DELETE", &format!("/v1/keys/{}", enc(id)), None, None)?)
                 }
             }
+        }
+        Cmd::Settings {
+            cmd: SettingsCmd::Instructions { cmd },
+        } => {
+            let api = require_key(&cfg)?;
+            let text = match cmd {
+                InstructionsCmd::Get => None,
+                InstructionsCmd::Clear => Some(String::new()),
+                InstructionsCmd::Set { text, file } => Some(match (text, file) {
+                    (Some(t), None) => t.clone(),
+                    (None, Some(f)) => read_file(f)?,
+                    _ => return Err(CliErr::usage("give the instructions text or --file")),
+                }),
+            };
+            let resp = match text {
+                Some(t) => api.call(
+                    "PUT",
+                    "/v1/settings",
+                    Some(&json!({"custom_instructions": t})),
+                    None,
+                )?,
+                None => api.get("/v1/settings")?,
+            };
+            Ok(Out {
+                request_id: resp.body["request_id"].as_str().map(String::from),
+                data: json!({"custom_instructions": resp.data()["custom_instructions"]}),
+                exit: exit::OK,
+            })
         }
         Cmd::Approvals { cmd } => {
             let api = require_key(&cfg)?;

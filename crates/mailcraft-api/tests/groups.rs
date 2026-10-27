@@ -888,6 +888,58 @@ async fn stats_settings_policy_doctor_suppressions() {
         assert_eq!(c.c("PUT", "/v1/settings", Some(bad)).await.0, 400);
     }
 
+    // custom instructions: set / get / trim / clear / too long / non-admin
+    let (s, b) = c
+        .c(
+            "PUT",
+            "/v1/settings",
+            Some(json!({"custom_instructions": "  Be warm.  "})),
+        )
+        .await;
+    assert_eq!(
+        (s, b["data"]["custom_instructions"].as_str()),
+        (200, Some("Be warm.")),
+        "{b}"
+    );
+    assert_eq!(
+        c.c("GET", "/v1/settings", None).await.1["data"]["llm_provider"]["model"],
+        "gpt-x",
+        "llm kept"
+    );
+    let (s, b) = c
+        .c(
+            "PUT",
+            "/v1/settings",
+            Some(json!({"custom_instructions": "x".repeat(2001)})),
+        )
+        .await;
+    assert_eq!(s, 422, "{b}");
+    assert!(b["error"]["hint"].is_string(), "{b}");
+    assert_eq!(
+        c.c("GET", "/v1/settings", None).await.1["data"]["custom_instructions"],
+        "Be warm."
+    );
+    assert_eq!(
+        call(
+            &c.app,
+            "PUT",
+            "/v1/settings",
+            Some(&ro),
+            Some(json!({"custom_instructions": "hi"}))
+        )
+        .await
+        .0,
+        403
+    );
+    let (_, b) = c
+        .c(
+            "PUT",
+            "/v1/settings",
+            Some(json!({"custom_instructions": ""})),
+        )
+        .await;
+    assert!(b["data"]["custom_instructions"].is_null(), "{b}");
+
     // policy
     let (_, b) = c.c("GET", "/v1/policy", None).await;
     assert_eq!(b["data"]["default"]["send"], "auto");

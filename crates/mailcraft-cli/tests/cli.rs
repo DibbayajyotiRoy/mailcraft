@@ -712,3 +712,86 @@ fn contract_doctor_reads_key_env_from_account_status() {
     assert_eq!(c["status"], "pass");
     assert_eq!(c["detail"], "env test");
 }
+
+#[test]
+fn settings_instructions_set_get_clear() {
+    let m = mock(vec![
+        (
+            "PUT",
+            "/v1/settings",
+            200,
+            env_ok(json!({"custom_instructions": "Be warm."})),
+        ),
+        (
+            "GET",
+            "/v1/settings",
+            200,
+            env_ok(json!({"custom_instructions": "Be warm.", "reply_to": null})),
+        ),
+    ]);
+    let d = conf_dir("instr");
+    let o = run(
+        &m,
+        &d,
+        Some("mc_test_abc"),
+        &["settings", "instructions", "set", "Be warm."],
+    );
+    assert!(o.status.success());
+    assert_eq!(
+        m.seen.lock().unwrap().last().unwrap().body,
+        json!({"custom_instructions": "Be warm."})
+    );
+    let f = d.with_extension("txt");
+    std::fs::write(&f, "From file").unwrap();
+    run(
+        &m,
+        &d,
+        Some("mc_test_abc"),
+        &[
+            "settings",
+            "instructions",
+            "set",
+            "--file",
+            f.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(
+        m.seen.lock().unwrap().last().unwrap().body,
+        json!({"custom_instructions": "From file"})
+    );
+    let o = run(
+        &m,
+        &d,
+        Some("mc_test_abc"),
+        &["settings", "instructions", "get"],
+    );
+    assert_eq!(out(&o)["data"], json!({"custom_instructions": "Be warm."}));
+    run(
+        &m,
+        &d,
+        Some("mc_test_abc"),
+        &["settings", "instructions", "clear"],
+    );
+    assert_eq!(
+        m.seen.lock().unwrap().last().unwrap().body,
+        json!({"custom_instructions": ""})
+    );
+}
+
+#[test]
+fn settings_instructions_surfaces_api_error() {
+    let m = mock(vec![(
+        "PUT",
+        "/v1/settings",
+        422,
+        json!({"ok": false, "error": {"code": "custom_instructions_too_long", "message": "too long", "hint": "shorten it"}}),
+    )]);
+    let o = run(
+        &m,
+        &conf_dir("instr2"),
+        Some("mc_test_abc"),
+        &["settings", "instructions", "set", "x"],
+    );
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stdout).contains("custom_instructions_too_long"));
+}
