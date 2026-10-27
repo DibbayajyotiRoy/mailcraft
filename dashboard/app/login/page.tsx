@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function Login({ searchParams }: { searchParams: Promise<{ err?: string }> }) {
   const { err } = await searchParams;
   return (
-    <main id="main" className="narrow">
+    <main id="main" className="narrow mx-auto w-full px-4 py-16">
       <h1>Sign in to mailcraft</h1>
       <ActionError err={err} />
       <form action={login} className="stack">
