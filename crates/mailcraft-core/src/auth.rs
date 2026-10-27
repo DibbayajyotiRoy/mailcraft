@@ -76,10 +76,8 @@ pub fn generate_token(env: KeyEnv) -> NewToken {
 pub fn token_env(token: &str) -> Option<KeyEnv> {
     let (env, rest) = if let Some(r) = token.strip_prefix("mc_test_") {
         (KeyEnv::Test, r)
-    } else if let Some(r) = token.strip_prefix("mc_live_") {
-        (KeyEnv::Live, r)
     } else {
-        return None;
+        (KeyEnv::Live, token.strip_prefix("mc_live_")?)
     };
     (rest.len() == 32 && rest.chars().all(|c| c.is_ascii_alphanumeric())).then_some(env)
 }
