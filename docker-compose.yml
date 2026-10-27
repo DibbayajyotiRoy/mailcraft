@@ -1,5 +1,5 @@
 # echo "MAILCRAFT_SECRET_KEY=$(openssl rand -base64 32)" > .env && docker compose up -d
-# API http://localhost:8080  dashboard http://localhost:3000
+# API http://localhost:8080  dashboard http://localhost:3000 (MAILCRAFT_PORT / MAILCRAFT_DASHBOARD_PORT change them)
 services:
   postgres:
     image: postgres:17-alpine
@@ -39,6 +39,10 @@ services:
       MAILCRAFT_MX_HOST: ${MAILCRAFT_MX_HOST:-}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MAILCRAFT_LLM_MODEL: ${MAILCRAFT_LLM_MODEL:-}
+      MAILCRAFT_LLM_REASONING: ${MAILCRAFT_LLM_REASONING:-}
+      MAILCRAFT_LLM_FALLBACK_MODELS: ${MAILCRAFT_LLM_FALLBACK_MODELS:-}
+      MAILCRAFT_LLM_GUARDRAILS: ${MAILCRAFT_LLM_GUARDRAILS:-}
       MAILCRAFT_GOOGLE_CLIENT_ID: ${MAILCRAFT_GOOGLE_CLIENT_ID:-}
       MAILCRAFT_GOOGLE_CLIENT_SECRET: ${MAILCRAFT_GOOGLE_CLIENT_SECRET:-}
     ports: ["${MAILCRAFT_PORT:-8080}:8080"]
@@ -48,9 +52,24 @@ services:
     build: ./dashboard
     environment:
       MAILCRAFT_API_URL: http://mailcraft:8080
-    ports: ["3000:3000"]
+    ports: ["${MAILCRAFT_DASHBOARD_PORT:-3000}:3000"]
     depends_on: [mailcraft]
     restart: unless-stopped
 
+  # The CLI, no install needed: `docker compose run --rm cli init` (any subcommand works).
+  # Keys live in the named volume, so they survive --rm. Runs as root so the fresh volume is writable.
+  cli:
+    image: ghcr.io/dibbayajyotiroy/mailcraft:latest
+    profiles: [cli]
+    entrypoint: ["/usr/local/bin/mailcraft"]
+    user: "0"
+    environment:
+      MAILCRAFT_API_URL: http://mailcraft:8080
+      MAILCRAFT_CONFIG_DIR: /config
+      MAILCRAFT_EGRESS_IP: ${MAILCRAFT_EGRESS_IP:-}
+    volumes: [mc-config:/config]
+    depends_on: [mailcraft]
+
 volumes:
   pgdata:
+  mc-config:
