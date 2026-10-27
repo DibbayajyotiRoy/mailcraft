@@ -1,0 +1,60 @@
+{
+  "journey": "J10",
+  "title": "Weekly usage digest (opt-in digest topic; fully templated, LLM writes one framing sentence)",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J10 Weekly digest",
+      "status": "draft",
+      "entry_rule": "always",
+      "approval": "first_n:5",
+      "caps": {
+        "frequency": {
+          "min_gap_hours": 0,
+          "max_per_7d": 3
+        }
+      },
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "weekly_digest_due"
+          },
+          "next": "busy"
+        },
+        {
+          "key": "busy",
+          "type": "condition",
+          "config": {
+            "rule": {
+              "field": "event.requests_7d",
+              "op": "gte",
+              "value": 10
+            }
+          },
+          "next": {
+            "true": "digest",
+            "false": "skip"
+          }
+        },
+        {
+          "key": "digest",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-weekly-digest",
+            "topic": "digest",
+            "mode": "llm"
+          }
+        },
+        {
+          "key": "skip",
+          "type": "exit",
+          "config": {
+            "reason": "quiet_week"
+          }
+        }
+      ]
+    }
+  ]
+}

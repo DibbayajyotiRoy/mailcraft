@@ -1,0 +1,77 @@
+{
+  "journey": "J11",
+  "title": "Onboarding abandoned",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J11 Onboarding abandoned",
+      "status": "draft",
+      "entry_rule": "once",
+      "goal": {
+        "events": [
+          "onboarding_completed",
+          "first_request_made"
+        ]
+      },
+      "approval": "first_n:5",
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "onboarding_step_saved"
+          },
+          "next": "wait"
+        },
+        {
+          "key": "wait",
+          "type": "delay",
+          "config": {
+            "duration": "48h"
+          },
+          "next": "stuck"
+        },
+        {
+          "key": "stuck",
+          "type": "condition",
+          "config": {
+            "rule": {
+              "and": [
+                {
+                  "field": "event_count:onboarding_completed",
+                  "op": "eq",
+                  "value": 0
+                },
+                {
+                  "field": "event_count:first_request_made",
+                  "op": "eq",
+                  "value": 0
+                }
+              ]
+            }
+          },
+          "next": {
+            "true": "nudge",
+            "false": "done"
+          }
+        },
+        {
+          "key": "nudge",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-onboarding-abandoned",
+            "topic": "product",
+            "mode": "llm"
+          }
+        },
+        {
+          "key": "done",
+          "type": "exit",
+          "config": {
+            "reason": "finished"
+          }
+        }
+      ]
+    }
+  ]
+}

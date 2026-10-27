@@ -1,0 +1,54 @@
+{
+  "journey": "J9",
+  "title": "First use of batch / MCP / CLI / SDK / sessions / browser",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J9 Feature tip",
+      "status": "draft",
+      "entry_rule": "always",
+      "approval": "first_n:5",
+      "caps": {
+        "per_contact": {
+          "max": 1,
+          "window_days": 7
+        }
+      },
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "events": [
+              "first_use_batch",
+              "first_use_mcp",
+              "first_use_cli",
+              "first_use_sdk",
+              "first_use_session",
+              "first_use_browser"
+            ]
+          },
+          "next": "wait"
+        },
+        {
+          "key": "wait",
+          "type": "delay",
+          "config": {
+            "duration": "3h"
+          },
+          "next": "tip"
+        },
+        {
+          "key": "tip",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-feature-tip",
+            "topic": "product",
+            "instructions": "Choose wording only; tips come from context.tips.",
+            "mode": "llm"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "journey": "J4",
+  "title": "First successful request",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J4 First successful request",
+      "status": "draft",
+      "entry_rule": "once",
+      "approval": "first_n:5",
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "first_successful_request"
+          },
+          "next": "wait"
+        },
+        {
+          "key": "wait",
+          "type": "delay",
+          "config": {
+            "duration": "1h"
+          },
+          "next": "congrats"
+        },
+        {
+          "key": "congrats",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-first-success",
+            "topic": "product",
+            "cap_exempt": true,
+            "weekend_ok": true,
+            "mode": "llm"
+          }
+        }
+      ]
+    }
+  ]
+}

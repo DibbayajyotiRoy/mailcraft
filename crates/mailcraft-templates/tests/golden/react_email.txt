@@ -1,0 +1,3 @@
+Welcome aboard
+
+Click here (https://app.example.com) to start.

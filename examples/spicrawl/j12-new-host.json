@@ -1,0 +1,40 @@
+{
+  "journey": "J12",
+  "title": "Success on a new site / second host (v1.1, draft; no email, tags the contact)",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J12 New host",
+      "status": "draft",
+      "entry_rule": "always",
+      "approval": "first_n:5",
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "hosts_milestone"
+          },
+          "next": "tag"
+        },
+        {
+          "key": "tag",
+          "type": "add_to_segment",
+          "config": {
+            "segment": "multi-host-users"
+          },
+          "next": "mark"
+        },
+        {
+          "key": "mark",
+          "type": "update_contact",
+          "config": {
+            "set": {
+              "hosts_milestone": "$event.hosts_count"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

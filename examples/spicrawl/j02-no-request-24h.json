@@ -1,0 +1,125 @@
+{
+  "journey": "J2",
+  "title": "Signed up, no request in 24h",
+  "source": "mailer-research/journeys.md",
+  "automations": [
+    {
+      "name": "J2 No request in 24h",
+      "status": "draft",
+      "entry_rule": "once",
+      "goal": {
+        "events": [
+          "first_request_made"
+        ]
+      },
+      "approval": "first_n:5",
+      "steps": [
+        {
+          "key": "trigger",
+          "type": "trigger",
+          "config": {
+            "event": "signed_up"
+          },
+          "next": "wait"
+        },
+        {
+          "key": "wait",
+          "type": "delay",
+          "config": {
+            "duration": "24h"
+          },
+          "next": "still_idle"
+        },
+        {
+          "key": "still_idle",
+          "type": "condition",
+          "config": {
+            "rule": {
+              "field": "event_count:first_request_made",
+              "op": "eq",
+              "value": 0
+            }
+          },
+          "next": {
+            "true": "onboarded?",
+            "false": "done"
+          }
+        },
+        {
+          "key": "onboarded?",
+          "type": "condition",
+          "config": {
+            "rule": {
+              "field": "contact.onboarding_completed",
+              "op": "exists"
+            }
+          },
+          "next": {
+            "true": "nudge_completed",
+            "false": "nudge_waiting"
+          }
+        },
+        {
+          "key": "nudge_completed",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-nudge-completed",
+            "topic": "product",
+            "mode": "llm"
+          },
+          "next": "wait2"
+        },
+        {
+          "key": "nudge_waiting",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-nudge-key-waiting",
+            "topic": "product",
+            "mode": "llm"
+          },
+          "next": "wait2"
+        },
+        {
+          "key": "wait2",
+          "type": "delay",
+          "config": {
+            "duration": "4d"
+          },
+          "next": "still_idle2"
+        },
+        {
+          "key": "still_idle2",
+          "type": "condition",
+          "config": {
+            "rule": {
+              "field": "event_count:first_request_made",
+              "op": "eq",
+              "value": 0
+            }
+          },
+          "next": {
+            "true": "nudge_second",
+            "false": "done"
+          }
+        },
+        {
+          "key": "nudge_second",
+          "type": "send_email",
+          "config": {
+            "template": "spicrawl-nudge-second",
+            "topic": "product",
+            "mode": "llm"
+          },
+          "next": "done"
+        },
+        {
+          "key": "done",
+          "type": "exit",
+          "config": {
+            "reason": "finished"
+          }
+        }
+      ]
+    }
+  ]
+}
