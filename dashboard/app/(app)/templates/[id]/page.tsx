@@ -1,25 +1,28 @@
 import { api, get } from "@/lib/api";
-import { ErrorBanner, Json, Preview, StatusBadge } from "@/components/ui";
+import { PageHeader } from "@/components/ui/page-header";
+import { ApiErrorState } from "../../_p3/ApiErrorState";
+import { parseErr } from "../../_p3/err";
+import { TemplateDetail } from "./TemplateDetail";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Template" };
 
-export default async function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
+export default async function TemplateDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ err?: string }> }) {
   const { id } = await params;
+  const { err } = await searchParams;
+  const e = parseErr(err);
   const [t, p] = await Promise.all([get(`/v1/templates/${encodeURIComponent(id)}`), api("POST", `/v1/templates/${encodeURIComponent(id)}/preview`, { variables: {} })]);
-  if (t.error) return <><h1>Template</h1><ErrorBanner error={t.error} /></>;
+  const shaped = !t.error && t.data && !Array.isArray(t.data) && typeof t.data === "object";
+  if (t.error || !shaped) return (
+    <>
+      <PageHeader title="Template" breadcrumb={[{ label: "Templates", href: "/templates" }, { label: id }]} />
+      <ApiErrorState error={t.error ?? { code: "bad_response", message: "The API returned an unexpected response for this page.", hint: "Check the API base URL and that the server is up to date." }} />
+    </>
+  );
   return (
     <>
-      <h1>{t.data.name ?? id} {t.data.status && <StatusBadge status={t.data.status} />}</h1>
-      <h2>Preview</h2>
-      {p.error ? <ErrorBanner error={p.error} /> : (
-        <>
-          {p.data.subject && <p><strong>Subject:</strong> {p.data.subject}</p>}
-          <Preview title="Template preview" html={p.data.html ?? ""} />
-          {(p.data.lint ?? []).length > 0 && <><h3>Lint</h3><Json value={p.data.lint} /></>}
-        </>
-      )}
-      <h2>Definition</h2>
-      <Json value={t.data} />
+      {e && <div className="mb-4"><ApiErrorState error={e} /></div>}
+      <TemplateDetail template={{ ...t.data, id: t.data.id ?? id }} initial={p.error ? { error: p.error } : { preview: Array.isArray(p.data) ? {} : p.data }} />
     </>
   );
 }
