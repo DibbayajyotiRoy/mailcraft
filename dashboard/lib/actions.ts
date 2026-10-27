@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { api, keyBody, request, type ApiResult } from "./api";
+import { withFlash } from "./flash";
 
 const f = (d: FormData, k: string) => String(d.get(k) ?? "").trim();
 const cookie = (base: string) => ({ httpOnly: true, sameSite: "strict" as const, secure: base.startsWith("https:"), path: "/", maxAge: 60 * 60 * 12 });
@@ -36,9 +37,11 @@ export async function setKill(d: FormData) {
 }
 
 export async function addDomain(d: FormData) {
-  done(await api("POST", "/v1/domains", { domain: f(d, "domain"), stream: f(d, "stream") || undefined }), "/domains");
+  done(await api("POST", "/v1/domains", { domain: f(d, "domain"), stream: f(d, "stream") || undefined }), "/domains", withFlash("/domains", `Added ${f(d, "domain")}. Now add its DNS records.`));
 }
-export async function verifyDomain(d: FormData) { done(await api("POST", `/v1/domains/${f(d, "id")}/verify`), "/domains"); }
+export async function verifyDomain(d: FormData) { done(await api("POST", `/v1/domains/${f(d, "id")}/verify`), "/domains", withFlash("/domains", `Re-checked ${f(d, "name") || "domain"}`)); }
+export async function rotateDkim(d: FormData) { done(await api("POST", `/v1/domains/${f(d, "id")}/rotate-dkim`), "/domains", withFlash("/domains", "DKIM key rotated. Publish the new record, then verify.")); }
+export async function deleteDomain(d: FormData) { done(await api("DELETE", `/v1/domains/${f(d, "id")}`), "/domains", withFlash("/domains", `Deleted ${f(d, "name") || "domain"}`)); }
 
 export async function importTemplate(d: FormData) {
   done(await api("POST", "/v1/templates/import", { format: f(d, "format"), name: f(d, "name"), content: String(d.get("content") ?? "") }), "/templates");
@@ -52,11 +55,11 @@ export async function decide(d: FormData) {
   done(await api("POST", `/v1/approvals/${f(d, "id")}/decide`, { decision: f(d, "decision") }), "/approvals");
 }
 
-export async function revokeKey(d: FormData) { done(await api("DELETE", `/v1/keys/${f(d, "id")}`), "/keys"); }
+export async function revokeKey(d: FormData) { done(await api("DELETE", `/v1/keys/${f(d, "id")}`), "/keys", withFlash("/keys", `Revoked ${f(d, "name") || "key"}`)); }
 
 /** useActionState-shaped so the one-time secret never travels through a URL. */
 export async function createKey(_p: unknown, d: FormData): Promise<{ secret?: string; error?: string }> {
-  const r = await api("POST", "/v1/keys", keyBody(f(d, "name"), f(d, "scopes"), f(d, "env")));
+  const r = await api("POST", "/v1/keys", keyBody(f(d, "name"), d.getAll("scopes").join(" ") || f(d, "scopes"), f(d, "env")));
   if (r.error) return { error: `${r.error.code}: ${r.error.message}${r.error.hint ? ` (${r.error.hint})` : ""}` };
   revalidatePath("/keys");
   return { secret: r.data?.token ?? JSON.stringify(r.data) };
