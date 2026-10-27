@@ -1,0 +1,11 @@
+/target
+node_modules
+.next
+dashboard/next-env.d.ts
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.mailcraft/
+key.json
+*.pem

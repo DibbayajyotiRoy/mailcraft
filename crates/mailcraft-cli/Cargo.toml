@@ -1,0 +1,17 @@
+[package]
+name = "mailcraft-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "mailcraft command line (agent-friendly: --json, stable exit codes)"
+
+[dependencies]
+mailcraft-core.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "mailcraft"
+path = "src/main.rs"

@@ -1,0 +1,15 @@
+[package]
+name = "mailcraft-templates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Block tree -> MJML -> HTML/text rendering"
+
+[dependencies]
+mailcraft-core.workspace = true
+mrml.workspace = true
+minijinja.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

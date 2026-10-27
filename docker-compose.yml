@@ -1,0 +1,37 @@
+# docker compose up -d   ->  http://localhost:8080
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: mailcraft
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mailcraft}
+      POSTGRES_DB: mailcraft
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailcraft"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    restart: unless-stopped
+
+  mailcraft:
+    build: .
+    image: ghcr.io/dibbayajyotiroy/mailcraft:latest
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    environment:
+      DATABASE_URL: postgres://mailcraft:${POSTGRES_PASSWORD:-mailcraft}@postgres:5432/mailcraft
+      REDIS_URL: redis://redis:6379
+      MAILCRAFT_SECRET_KEY: ${MAILCRAFT_SECRET_KEY:?set MAILCRAFT_SECRET_KEY (openssl rand -base64 32)}
+      MAILCRAFT_BIND: 0.0.0.0:8080
+    ports: ["8080:8080"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:

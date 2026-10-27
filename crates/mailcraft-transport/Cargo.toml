@@ -1,0 +1,16 @@
+[package]
+name = "mailcraft-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Delivery transports (smtp-relay, ses, gmail-oauth, direct)"
+
+[dependencies]
+mailcraft-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+uuid.workspace = true

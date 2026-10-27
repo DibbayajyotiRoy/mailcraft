@@ -1,0 +1,79 @@
+openapi: 3.1.0
+info:
+  title: mailcraft API
+  version: 0.0.1
+  description: |
+    Single source of truth for the REST API, the CLI and the MCP tools (SPEC.md section 7).
+    Pre-alpha: only /healthz is live; every other operation returns 501 `not_implemented`.
+  license: { name: AGPL-3.0-only, url: https://www.gnu.org/licenses/agpl-3.0.html }
+servers:
+  - url: http://localhost:8080
+security:
+  - bearer: []
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      security: []
+      summary: Liveness (process is up; says nothing about Postgres or Redis)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+  /v1/emails:
+    post:
+      operationId: emails_send
+      summary: Send one email (queue it). Supports dry_run and Idempotency-Key.
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 256 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendEmail" }
+      responses:
+        "202": { description: queued, pending_approval or blocked_by_policy (see data.status) }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, description: "mc_test_... or mc_live_... key" }
+  responses:
+    Error:
+      description: Structured error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  schemas:
+    SendEmail:
+      type: object
+      required: [to]
+      properties:
+        from: { type: string }
+        to: { type: array, items: { type: string, format: email }, maxItems: 50 }
+        subject: { type: string }
+        html: { type: string }
+        text: { type: string }
+        template: { type: object, properties: { id: { type: string }, variables: { type: object } } }
+        stream: { type: string, enum: [transactional, marketing], default: transactional }
+        tags: { type: array, items: { type: object } }
+        scheduled_at: { type: string, format: date-time }
+        dry_run: { type: boolean, default: false }
+    ErrorEnvelope:
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, const: false }
+        error:
+          type: object
+          required: [code, message, doc_url, retryable]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            field: { type: string }
+            hint: { type: string }
+            doc_url: { type: string }
+            retryable: { type: boolean }

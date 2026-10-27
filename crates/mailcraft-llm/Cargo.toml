@@ -1,0 +1,17 @@
+[package]
+name = "mailcraft-llm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "LLM providers for email content generation (OpenRouter first)"
+
+[dependencies]
+mailcraft-core.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

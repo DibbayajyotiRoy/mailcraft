@@ -1,0 +1,29 @@
+# mailcraft
+
+> Agent-native, self-hosted email: transactional sends, event-triggered lifecycle automations, and LLM-written emails behind a validator and approval queue. AGPL-3.0. Pre-alpha.
+
+Use test keys (`mc_test_...`) until a human approves go-live. Never print or ask for API keys. Always pass `--json`. Mutating calls accept `idempotency_key` and `dry_run`.
+
+## Start here
+- [Quickstart](/docs/quickstart.md): docker compose up -d, mailcraft init, mailcraft domain add
+- [Agent setup](/docs/agents.md): MCP URL, init flow, what needs a human
+- [OpenAPI](/openapi.json): single source of truth for REST, CLI and MCP
+- [MCP server](/mcp): Streamable HTTP; OAuth or `Authorization: Bearer mc_...`
+
+## Concepts
+- [Streams](/docs/streams.md): transactional vs marketing (separate subdomains, no tracking or unsubscribe on transactional)
+- [Policy and approvals](/docs/safety.md): auto / needs_approval / blocked, caps, allowlists, kill switch
+- [Automations](/docs/automations.md): trigger, condition, delay, wait_for_event, send_email, update_contact, add_to_segment
+- [LLM emails](/docs/llm.md): slots, validator, fallback copy, approval
+- [Templates](/docs/templates.md): JSON block tree, variables, import/export
+- [Domains and DNS](/docs/domains.md): SPF/DKIM/DMARC/return-path records, verification
+- [Transports](/docs/transports.md): Gmail OAuth (test / low volume), SES, SMTP presets, direct (after doctor)
+
+## Reference
+- [Errors](/errors/index.md): every code with a fix; each error has `hint` and `doc_url`
+- [Webhooks](/docs/webhooks.md): Standard Webhooks signing, retry schedule
+- [CLI](/docs/cli.md): commands and exit codes (0 ok, 2 usage, 3 auth, 4 policy/approval, 5 retryable, 6 not found, 7 checks failed)
+
+## Optional
+- [Full docs in one file](/llms-full.txt)
+- [Spec](https://github.com/DibbayajyotiRoy/mailcraft/blob/main/SPEC.md)
