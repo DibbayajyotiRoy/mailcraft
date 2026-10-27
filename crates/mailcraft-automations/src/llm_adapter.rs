@@ -64,18 +64,37 @@ pub fn personalizer_from_lookup(
     }
 }
 
-fn fb<'a>(specs: &'a [SlotSpec], name: &str) -> Option<&'a str> {
+/// Template slot declarations in the LLM crate's shape (the dynamic contract).
+pub fn llm_specs(specs: &[SlotSpec]) -> Vec<mailcraft_llm::SlotSpec> {
     specs
         .iter()
-        .find(|s| s.name == name)
-        .and_then(|s| s.fallback.as_deref())
+        .map(|s| mailcraft_llm::SlotSpec {
+            name: s.name.clone(),
+            max_len: s.max_len,
+            instructions: s.instructions.clone(),
+            fallback: s.fallback.clone(),
+        })
+        .collect()
 }
 
-// ponytail: mailcraft-llm has 5 fixed slots; templates declare named ones. Only slots named
-// like the contract (`body` = body_paragraphs) are LLM-filled; any other name keeps its static
-// fallback. Upgrade: a dynamic-slots contract (schema built from SlotSpec) in mailcraft-llm.
-fn is_body(n: &str) -> bool {
-    n == "body" || n == "body_paragraphs"
+/// Map a pipeline report back to `Personalized` by slot name. `used_fallback` only when the
+/// pipeline fell back; a declared slot absent from a non-fallback report counts as a fallback
+/// too (the validator makes that unreachable, but a slot must never silently keep its fallback).
+pub fn map_report(specs: &[SlotSpec], report: &Report) -> Personalized {
+    let mut out = Personalized::default();
+    let complete = specs.iter().all(|s| report.values.contains_key(&s.name));
+    if report.outcome == Outcome::Fallback || !complete {
+        // Engine renders the template subject and per-slot fallbacks.
+        out.used_fallback = true;
+        return out;
+    }
+    out.subject = report.values.get("subject").cloned();
+    out.preheader = report.values.get("preheader").cloned();
+    for s in specs {
+        out.slots
+            .insert(s.name.clone(), report.values[&s.name].clone());
+    }
+    out
 }
 
 #[async_trait]
@@ -109,23 +128,14 @@ impl Personalizer for LlmAdapter {
             settings["llm"]["custom_instructions"].as_str(),
             req.custom_instructions.as_deref(),
         );
-        let mut instructions = req.instructions.clone().unwrap_or_default();
-        for s in specs {
-            if let Some(i) = &s.instructions {
-                instructions.push_str(&format!("\nSlot `{}`: {i}", s.name));
-            }
-        }
+        let instructions = req.instructions.clone().unwrap_or_default();
+        // Unused by the dynamic contract (the engine applies per-slot fallbacks); required by the API.
         let fallback = Slots {
-            subject: fb(specs, "subject").unwrap_or(&req.subject_template).into(),
-            preheader: fb(specs, "preheader").unwrap_or_default().into(),
-            greeting: fb(specs, "greeting").unwrap_or_default().into(),
-            body_paragraphs: specs
-                .iter()
-                .find(|s| is_body(&s.name))
-                .and_then(|s| s.fallback.as_deref())
-                .map(|b| b.split("\n\n").map(str::to_owned).collect())
-                .unwrap_or_default(),
-            cta_label: fb(specs, "cta_label").unwrap_or_default().into(),
+            subject: req.subject_template.clone(),
+            preheader: String::new(),
+            greeting: String::new(),
+            body_paragraphs: vec![],
+            cta_label: String::new(),
         };
         // Template-owned parts are only used to score the final message; the engine renders the real one.
         let template = EmailTemplate {
@@ -147,36 +157,12 @@ impl Personalizer for LlmAdapter {
                 renderer: None,
                 model: None,
                 custom_instructions,
+                slot_specs: llm_specs(specs),
             })
             .await;
         let generation_id = self.record(&req, &report).await.map_err(err)?;
-        let fell_back = report.outcome == Outcome::Fallback;
-        let mut out = Personalized {
-            generation_id: Some(generation_id),
-            used_fallback: fell_back,
-            ..Default::default()
-        };
-        if fell_back {
-            // Engine renders the template subject and per-slot fallbacks.
-            return Ok(out);
-        }
-        let s = report.slots;
-        out.subject = Some(s.subject.clone());
-        out.preheader = Some(s.preheader.clone());
-        for spec in specs {
-            let text = match spec.name.as_str() {
-                "greeting" => s.greeting.clone(),
-                "cta_label" => s.cta_label.clone(),
-                "subject" => s.subject.clone(),
-                "preheader" => s.preheader.clone(),
-                n if is_body(n) => s.body_paragraphs.join("\n\n"),
-                _ => continue,
-            };
-            // Over max_len: leave unset so the engine uses the slot's fallback.
-            if spec.max_len.is_none_or(|m| text.chars().count() <= m) {
-                out.slots.insert(spec.name.clone(), text);
-            }
-        }
+        let mut out = map_report(specs, &report);
+        out.generation_id = Some(generation_id);
         Ok(out)
     }
 }
@@ -208,6 +194,7 @@ impl LlmAdapter {
                 "spam_score": a.spam.as_ref().map(|s| s.score), "tokens": a.tokens,
             });
             let output = match (&a.raw, is_last && !fell_back) {
+                (_, true) if !r.values.is_empty() => serde_json::to_value(&r.values).ok(),
                 (_, true) => serde_json::to_value(&r.slots).ok(),
                 (Some(raw), _) => Some(serde_json::from_str(raw).unwrap_or(json!(raw))),
                 _ => None,

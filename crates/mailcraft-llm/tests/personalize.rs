@@ -52,6 +52,7 @@ fn req(g: Guardrails) -> PersonalizeRequest {
         renderer: None,
         model: None,
         custom_instructions: None,
+        slot_specs: vec![],
     }
 }
 fn p(outs: Vec<Slots>) -> (LlmPersonalizer, Arc<Scripted>) {

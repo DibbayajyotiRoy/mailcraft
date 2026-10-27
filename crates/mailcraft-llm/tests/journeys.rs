@@ -164,6 +164,7 @@ fn job(j: &Journey) -> GenerateJob {
         template: template(),
         fallback: j.fallback.clone(),
         custom_instructions: None,
+        slot_specs: vec![],
     }
 }
 fn raw(s: &Slots) -> String {

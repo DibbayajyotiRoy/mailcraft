@@ -1,6 +1,6 @@
 //! The entry point automations (WP4) call for `send_email` steps with `mode: llm`.
 use crate::budget::BudgetGuard;
-use crate::contract::{EmailTemplate, Slots};
+use crate::contract::{EmailTemplate, SlotSpec, Slots};
 use crate::pipeline::{GenerateJob, Generator, MessageRenderer, Outcome, Report};
 use crate::spam::{SpamChecker, SpamConfig};
 use crate::validator::{Validator, ValidatorConfig};
@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 /// Bump when `SYSTEM_PROMPT` changes (stored per generation; a change resets approval, SPEC 10.1.6).
-pub const PROMPT_VERSION: &str = "2026-10-27.3";
+pub const PROMPT_VERSION: &str = "2026-10-27.4";
 
 /// Council-approved default prompt: short, human, polite. Workspace style instructions and the
 /// final rule are appended by `Generator::run` when `custom_instructions` is set.
@@ -99,6 +99,9 @@ pub struct PersonalizeRequest {
     /// Workspace (+ step) style text; untrusted, capped, never overrides the rules.
     /// Build it with [`crate::merge_custom_instructions`].
     pub custom_instructions: Option<String>,
+    /// Template-declared slots; non-empty switches to the dynamic contract (schema, prompt and
+    /// validation per slot, result in `Report::values`). Empty = the fixed 5-slot `Slots`.
+    pub slot_specs: Vec<SlotSpec>,
 }
 
 /// Output: `report.slots` are validated (or the fallback); `report.outcome` says which.
@@ -152,6 +155,7 @@ impl Personalizer for LlmPersonalizer {
             renderer: req.renderer,
             fallback: req.fallback,
             custom_instructions: req.custom_instructions,
+            slot_specs: req.slot_specs,
         };
         let cfg = ValidatorConfig {
             banned_terms: req.guardrails.banned_terms,
@@ -173,6 +177,7 @@ impl Personalizer for LlmPersonalizer {
                     ),
                     outcome: Outcome::Fallback,
                     slots: job.fallback,
+                    values: Default::default(),
                     fallback_reason: Some(format!("invalid_guardrails: {e}")),
                     attempts: vec![],
                     total_tokens: 0,
