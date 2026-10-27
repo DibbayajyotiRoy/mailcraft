@@ -4,7 +4,10 @@ info:
   version: 0.0.1
   description: |
     Single source of truth for the REST API, the CLI and the MCP tools (SPEC.md section 7).
-    Pre-alpha: only /healthz is live; every other operation returns 501 `not_implemented`.
+    Every success body is `{ok:true, data, request_id}` (lists add `next_cursor`); every failure
+    is `{ok:false, error:{code,message,field?,hint?,doc_url,retryable}, request_id}`.
+    Mutating routes accept `Idempotency-Key` (24 h replay window, `Idempotent-Replay: true`).
+    Domains, contacts, segments and events answer 501 `not_implemented` until their service is wired.
   license: { name: AGPL-3.0-only, url: https://www.gnu.org/licenses/agpl-3.0.html }
 servers:
   - url: http://localhost:8080
@@ -15,32 +18,470 @@ paths:
     get:
       operationId: healthz
       security: []
-      summary: Liveness (process is up; says nothing about Postgres or Redis)
+      summary: Liveness only (says nothing about Postgres or Redis)
       responses:
-        "200":
-          description: ok
-          content:
-            application/json:
-              schema: { type: object, properties: { ok: { type: boolean } } }
+        "200": { description: ok, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+  /readyz:
+    get:
+      operationId: readyz
+      security: []
+      summary: Readiness. Fails on Postgres / migrations; Redis is reported as a warning only.
+      responses:
+        "200": { description: ready }
+        "503": { description: not ready }
+  /metrics:
+    get:
+      operationId: metrics
+      security: []
+      summary: Prometheus metrics (Bearer MAILCRAFT_METRICS_TOKEN when configured)
+      responses:
+        "200": { description: text exposition format }
+  /openapi.yaml:
+    get:
+      operationId: openapi
+      security: []
+      summary: This document
+      responses:
+        "200": { description: yaml }
+
   /v1/emails:
     post:
       operationId: emails_send
-      summary: Send one email (queue it). Supports dry_run and Idempotency-Key.
+      summary: Send one email (enqueue). Test keys sandbox it. Supports dry_run and Idempotency-Key.
+      description: |
+        One `emails` row is queued per recipient. `data.status` is `queued` or `pending_approval`
+        (202, with `approval_id`; poll GET /v1/approvals/{id}, never decide). A `blocked` policy is
+        403 `blocked_by_policy`. `dry_run: true` stores nothing and returns 200 with `rendered`, `lint`, `would_send_via`.
+        Scope: send.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SendEmail" } } } }
+      responses:
+        "200": { description: dry run preview }
+        "202": { description: queued or pending_approval, content: { application/json: { schema: { $ref: "#/components/schemas/SendResult" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: emails_list
+      summary: List emails, newest first (scope read)
       parameters:
-        - { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 256 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        "200": { description: page of emails }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/emails/batch:
+    post:
+      operationId: emails_batch_send
+      summary: Send up to 100 emails. Response `data[]` is index-aligned with per-item `{ok,data|error}`. No dry_run.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/SendEmail" }
+            schema:
+              type: object
+              required: [emails]
+              properties:
+                emails: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/SendEmail" } }
       responses:
-        "202": { description: queued, pending_approval or blocked_by_policy (see data.status) }
+        "202": { description: per-item results }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/emails/{id}:
+    get:
+      operationId: email_get
+      summary: Email status (scope read)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: email }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/emails/{id}/cancel:
+    post:
+      operationId: email_cancel
+      summary: Cancel a queued, deferred or pending_approval email (scope send)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: cancelled }
+        "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /v1/emails/{id}/events:
+    get:
+      operationId: email_events
+      summary: Event timeline for one email (scope read)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: events }
+
+  /v1/keys:
+    post:
+      operationId: api_key_create
+      summary: Create a key (scope admin). The secret is returned once. Keys made here never hold `admin`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CreateKey" } } } }
+      responses:
+        "201": { description: created, includes `token` }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: api_key_list
+      summary: List keys (scope admin); never returns secrets
+      responses:
+        "200": { description: keys }
+  /v1/keys/{id}:
+    get:
+      operationId: api_key_get
+      summary: Get a key (scope admin)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: key }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: api_key_update
+      summary: Change a key's policy, allowlist or caps (scope admin)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                policy: { $ref: "#/components/schemas/KeyPolicy" }
+                recipient_allowlist: { type: array, items: { type: string } }
+                daily_send_cap: { type: integer, minimum: 1 }
+                minute_send_cap: { type: integer, minimum: 1 }
+      responses:
+        "200": { description: key }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: api_key_revoke
+      summary: Revoke a key (scope admin)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: revoked }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/domains:
+    post:
+      operationId: domain_add
+      summary: Add a sending domain; returns DNS records (scope manage; DomainService)
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domain]
+              properties:
+                domain: { type: string }
+                stream: { type: string, enum: [transactional, marketing] }
+                tracking: { type: object, properties: { clicks: { type: boolean }, opens: { type: boolean } } }
+      responses:
+        "201": { description: created }
         "501": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: domain_list
+      summary: List domains (scope read)
+      responses:
+        "200": { description: domains }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/domains/{id}:
+    get:
+      operationId: domain_get
+      summary: Get a domain with record status (scope read)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: domain }
+        "501": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: domain_delete
+      summary: Delete a domain (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: deleted }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/domains/{id}/verify:
+    post:
+      operationId: domain_verify
+      summary: Re-check DNS now (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: domain with updated records }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/domains/{id}/rotate-dkim:
+    post:
+      operationId: domain_rotate_dkim
+      summary: Rotate the DKIM selector (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: domain }
+        "501": { $ref: "#/components/responses/Error" }
+
+  /v1/contacts:
+    put:
+      operationId: contact_upsert
+      summary: Upsert a contact (scope manage; ContactService)
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                first_name: { type: string }
+                last_name: { type: string }
+                timezone: { type: string }
+                properties: { type: object }
+      responses:
+        "200": { description: contact }
+        "501": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: contact_list
+      summary: List contacts (scope manage)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200": { description: page of contacts }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/contacts/{id}:
+    get:
+      operationId: contact_get
+      summary: Get a contact by id or email (scope manage)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: contact }
+        "501": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: contact_delete
+      summary: Delete a contact (suppression records are kept)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: deleted }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/contacts/{id}/suppress:
+    post:
+      operationId: contact_suppress
+      summary: Suppress a contact (scope manage)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } }
+      responses:
+        "200": { description: suppressed }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/segments:
+    post:
+      operationId: segment_create
+      summary: Create a segment (scope manage; SegmentService)
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string }, filter: { type: object } } } } }
+      responses:
+        "201": { description: segment }
+        "501": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: segment_list
+      summary: List segments (scope manage)
+      responses:
+        "200": { description: segments }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/segments/{id}/members:
+    post:
+      operationId: segment_add_members
+      summary: Add contacts (by email) to a segment (scope manage)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [emails], properties: { emails: { type: array, items: { type: string }, maxItems: 1000 } } } } }
+      responses:
+        "200": { description: result }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/events:
+    post:
+      operationId: event_send
+      summary: Track an event (scope send or manage; EventService). Deduped by Idempotency-Key.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, contact]
+              properties:
+                name: { type: string }
+                contact: { type: object, required: [email], properties: { email: { type: string } } }
+                properties: { type: object }
+                contact_properties: { type: object }
+                dry_run: { type: boolean }
+      responses:
+        "200": { description: dry run result }
+        "202": { description: accepted }
+        "501": { $ref: "#/components/responses/Error" }
+
+  /v1/approvals:
+    get:
+      operationId: approval_list
+      summary: List approvals (scope read)
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected, expired] } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200": { description: approvals }
+  /v1/approvals/{id}:
+    get:
+      operationId: approval_get
+      summary: One approval with preview payload (scope read). Agents poll this.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: approval }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/approvals/{id}/decide:
+    post:
+      operationId: approval_decide
+      summary: Approve or reject (scope admin; never granted to agent keys, deliberately absent from MCP)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [approve, reject] } } } } }
+      responses:
+        "200": { description: decided }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/go-live-requests:
+    post:
+      operationId: go_live_request
+      summary: Ask a human to enable live sending (scope manage). Creates a `go_live` approval.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { note: { type: string } } } } }
+      responses:
+        "202": { description: pending approval }
+  /v1/policy/proposals:
+    post:
+      operationId: policy_propose
+      summary: Propose a key policy change; a human approves it (scope manage)
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [key_id, policy], properties: { key_id: { type: string, format: uuid }, policy: { $ref: "#/components/schemas/KeyPolicy" } } } } }
+      responses:
+        "202": { description: pending approval }
+  /v1/kill-switch:
+    get:
+      operationId: kill_switch_status
+      summary: Workspace switch and paused keys (scope read)
+      responses:
+        "200": { description: status }
+    post:
+      operationId: kill_switch_set
+      summary: Engage (scope manage or admin) or disengage (scope admin only). Omit key_id for the whole workspace.
+      description: Checked at API admission and at dequeue by the worker, so already-queued mail stops.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [on], properties: { on: { type: boolean }, key_id: { type: string, format: uuid } } } } }
+      responses:
+        "200": { description: state }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/audit:
+    get:
+      operationId: audit_list
+      summary: Audit log, newest first (scope read). Args are redacted.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: before, in: query, schema: { type: integer }, description: "id cursor" }
+      responses:
+        "200": { description: rows }
+  /v1/audit/verify:
+    get:
+      operationId: audit_verify
+      summary: Recompute the hash chain (scope admin). `ok:false` names the first bad row.
+      responses:
+        "200": { description: "{ok, checked, first_bad_id}" }
+  /v1/account/status:
+    get:
+      operationId: account_status
+      summary: Workspace flags, pending approvals and the calling key (scope read)
+      responses:
+        "200": { description: status }
+
+  /v1/webhooks:
+    post:
+      operationId: webhook_create
+      summary: Create an endpoint (scope manage). The `whsec_` secret is returned once. URL passes an SSRF guard.
+      description: |
+        Deliveries are signed per Standard Webhooks (`webhook-id`, `webhook-timestamp`, `webhook-signature: v1,<b64 hmac-sha256>`
+        over `id.timestamp.body`) with `svix-*` twins. Retries: immediately, 5s, 5m, 30m, 2h, 5h, 10h, 10h (8 attempts, +/-10% jitter)
+        on 5xx/408/429/network; other 4xx is final. 5 consecutive exhausted deliveries disable the endpoint.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                events: { type: array, items: { type: string }, default: ["*"] }
+                description: { type: string }
+      responses:
+        "201": { description: created, includes `secret` }
+        "400": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: webhook_list
+      summary: List endpoints (scope manage); never returns secrets
+      responses:
+        "200": { description: endpoints }
+  /v1/webhooks/{id}:
+    delete:
+      operationId: webhook_delete
+      summary: Delete an endpoint (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: deleted }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/webhooks/{id}/test:
+    post:
+      operationId: webhook_test
+      summary: Queue a `test.ping` delivery (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "202": { description: queued }
+  /v1/webhooks/{id}/deliveries:
+    get:
+      operationId: webhook_deliveries
+      summary: Recent deliveries for an endpoint (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: deliveries }
+  /v1/webhook-deliveries/{id}/replay:
+    post:
+      operationId: webhook_delivery_replay
+      summary: Re-queue a delivery (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "202": { description: queued }
+
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer, description: "mc_test_... or mc_live_... key" }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 256 } }
   responses:
     Error:
       description: Structured error
@@ -48,30 +489,69 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    KeyPolicy:
+      type: object
+      description: action -> decision
+      properties:
+        send: { type: string, enum: [auto, needs_approval, blocked] }
+      additionalProperties: false
+    CreateKey:
+      type: object
+      required: [name, env, scopes]
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 100 }
+        env: { type: string, enum: [test, live] }
+        scopes: { type: array, items: { type: string, enum: [read, send, manage] }, minItems: 1 }
+        domain_id: { type: string, format: uuid }
+        policy: { $ref: "#/components/schemas/KeyPolicy" }
+        recipient_allowlist: { type: array, items: { type: string }, description: "exact addresses or @domain entries; test keys may also use magic addresses" }
+        daily_send_cap: { type: integer, minimum: 1 }
+        minute_send_cap: { type: integer, minimum: 1 }
+        expires_at: { type: string, format: date-time }
     SendEmail:
       type: object
       required: [to]
+      additionalProperties: false
       properties:
-        from: { type: string }
-        to: { type: array, items: { type: string, format: email }, maxItems: 50 }
+        from: { type: string, description: "required for live keys; must be on a verified domain" }
+        to: { type: array, items: { type: string, format: email }, minItems: 1, maxItems: 50 }
         subject: { type: string }
         html: { type: string }
         text: { type: string }
-        template: { type: object, properties: { id: { type: string }, variables: { type: object } } }
+        reply_to: { type: string }
+        template: { type: object, required: [id], properties: { id: { type: string, description: "alias or uuid" }, variables: { type: object } } }
         stream: { type: string, enum: [transactional, marketing], default: transactional }
         tags: { type: array, items: { type: object } }
+        headers: { type: object, additionalProperties: { type: string }, description: "custom headers; platform-owned headers are rejected" }
         scheduled_at: { type: string, format: date-time }
         dry_run: { type: boolean, default: false }
+    SendResult:
+      type: object
+      properties:
+        id: { type: string, format: uuid, description: "first recipient's email id" }
+        status: { type: string, enum: [queued, pending_approval] }
+        stream: { type: string }
+        approval_id: { type: string, format: uuid }
+        policy_decisions: { type: array, items: { type: object } }
+        recipients: { type: array, items: { type: object, properties: { email: { type: string }, id: { type: string, format: uuid } } } }
     ErrorEnvelope:
       type: object
       required: [ok, error]
       properties:
         ok: { type: boolean, const: false }
+        request_id: { type: string }
         error:
           type: object
           required: [code, message, doc_url, retryable]
           properties:
-            code: { type: string }
+            code:
+              type: string
+              description: |
+                Stable. invalid_request, unauthenticated, forbidden_scope, not_found, idempotency_key_reused,
+                rate_limited, domain_not_verified, recipient_suppressed, recipient_not_allowed, blocked_by_policy,
+                send_cap_exceeded, kill_switch_active, test_key_live_recipient, approval_already_decided,
+                invalid_state, not_implemented, internal_error
             message: { type: string }
             field: { type: string }
             hint: { type: string }

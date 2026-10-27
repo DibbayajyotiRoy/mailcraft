@@ -1,10 +1,17 @@
 //! Domain types, structured errors and plugin traits. No I/O lives here.
 //! See SPEC.md section 9 (plugin traits) and 4.3 (errors).
 
+pub mod address;
+pub mod audit;
+pub mod auth;
+pub mod crypto;
 pub mod error;
 pub mod llm;
+pub mod policy;
 pub mod retry;
+pub mod services;
 pub mod transport;
+pub mod webhook;
 
 pub use error::{Error, ErrorBody, Result};
 
