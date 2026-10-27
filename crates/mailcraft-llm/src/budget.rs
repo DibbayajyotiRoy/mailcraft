@@ -127,7 +127,7 @@ impl BudgetGuard for InMemoryBudget {
     }
 }
 
-/// Postgres-backed budget (table `llm_budget_usage`, see migrations/20261028000001_llm_budget.sql).
+/// Postgres-backed budget (table `llm_budget_usage`, see migrations/20261028000002_llm_budget.sql).
 /// `tenant` is the workspace UUID as a string; an unparsable id fails closed.
 pub struct PgBudget {
     pool: sqlx::PgPool,
