@@ -265,6 +265,46 @@ pub async fn enqueue(
     Ok(n)
 }
 
+/// Outbox -> deliveries: turns new `email_events` rows into `email.<type>` webhook deliveries,
+/// in one transaction with marking them done (at-least-once; payload `data` per SPEC 7.4).
+#[allow(clippy::type_complexity)] // one sqlx row tuple
+pub async fn fan_out(st: &AppState, limit: i64) -> Result<usize, sqlx::Error> {
+    let mut tx = st.db.begin().await?;
+    let rows: Vec<(i64, Uuid, Uuid, String, Option<String>, Option<String>, Option<String>, DateTime<Utc>, Value)> =
+        sqlx::query_as(
+            "SELECT ev.id, ev.workspace_id, ev.email_id, ev.type, ev.bounce_class, ev.enhanced_code, ev.diagnostic, \
+                    ev.occurred_at, jsonb_build_object('from', e.from_addr, 'to', e.to_addr, 'subject', e.subject, \
+                    'stream', e.stream, 'env', e.env, 'tags', e.tags) \
+             FROM email_events ev JOIN emails e ON e.id = ev.email_id \
+             WHERE ev.outboxed_at IS NULL ORDER BY ev.id LIMIT $1 FOR UPDATE OF ev SKIP LOCKED",
+        )
+        .bind(limit)
+        .fetch_all(&mut *tx)
+        .await?;
+    for (id, ws, email_id, ty, class, enh, diag, at, mut data) in rows.iter().cloned() {
+        if let Some(m) = data.as_object_mut() {
+            m.insert("email_id".into(), json!(email_id));
+            m.insert("occurred_at".into(), json!(at));
+            if let Some(c) = class {
+                m.insert("bounce_class".into(), json!(c));
+            }
+            if let Some(c) = enh {
+                m.insert("enhanced_code".into(), json!(c));
+            }
+            if let Some(c) = diag {
+                m.insert("diagnostic".into(), json!(c));
+            }
+        }
+        enqueue(&mut tx, ws, &format!("email.{ty}"), data).await?;
+        sqlx::query("UPDATE email_events SET outboxed_at = now() WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(rows.len())
+}
+
 #[derive(sqlx::FromRow)]
 struct Due {
     id: Uuid,

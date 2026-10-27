@@ -3,8 +3,8 @@ use crate::{
     metrics::Metrics,
     mime::{self, MimeParts},
     traits::{
-        db_err, FinalizeCtx, Finalizer, NoopFinalizer, PgSuppressions, ResolvedTransport,
-        SuppressionCheck, TransportResolver,
+        db_err, FinalizeCtx, Finalizer, LinkMaker, NoLinks, NoopFinalizer, PgSuppressions,
+        ResolvedTransport, SuppressionCheck, TransportResolver,
     },
     verp_mail_from,
 };
@@ -39,8 +39,10 @@ WITH claimed AS (
   RETURNING *)
 SELECT e.id, e.workspace_id, e.api_key_id, e.domain_id, e.transport_id, e.stream, e.env,
        e.from_addr, e.to_addr, e.cc, e.reply_to, e.subject, e.headers, e.attempts, e.max_age_at,
-       e.created_at, e.rcpt_domain, e.message_id,
-       b.html, b.text, w.kill_switch, k.daily_send_cap, k.minute_send_cap,
+       e.created_at, e.rcpt_domain, e.message_id, e.template_id, e.template_vars,
+       COALESCE(e.contact_id, (SELECT c.id FROM contacts c WHERE c.workspace_id = e.workspace_id AND c.email = lower(e.to_addr))) AS contact_id,
+       b.html, b.text, w.kill_switch, w.name AS workspace_name, w.postal_address,
+       COALESCE(k.paused, false) AS key_paused, k.daily_send_cap, k.minute_send_cap,
        d.return_path_host
 FROM claimed e
 JOIN workspaces w ON w.id = e.workspace_id
@@ -68,9 +70,15 @@ struct Job {
     created_at: DateTime<Utc>,
     rcpt_domain: Option<String>,
     message_id: Option<String>,
+    template_id: Option<Uuid>,
+    template_vars: Option<serde_json::Value>,
+    contact_id: Option<Uuid>,
     html: Option<String>,
     text: Option<String>,
     kill_switch: bool,
+    key_paused: bool,
+    workspace_name: String,
+    postal_address: Option<String>,
     daily_send_cap: Option<i32>,
     minute_send_cap: Option<i32>,
     return_path_host: Option<String>,
@@ -122,9 +130,16 @@ pub struct Engine {
     resolver: Arc<dyn TransportResolver>,
     finalizer: Arc<dyn Finalizer>,
     suppress: Arc<dyn SuppressionCheck>,
+    links: Arc<dyn LinkMaker>,
     limits: Arc<Limits>,
     sandbox: Arc<Sandbox>,
     pub metrics: Arc<Metrics>,
+}
+
+struct Content {
+    subject: String,
+    html: Option<String>,
+    text: Option<String>,
 }
 
 struct Event {
@@ -174,6 +189,7 @@ impl Engine {
             cfg: EngineConfig::default(),
             resolver,
             finalizer: Arc::new(NoopFinalizer),
+            links: Arc::new(NoLinks),
             limits: Arc::new(Limits::in_process()),
             sandbox: Arc::new(Sandbox::new()),
             metrics: Arc::new(Metrics::default()),
@@ -189,6 +205,10 @@ impl Engine {
     }
     pub fn suppression(mut self, s: Arc<dyn SuppressionCheck>) -> Self {
         self.suppress = s;
+        self
+    }
+    pub fn links(mut self, l: Arc<dyn LinkMaker>) -> Self {
+        self.links = l;
         self
     }
     pub fn limits(mut self, l: Arc<Limits>) -> Self {
@@ -330,6 +350,9 @@ impl Engine {
         if job.kill_switch {
             return self.defer(wid, job, 30.0, "kill switch engaged").await;
         }
+        if job.key_paused {
+            return self.defer(wid, job, 30.0, "api key is paused").await;
+        }
         let suppressed = if test && sb_outcome == SandboxOutcome::Suppressed {
             true
         } else {
@@ -346,6 +369,27 @@ impl Engine {
                 }
             }
         };
+        // Marketing mail honours a one-click topic opt-out (`/u/{token}` -> contact_topics.opted_in).
+        let suppressed = suppressed
+            || (stream == Stream::Marketing
+                && match job.contact_id {
+                    None => false,
+                    Some(c) => match sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS (SELECT 1 FROM contact_topics ct JOIN topics t ON t.id = ct.topic_id \
+                         WHERE ct.contact_id = $1 AND NOT ct.opted_in AND t.key IN ('product','digest'))",
+                    )
+                    .bind(c)
+                    .fetch_one(&self.pool)
+                    .await
+                    {
+                        Ok(b) => b,
+                        Err(e) => {
+                            return self
+                                .defer(wid, job, 60.0, &format!("topic check failed: {e}"))
+                                .await
+                        }
+                    },
+                });
         if suppressed {
             let t = Transition {
                 status: "suppressed",
@@ -446,14 +490,21 @@ impl Engine {
             .as_deref()
             .map(|m| m.trim_matches(['<', '>']).to_string())
             .unwrap_or_else(|| format!("{}@{from_domain}", job.id.simple()));
+        let content = match self.content(job, stream).await {
+            Ok(c) => c,
+            Err(e) => {
+                self.release(&reserved).await;
+                return self.fail(wid, job, &egress, e).await;
+            }
+        };
         let raw = match mime::build(&MimeParts {
             from: &job.from_addr,
             to: &job.to_addr,
             cc: &cc,
             reply_to: job.reply_to.as_deref(),
-            subject: &job.subject,
-            text: job.text.as_deref(),
-            html: job.html.as_deref(),
+            subject: &content.subject,
+            text: content.text.as_deref(),
+            html: content.html.as_deref(),
             headers: &job.headers,
             message_id: &message_id,
         }) {
@@ -466,11 +517,18 @@ impl Engine {
         let ctx = FinalizeCtx {
             email_id: job.id,
             workspace_id: job.workspace_id,
+            contact_id: job.contact_id,
             domain_id: job.domain_id,
             stream,
             from_domain,
         };
-        let raw = match self.finalizer.finalize(&ctx, raw).await {
+        // The sandbox never signs: nothing leaves the box, and the domain may not exist yet.
+        let finalized = if test {
+            Ok(raw)
+        } else {
+            self.finalizer.finalize(&ctx, raw).await
+        };
+        let raw = match finalized {
             Ok(r) => r,
             Err(e) => {
                 self.release(&reserved).await;
@@ -556,6 +614,80 @@ impl Engine {
                     .await
             }
         }
+    }
+
+    /// Subject / html / text for this job. Rows with a stored body are used as is; template rows
+    /// (API `template`, automations) are rendered here, at dequeue, with the unsubscribe and
+    /// preferences links plus `workspace.name` injected, and the result is saved for the log.
+    async fn content(&self, job: &Job, stream: Stream) -> std::result::Result<Content, String> {
+        let plain = Content {
+            subject: job.subject.clone(),
+            html: job.html.clone(),
+            text: job.text.clone(),
+        };
+        let Some(tid) = job
+            .template_id
+            .filter(|_| job.html.is_none() && job.text.is_none())
+        else {
+            return Ok(plain);
+        };
+        let doc: Option<serde_json::Value> = sqlx::query_scalar(
+            "SELECT doc FROM template_versions WHERE template_id = $1 ORDER BY
+               (id = (SELECT current_version_id FROM templates WHERE id = $1)) DESC, version DESC LIMIT 1",
+        )
+        .bind(tid)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        let doc = doc.ok_or("template has no version")?;
+        let t: mailcraft_templates::Template =
+            serde_json::from_value(doc).map_err(|e| format!("template: {e}"))?;
+        let (unsub, prefs) = self.links.links(job.workspace_id, job.contact_id, stream);
+        let mut vars = job
+            .template_vars
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(m) = vars.as_object_mut() {
+            m.insert("unsubscribe_url".into(), unsub.into());
+            m.insert("preferences_url".into(), prefs.into());
+            m.insert(
+                "workspace".into(),
+                serde_json::json!({"name": job.workspace_name}),
+            );
+        }
+        let opts = mailcraft_templates::RenderOptions {
+            stream,
+            footer: mailcraft_templates::Footer {
+                workspace_name: Some(job.workspace_name.clone()),
+                postal_address: job.postal_address.clone(),
+            },
+        };
+        let r =
+            mailcraft_templates::render(&t, &vars, &opts).map_err(|e| format!("render: {e}"))?;
+        let subject = if job.subject.trim().is_empty() {
+            r.subject
+        } else {
+            job.subject.clone()
+        };
+        let _ = sqlx::query(
+            "INSERT INTO email_bodies (email_id, html, text) VALUES ($1,$2,$3)
+             ON CONFLICT (email_id) DO UPDATE SET html = $2, text = $3",
+        )
+        .bind(job.id)
+        .bind(&r.html)
+        .bind(&r.text)
+        .execute(&self.pool)
+        .await;
+        let _ = sqlx::query("UPDATE emails SET subject = $2 WHERE id = $1")
+            .bind(job.id)
+            .bind(&subject)
+            .execute(&self.pool)
+            .await;
+        Ok(Content {
+            subject,
+            html: Some(r.html),
+            text: Some(r.text),
+        })
     }
 
     /// Error-class policy: Permanent -> failed/bounced, Temporary -> backoff, RateLimited ->

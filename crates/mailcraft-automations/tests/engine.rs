@@ -1,6 +1,6 @@
 //! Integration tests on a throwaway Postgres:
 //!   docker run -d --rm --name mc-pg-auto -e POSTGRES_PASSWORD=x -p 55434:5432 postgres:17-alpine
-//! Override with MAILCRAFT_TEST_DATABASE_URL. Tests skip (loudly) when no server is reachable,
+//! Override with MAILCRAFT_TEST_PG. Tests skip (loudly) when no server is reachable,
 //! unless MAILCRAFT_REQUIRE_DB is set.
 use chrono::{DateTime, Duration, Utc};
 use mailcraft_automations::*;
@@ -28,8 +28,8 @@ async fn setup() -> Option<Fx> {
 }
 
 async fn setup_with(p: Arc<dyn Personalizer>) -> Option<Fx> {
-    let admin = std::env::var("MAILCRAFT_TEST_DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:x@localhost:55434/postgres".into());
+    let admin = std::env::var("MAILCRAFT_TEST_PG")
+        .unwrap_or_else(|_| "postgres://postgres:x@127.0.0.1:55432/postgres".into());
     let admin_pool = match PgPoolOptions::new()
         .max_connections(2)
         .acquire_timeout(std::time::Duration::from_secs(3))

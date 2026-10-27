@@ -1135,7 +1135,19 @@ async fn daily_cap_uses_redis_and_survives_a_redis_flush() {
         .get_multiplexed_async_connection()
         .await
         .unwrap();
-    let _: () = redis::cmd("FLUSHDB").query_async(&mut r).await.unwrap();
+    // Only this key's counters: FLUSHDB would reset other tests' rate limits in the shared Redis.
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM api_keys WHERE name = 'capped'")
+        .fetch_one(&c.st.db)
+        .await
+        .unwrap();
+    let keys: Vec<String> = redis::cmd("KEYS")
+        .arg(format!("cap:{id}:*"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    for k in keys {
+        let _: () = redis::cmd("DEL").arg(k).query_async(&mut r).await.unwrap();
+    }
     let (s, h, b) = c.call("POST", "/v1/emails", Some(&k), &[], Some(two)).await;
     assert_eq!(
         (s, code(&b)),

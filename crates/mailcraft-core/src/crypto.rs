@@ -61,6 +61,17 @@ impl SecretBox {
         };
         Self::from_key(&bytes)
     }
+    /// Like `from_env_value`, but a non-hex / non-base64 value of 16+ chars is a passphrase
+    /// (SHA-256 of it is the key).
+    pub fn from_secret(s: &str) -> Result<Self> {
+        Self::from_env_value(s).or_else(|e| {
+            if s.trim().len() >= 16 {
+                Self::from_key(&sha256(s.trim().as_bytes()))
+            } else {
+                Err(e)
+            }
+        })
+    }
     pub fn from_key(key: &[u8]) -> Result<Self> {
         Aes256Gcm::new_from_slice(key).map(Self).map_err(|_| {
             Error::new(

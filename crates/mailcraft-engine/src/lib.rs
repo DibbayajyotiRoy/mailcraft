@@ -15,8 +15,8 @@ mod worker;
 pub use limits::Limits;
 pub use metrics::Metrics;
 pub use traits::{
-    FinalizeCtx, Finalizer, NoopFinalizer, PgSuppressions, ResolvedTransport, StaticResolver,
-    SuppressionCheck, TransportResolver,
+    FinalizeCtx, Finalizer, LinkMaker, NoLinks, NoopFinalizer, PgSuppressions, ResolvedTransport,
+    StaticResolver, SuppressionCheck, TransportResolver,
 };
 pub use worker::{CapStorePg, Engine, EngineConfig, CLAIM_SQL};
 

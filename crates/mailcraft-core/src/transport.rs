@@ -41,6 +41,9 @@ pub struct DnsRecord {
     pub kind: String, // "TXT" | "CNAME" | "MX"
     pub name: String,
     pub value: String,
+    /// MX preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u16>,
     pub status: String, // "not_started" | "pending" | "verified" | "failed"
 }
 

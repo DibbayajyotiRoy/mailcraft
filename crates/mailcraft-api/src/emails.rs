@@ -355,7 +355,17 @@ async fn plan(st: &AppState, key: &ApiKey, p: &Prepared, record: bool) -> ApiRes
             "remove them from `to`; suppression is removed only by DELETE /v1/suppressions/{email}",
         ));
     }
-    let pol = policy::for_action(&key.policy, "send");
+    // Key policy wins; an unset key action falls back to the workspace default (`settings.policy_default`).
+    let pol = if key.policy.get("send").is_some_and(|v| !v.is_null()) {
+        policy::for_action(&key.policy, "send")
+    } else {
+        let d: Option<Value> =
+            sqlx::query_scalar("SELECT settings -> 'policy_default' FROM workspaces WHERE id = $1")
+                .bind(key.workspace_id)
+                .fetch_one(&st.db)
+                .await?;
+        policy::for_action(&d.unwrap_or(Value::Null), "send")
+    };
     st.metrics
         .policy_decisions
         .with_label_values(&[

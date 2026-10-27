@@ -32,7 +32,16 @@ services:
       REDIS_URL: redis://redis:6379
       MAILCRAFT_SECRET_KEY: ${MAILCRAFT_SECRET_KEY:?set MAILCRAFT_SECRET_KEY (openssl rand -base64 32)}
       MAILCRAFT_BIND: 0.0.0.0:8080
-    ports: ["8080:8080"]
+      # Recipient-reachable URL: unsubscribe links and the instance DNS domain are built from it.
+      MAILCRAFT_PUBLIC_URL: ${MAILCRAFT_PUBLIC_URL:-http://localhost:8080}
+      # `domain add` needs your sending IP(s) for the return-path SPF (or a public URL with a real host).
+      MAILCRAFT_EGRESS_IP: ${MAILCRAFT_EGRESS_IP:-}
+      MAILCRAFT_MX_HOST: ${MAILCRAFT_MX_HOST:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MAILCRAFT_GOOGLE_CLIENT_ID: ${MAILCRAFT_GOOGLE_CLIENT_ID:-}
+      MAILCRAFT_GOOGLE_CLIENT_SECRET: ${MAILCRAFT_GOOGLE_CLIENT_SECRET:-}
+    ports: ["${MAILCRAFT_PORT:-8080}:8080"]
     restart: unless-stopped
 
   dashboard:

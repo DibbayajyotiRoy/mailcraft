@@ -24,12 +24,14 @@ pub mod metrics;
 pub mod ops;
 pub mod page;
 pub mod public;
+pub mod resolver;
 pub mod services;
 pub mod ssrf;
 pub mod state;
 pub mod templates;
 pub mod transports;
 pub mod webhooks;
+pub mod wiring;
 
 use std::time::{Duration, Instant};
 
@@ -285,18 +287,21 @@ pub async fn bootstrap(db: &PgPool, name: &str) -> Result<(Uuid, String), sqlx::
     Ok((ws, token))
 }
 
-/// Background loops owned by the API process: webhook delivery and idempotency purge.
-/// (Email sending, bounce handling and fan-out of `email_events` belong to the engine.)
-pub async fn run_background(st: AppState) {
-    let mut tick = tokio::time::interval(Duration::from_secs(2));
+/// Background loops owned by the API process: webhook fan-out + delivery and idempotency purge.
+/// (Sending is the engine's job; automations tick in `wiring::serve`.) Stops on `shutdown`.
+pub async fn run_background(st: AppState, mut shutdown: tokio::sync::watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut n: u64 = 0;
-    loop {
-        tick.tick().await;
+    while !*shutdown.borrow() {
+        tokio::select! { _ = tick.tick() => {}, _ = shutdown.changed() => break }
+        if let Err(e) = webhooks::fan_out(&st, 200).await {
+            tracing::error!(error = %e, "webhook fan-out loop");
+        }
         if let Err(e) = webhooks::deliver_due(&st, 50).await {
             tracing::error!(error = %e, "webhook delivery loop");
         }
         n += 1;
-        if n.is_multiple_of(1800) {
+        if n.is_multiple_of(3600) {
             let _ = idem::purge(&st.db).await;
         }
     }

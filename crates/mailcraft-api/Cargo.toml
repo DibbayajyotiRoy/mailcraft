@@ -10,7 +10,7 @@ description = "axum HTTP API server"
 mailcraft-core.workspace = true
 mailcraft-engine.workspace = true
 mailcraft-deliverability = { path = "../mailcraft-deliverability" }
-mailcraft-automations = { path = "../mailcraft-automations" }
+mailcraft-automations = { path = "../mailcraft-automations", features = ["llm"] }
 mailcraft-templates.workspace = true
 mailcraft-transport.workspace = true
 axum.workspace = true
@@ -31,6 +31,7 @@ base64 = "0.22"
 futures-lite = "2"
 
 [dev-dependencies]
+mail-auth = "0.14"
 tower.workspace = true
 http-body-util = "0.1"
 tokio = { workspace = true, features = ["io-util"] }

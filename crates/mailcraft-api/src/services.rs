@@ -96,8 +96,8 @@ impl Domains {
     }
 
     async fn view(&self, d: DomainRow) -> Result<DomainView> {
-        let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
-            "SELECT record, type, name, value, status FROM domain_records WHERE domain_id = $1 ORDER BY record, name",
+        let rows: Vec<(String, String, String, String, Option<i32>, String)> = sqlx::query_as(
+            "SELECT record, type, name, value, priority, status FROM domain_records WHERE domain_id = $1 ORDER BY record, name",
         )
         .bind(d.id)
         .fetch_all(&self.db)
@@ -115,7 +115,8 @@ impl Domains {
             status: d.status.as_str().into(),
             records: rows
                 .into_iter()
-                .map(|(record, kind, name, value, status)| DnsRecord {
+                .map(|(record, kind, name, value, priority, status)| DnsRecord {
+                    priority: priority.and_then(|p| u16::try_from(p).ok()),
                     record,
                     kind,
                     name,
@@ -500,15 +501,9 @@ impl AppState {
         config: crate::Config,
         personalizer: Arc<dyn Personalizer>,
     ) -> Result<Self> {
-        let bad = |m: String| Error::new("invalid_secret_key", 500, m);
-        let secrets =
-            mailcraft_core::crypto::SecretBox::from_env_value(secret_key).or_else(|_| {
-                mailcraft_core::crypto::SecretBox::from_key(&mailcraft_core::crypto::sha256(
-                    secret_key.as_bytes(),
-                ))
-            })?;
-        let mut st = Self::new(db.clone(), redis, secrets, config);
-        let deliv = DelivBox::from_secret(secret_key).map_err(|e| bad(e.to_string()))?;
+        let secrets = mailcraft_core::crypto::SecretBox::from_secret(secret_key)?;
+        let mut st = Self::new(db.clone(), redis, secrets.clone(), config);
+        let deliv = secrets;
         st.dkim_box = Some(deliv.clone());
         match HickoryDns::system() {
             Ok(dns) => {
