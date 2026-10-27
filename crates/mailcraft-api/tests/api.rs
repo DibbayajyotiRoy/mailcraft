@@ -2008,3 +2008,48 @@ async fn stub_services_answer_501_and_real_ones_plug_in() {
         .await;
     assert_eq!((s, code(&b)), (StatusCode::NOT_FOUND, "not_found"));
 }
+
+#[tokio::test]
+async fn deciding_an_automation_first_send_releases_or_cancels_the_gated_email() {
+    let c = ctx!();
+    for (decision, want_email, want_approval) in [
+        ("approve", "queued", "approved"),
+        ("reject", "cancelled", "rejected"),
+    ] {
+        let eid: Uuid = sqlx::query_scalar(
+            "INSERT INTO emails (workspace_id, stream, source, from_addr, to_addr, subject, status)
+             VALUES ($1,'transactional','automation','a@x.com','b@x.com','s','pending_approval') RETURNING id",
+        )
+        .bind(c.ws)
+        .fetch_one(&c.st.db)
+        .await
+        .unwrap();
+        let ap: Uuid = sqlx::query_scalar(
+            "INSERT INTO approvals (workspace_id, kind, subject_id, payload) VALUES ($1,'automation_first_send',$2,'{}') RETURNING id",
+        )
+        .bind(c.ws)
+        .bind(eid)
+        .fetch_one(&c.st.db)
+        .await
+        .unwrap();
+        let (st_, _, b) = c
+            .call(
+                "POST",
+                &format!("/v1/approvals/{ap}/decide"),
+                Some(&c.admin),
+                &[],
+                Some(json!({"decision": decision})),
+            )
+            .await;
+        assert_eq!(
+            (st_, b["data"]["status"].as_str()),
+            (StatusCode::OK, Some(want_approval))
+        );
+        let status: String = sqlx::query_scalar("SELECT status FROM emails WHERE id = $1")
+            .bind(eid)
+            .fetch_one(&c.st.db)
+            .await
+            .unwrap();
+        assert_eq!(status, want_email, "{decision}");
+    }
+}
