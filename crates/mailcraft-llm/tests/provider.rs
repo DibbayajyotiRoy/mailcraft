@@ -245,3 +245,31 @@ async fn openrouter_sends_model_fallbacks() {
         .unwrap();
     assert_eq!(b["models"], json!(["openai/gpt-5-nano"]));
 }
+
+#[tokio::test]
+async fn reasoning_is_sent_only_when_configured() {
+    for (r, want) in [
+        (None, None),
+        (
+            Some(json!({"enabled": false})),
+            Some(json!({"enabled": false})),
+        ),
+        (
+            Some(json!({"effort": "low"})),
+            Some(json!({"effort": "low"})),
+        ),
+    ] {
+        let s = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+            .mount(&s)
+            .await;
+        let mut c = OpenAiCompatConfig::openrouter("k", "r", "t");
+        c.reasoning = r;
+        fast(c, &s.uri()).generate(req()).await.unwrap();
+        let b = s.received_requests().await.unwrap()[0]
+            .body_json::<Value>()
+            .unwrap();
+        assert_eq!(b.get("reasoning").cloned(), want);
+    }
+}

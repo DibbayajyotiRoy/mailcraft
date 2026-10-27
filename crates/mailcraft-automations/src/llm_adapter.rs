@@ -137,6 +137,7 @@ impl Personalizer for LlmAdapter {
                 fallback,
                 renderer: None,
                 model: None,
+                custom_instructions: None,
             })
             .await;
         let generation_id = self.record(&req, &report).await.map_err(err)?;

@@ -163,6 +163,7 @@ fn job(j: &Journey) -> GenerateJob {
         context: j.context.clone(),
         template: template(),
         fallback: j.fallback.clone(),
+        custom_instructions: None,
     }
 }
 fn raw(s: &Slots) -> String {

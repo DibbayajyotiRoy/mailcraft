@@ -51,6 +51,7 @@ fn req(g: Guardrails) -> PersonalizeRequest {
         fallback: slots("Static copy."),
         renderer: None,
         model: None,
+        custom_instructions: None,
     }
 }
 fn p(outs: Vec<Slots>) -> (LlmPersonalizer, Arc<Scripted>) {
@@ -129,4 +130,34 @@ async fn bad_guardrail_regex_falls_back_without_calling_the_model() {
     assert_eq!(r.outcome, Outcome::Fallback);
     assert!(r.fallback_reason.unwrap().starts_with("invalid_guardrails"));
     assert_eq!(*m.1.lock().unwrap(), 0);
+}
+
+fn greet(greeting: &str, body: &str) -> Slots {
+    Slots {
+        greeting: greeting.into(),
+        ..slots(body)
+    }
+}
+
+#[tokio::test]
+async fn repeated_greeting_is_repaired_then_falls_back() {
+    // bake-off J5/J7 shapes
+    let bad = greet("Hi Ana", "Hi Ana, you have 3 days left.");
+    let good = slots("You have 3 days left in your trial. What are you building?");
+    let (pz, m) = p(vec![bad.clone(), good.clone()]);
+    let r = pz.personalize(req(Guardrails::default())).await;
+    assert_eq!((r.outcome, *m.1.lock().unwrap()), (Outcome::Repaired, 2));
+    assert_eq!(r.slots, good);
+
+    let (pz, _) = p(vec![bad.clone(), bad]);
+    let r = pz.personalize(req(Guardrails::default())).await;
+    assert_eq!(r.outcome, Outcome::Fallback);
+}
+
+#[test]
+fn spicrawl_guardrail_pack_is_selectable() {
+    let g = Guardrails::spicrawl();
+    assert!(g.banned_terms.iter().any(|t| t.contains("camoufox")));
+    assert!(g.allowed_link_domains.contains(&"spicrawl.com".to_string()));
+    assert_eq!(g.spam_threshold, Guardrails::default().spam_threshold);
 }
