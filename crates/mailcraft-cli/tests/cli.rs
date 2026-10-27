@@ -117,7 +117,7 @@ fn send_sends_auth_and_idempotency_key() {
         "POST",
         "/v1/emails",
         202,
-        env_ok(json!({"id": "em_1", "status": "queued"})),
+        env_ok(json!({"id": "0192f3a0-7b1c-7a10-8000-000000000001", "status": "queued"})),
     )]);
     let o = run(
         &m,
@@ -139,7 +139,7 @@ fn send_sends_auth_and_idempotency_key() {
     assert_eq!(o.status.code(), Some(0));
     let v = out(&o);
     assert_eq!(v["schema"], 1);
-    assert_eq!(v["data"]["id"], "em_1");
+    assert_eq!(v["data"]["id"], "0192f3a0-7b1c-7a10-8000-000000000001");
     let r = m.seen.lock().unwrap()[0].clone();
     assert!(r.headers.contains("authorization: bearer mc_test_abc"));
     assert!(r.headers.contains("idempotency-key: k1"));
@@ -153,7 +153,7 @@ fn send_with_template_and_data() {
         "POST",
         "/v1/emails",
         202,
-        env_ok(json!({"id": "em_1", "status": "queued"})),
+        env_ok(json!({"id": "0192f3a0-7b1c-7a10-8000-000000000001", "status": "queued"})),
     )]);
     let o = run(
         &m,
@@ -182,7 +182,7 @@ fn pending_approval_exits_4() {
         "POST",
         "/v1/emails",
         202,
-        env_ok(json!({"id": "em_1", "status": "pending_approval"})),
+        env_ok(json!({"id": "0192f3a0-7b1c-7a10-8000-000000000001", "status": "pending_approval"})),
     )]);
     let o = run(
         &m,
@@ -205,8 +205,18 @@ fn error_exit_codes() {
         (501, "not_implemented", 1),
         (409, "idempotency_key_reused", 1),
     ] {
-        let m = mock(vec![("GET", "/v1/emails/em_1", status, err(code))]);
-        let o = run(&m, &conf_dir("err"), Some("k"), &["emails", "get", "em_1"]);
+        let m = mock(vec![(
+            "GET",
+            "/v1/emails/0192f3a0-7b1c-7a10-8000-000000000001",
+            status,
+            err(code),
+        )]);
+        let o = run(
+            &m,
+            &conf_dir("err"),
+            Some("k"),
+            &["emails", "get", "0192f3a0-7b1c-7a10-8000-000000000001"],
+        );
         assert_eq!(o.status.code(), Some(want), "{code}");
         let v = out(&o);
         assert_eq!(v["ok"], false);
@@ -247,11 +257,11 @@ fn domain_verify_resolves_id_and_exits_7_until_verified() {
             "GET",
             "/v1/domains",
             200,
-            env_ok(json!([{"id": "dom_1", "name": "example.com"}])),
+            env_ok(json!([{"id": "0192f3a0-7b1c-7a10-8000-0000000000d1", "name": "example.com"}])),
         ),
         (
             "POST",
-            "/v1/domains/dom_1/verify",
+            "/v1/domains/0192f3a0-7b1c-7a10-8000-0000000000d1/verify",
             200,
             env_ok(json!({"status": "pending", "records": []})),
         ),
@@ -279,12 +289,14 @@ fn domain_add_and_kill_switch_and_approvals() {
             "POST",
             "/v1/domains",
             201,
-            env_ok(json!({"id": "dom_1", "status": "not_started", "records": []})),
+            env_ok(
+                json!({"id": "0192f3a0-7b1c-7a10-8000-0000000000d1", "status": "not_started", "records": []}),
+            ),
         ),
         ("POST", "/v1/kill-switch", 200, env_ok(json!({"on": true}))),
         (
             "POST",
-            "/v1/approvals/ap_1/decide",
+            "/v1/approvals/0192f3a0-7b1c-7a10-8000-0000000000a1/decide",
             403,
             json!({"ok": false, "error": {"code": "forbidden_scope", "message": "agent keys cannot decide"}}),
         ),
@@ -301,9 +313,18 @@ fn domain_add_and_kill_switch_and_approvals() {
         Some(0)
     );
     assert_eq!(
-        run(&m, &d, Some("k"), &["approvals", "approve", "ap_1"])
-            .status
-            .code(),
+        run(
+            &m,
+            &d,
+            Some("k"),
+            &[
+                "approvals",
+                "approve",
+                "0192f3a0-7b1c-7a10-8000-0000000000a1"
+            ]
+        )
+        .status
+        .code(),
         Some(3)
     );
     let seen = m.seen.lock().unwrap();
@@ -328,13 +349,15 @@ fn init_creates_key_saves_0600_and_never_prints_it() {
             "GET",
             "/v1/account/status",
             200,
-            env_ok(json!({"env": "test", "delivery_path": {"kind": "sandbox"}})),
+            env_ok(
+                json!({"workspace": "w", "kill_switch": false, "live_enabled": false, "pending_approvals": 0, "key": {"env": "test"}, "delivery_path": {"kind": "sandbox"}}),
+            ),
         ),
         (
             "POST",
             "/v1/emails",
             202,
-            env_ok(json!({"id": "em_1", "status": "queued"})),
+            env_ok(json!({"id": "0192f3a0-7b1c-7a10-8000-000000000001", "status": "queued"})),
         ),
     ]);
     let d = conf_dir("init");
@@ -452,4 +475,240 @@ fn doctor_reports_check_failure_exit_7() {
         .map(|c| c["id"].as_str().unwrap())
         .collect();
     assert!(ids.contains(&"port25_outbound") && ids.contains(&"api_reachable"));
+}
+
+// ---- contract: serve the API's real response shapes (docs/contract/fixtures.json) ----
+
+fn fx(key: &str) -> (u16, Value) {
+    let all: Value =
+        serde_json::from_str(include_str!("../../../docs/contract/fixtures.json")).unwrap();
+    let f = &all[key];
+    assert!(f.is_object(), "no fixture {key}");
+    (f["status"].as_u64().unwrap() as u16, f["body"].clone())
+}
+
+const ID: &str = "0192f3a0-7b1c-7a10-8000-000000000001";
+
+#[test]
+#[allow(clippy::type_complexity)]
+fn contract_real_envelopes() {
+    // (cli args, method, path, fixture key, expected exit, data pointer, expected value)
+    let cases: Vec<(Vec<&str>, &str, String, &str, u8, &str, Value)> = vec![
+        (
+            vec![
+                "send",
+                "--to",
+                "delivered@test.mailcraft.local",
+                "--subject",
+                "s",
+                "--text",
+                "t",
+            ],
+            "POST",
+            "/v1/emails".into(),
+            "POST /v1/emails",
+            0,
+            "/recipients/0/id",
+            json!(ID),
+        ),
+        (
+            vec![
+                "send",
+                "--to",
+                "a@example.com",
+                "--subject",
+                "s",
+                "--text",
+                "t",
+            ],
+            "POST",
+            "/v1/emails".into(),
+            "POST /v1/emails#pending",
+            4,
+            "/approval_id",
+            json!("0192f3a0-7b1c-7a10-8000-0000000000a1"),
+        ),
+        (
+            vec![
+                "send",
+                "--to",
+                "a@example.com",
+                "--subject",
+                "s",
+                "--text",
+                "t",
+                "--dry-run",
+            ],
+            "POST",
+            "/v1/emails".into(),
+            "POST /v1/emails#dry_run",
+            0,
+            "/would_send_via",
+            json!("sandbox"),
+        ),
+        (
+            vec!["emails", "list", "--status", "queued"],
+            "GET",
+            "/v1/emails".into(),
+            "GET /v1/emails",
+            0,
+            "/0/to_addr",
+            json!("delivered@test.mailcraft.local"),
+        ),
+        (
+            vec!["emails", "get", ID],
+            "GET",
+            format!("/v1/emails/{ID}"),
+            "GET /v1/emails/{id}",
+            0,
+            "/status",
+            json!("queued"),
+        ),
+        (
+            vec!["emails", "events", ID],
+            "GET",
+            format!("/v1/emails/{ID}/events"),
+            "GET /v1/emails/{id}/events",
+            0,
+            "/0/type",
+            json!("delivered"),
+        ),
+        (
+            vec!["emails", "cancel", ID],
+            "POST",
+            format!("/v1/emails/{ID}/cancel"),
+            "POST /v1/emails/{id}/cancel",
+            0,
+            "/status",
+            json!("cancelled"),
+        ),
+        (
+            vec!["keys", "create", "--name", "agent"],
+            "POST",
+            "/v1/keys".into(),
+            "POST /v1/keys",
+            0,
+            "/prefix",
+            json!("mc_test_AbCd"),
+        ),
+        (
+            vec!["keys", "list"],
+            "GET",
+            "/v1/keys".into(),
+            "GET /v1/keys",
+            0,
+            "/0/paused",
+            json!(false),
+        ),
+        (
+            vec!["keys", "revoke", ID],
+            "DELETE",
+            format!("/v1/keys/{ID}"),
+            "DELETE /v1/keys/{id}",
+            0,
+            "/revoked",
+            json!(true),
+        ),
+        (
+            vec!["approvals", "list"],
+            "GET",
+            "/v1/approvals".into(),
+            "GET /v1/approvals",
+            0,
+            "/0/payload/preview/subject",
+            json!("hi"),
+        ),
+        (
+            vec!["approvals", "approve", ID],
+            "POST",
+            format!("/v1/approvals/{ID}/decide"),
+            "POST /v1/approvals/{id}/decide",
+            0,
+            "/status",
+            json!("approved"),
+        ),
+        (
+            vec!["kill-switch", "on"],
+            "POST",
+            "/v1/kill-switch".into(),
+            "POST /v1/kill-switch",
+            0,
+            "/on",
+            json!(true),
+        ),
+        (
+            vec!["pause"],
+            "POST",
+            "/v1/kill-switch".into(),
+            "POST /v1/kill-switch",
+            0,
+            "/on",
+            json!(true),
+        ),
+    ];
+    for (args, method, path, key, want_exit, ptr, want) in cases {
+        let (st, body) = fx(key);
+        let m = mock(vec![(
+            method,
+            Box::leak(path.clone().into_boxed_str()),
+            st,
+            body,
+        )]);
+        let o = run(&m, &conf_dir("contract"), Some("mc_test_k"), &args);
+        assert_eq!(o.status.code(), Some(want_exit as i32), "{args:?}");
+        let v = out(&o);
+        assert_eq!(v["request_id"], "req_0192f3a07b1c", "{args:?}");
+        assert_eq!(v["data"].pointer(ptr), Some(&want), "{args:?} {ptr}");
+    }
+}
+
+#[test]
+fn contract_resume_sends_off_and_admin_refusal_is_exit_3() {
+    let (st, body) = fx("POST /v1/kill-switch");
+    let m = mock(vec![("POST", "/v1/kill-switch", st, body)]);
+    run(&m, &conf_dir("resume"), Some("k"), &["resume"]);
+    run(
+        &m,
+        &conf_dir("resume"),
+        Some("k"),
+        &["kill-switch", "resume"],
+    );
+    let seen = m.seen.lock().unwrap();
+    assert!(seen.iter().all(|r| r.body == json!({"on": false})));
+    drop(seen);
+    let (st, body) = fx("ERROR forbidden_scope");
+    let m = mock(vec![(
+        "POST",
+        Box::leak(format!("/v1/approvals/{ID}/decide").into_boxed_str()),
+        st,
+        body,
+    )]);
+    let o = run(
+        &m,
+        &conf_dir("deny"),
+        Some("k"),
+        &["approvals", "approve", ID],
+    );
+    assert_eq!(o.status.code(), Some(3));
+    assert_eq!(out(&o)["error"]["code"], "forbidden_scope");
+}
+
+#[test]
+fn contract_doctor_reads_key_env_from_account_status() {
+    let (st, body) = fx("GET /v1/account/status");
+    let m = mock(vec![
+        ("GET", "/healthz", 200, json!({"ok": true})),
+        ("GET", "/v1/account/status", st, body),
+    ]);
+    let o = run(&m, &conf_dir("docenv"), Some("k"), &["doctor"]);
+    let v = out(&o);
+    let c = v["data"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "api_key")
+        .unwrap()
+        .clone();
+    assert_eq!(c["status"], "pass");
+    assert_eq!(c["detail"], "env test");
 }

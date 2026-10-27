@@ -146,7 +146,7 @@ pub fn run(cfg: &Config, ip: Option<String>) -> Result<Out, CliErr> {
                         checks.push(check(
                             "api_key",
                             "pass",
-                            format!("env {}", d["env"].as_str().unwrap_or("?")),
+                            format!("env {}", d["key"]["env"].as_str().unwrap_or("?")),
                             "",
                         ));
                         let kind = d["delivery_path"]["kind"].as_str().unwrap_or("unknown");
