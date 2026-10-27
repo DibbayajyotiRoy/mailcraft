@@ -273,3 +273,37 @@ async fn reasoning_is_sent_only_when_configured() {
         assert_eq!(b.get("reasoning").cloned(), want);
     }
 }
+
+#[tokio::test]
+async fn empty_completion_retries_on_next_fallback_model() {
+    use wiremock::matchers::body_partial_json;
+    let s = MockServer::start().await;
+    let empty = json!({"id":"g0","model":"a/free","choices":[{"message":{"content":""}}],
+        "usage":{"prompt_tokens":0,"completion_tokens":0}});
+    Mock::given(method("POST"))
+        .and(body_partial_json(json!({"model": "a/free"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(empty))
+        .expect(1)
+        .mount(&s)
+        .await;
+    Mock::given(method("POST"))
+        .and(body_partial_json(json!({"model": "b/paid"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .expect(1)
+        .mount(&s)
+        .await;
+    let mut c = OpenAiCompatConfig::openrouter("k", "r", "t");
+    c.fallback_models = vec!["b/paid".into()];
+    let mut r = req();
+    r.model = "a/free".into();
+    let out = fast(c, &s.uri()).generate(r).await.unwrap();
+    assert_eq!(out.json, json!({"a":1}));
+    let first = s.received_requests().await.unwrap()[0]
+        .body_json::<Value>()
+        .unwrap();
+    assert_eq!(
+        first["models"],
+        json!(["b/paid"]),
+        "configured fallbacks are sent"
+    );
+}

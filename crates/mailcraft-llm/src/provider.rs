@@ -16,6 +16,9 @@ pub struct OpenAiCompatConfig {
     pub require_parameters: bool,
     /// OpenRouter `reasoning` object (`{"enabled":false}` or `{"effort":"low"}`); omitted when None.
     pub reasoning: Option<Value>,
+    /// OpenRouter-only: models tried after the request's own (MAILCRAFT_LLM_FALLBACK_MODELS).
+    /// Also the next model to retry with when a completion comes back empty.
+    pub fallback_models: Vec<String>,
     pub timeout: Duration,
     pub max_retries: u32,
     pub backoff_base: Duration,
@@ -42,6 +45,7 @@ impl OpenAiCompatConfig {
             extra_headers: vec![],
             require_parameters: false,
             reasoning: None,
+            fallback_models: vec![],
             timeout: Duration::from_secs(60),
             max_retries: 3,
             backoff_base: Duration::from_millis(500),
@@ -78,6 +82,8 @@ pub struct OpenAiCompat {
     cfg: OpenAiCompatConfig,
     http: reqwest::Client,
 }
+
+const EMPTY: &str = "empty completion";
 
 fn strip_fences(s: &str) -> &str {
     let t = s.trim();
@@ -124,7 +130,7 @@ impl OpenAiCompat {
         let text = v["choices"][0]["message"]["content"]
             .as_str()
             .filter(|s| !s.trim().is_empty())
-            .ok_or_else(|| LlmError::Transient("empty completion".into()))?;
+            .ok_or_else(|| LlmError::Transient(EMPTY.into()))?;
         let json = serde_json::from_str(strip_fences(text))
             .unwrap_or_else(|_| Value::String(text.to_string()));
         let u = &v["usage"];
@@ -161,11 +167,14 @@ impl LlmProvider for OpenAiCompat {
         self.cfg.id
     }
 
-    async fn generate(&self, request: GenerateRequest) -> Result<GenerateResult, LlmError> {
-        let body = self.build_body(&request);
+    async fn generate(&self, mut request: GenerateRequest) -> Result<GenerateResult, LlmError> {
+        if request.fallbacks.is_empty() {
+            request.fallbacks = self.cfg.fallback_models.clone();
+        }
         let url = format!("{}/chat/completions", self.cfg.base_url);
         let mut attempt = 0u32;
         loop {
+            let body = self.build_body(&request);
             let mut rb = self.http.post(&url).json(&body);
             if let Some(k) = &self.cfg.api_key {
                 rb = rb.bearer_auth(k);
@@ -192,9 +201,20 @@ impl LlmProvider for OpenAiCompat {
                     if status.is_success() {
                         let v: Value = serde_json::from_str(&text)
                             .map_err(|e| LlmError::Transient(format!("decode: {e}")))?;
-                        return Self::parse(&v);
+                        match Self::parse(&v) {
+                            // Free models sometimes return 200 with no text, and OpenRouter's own
+                            // `models` fallback does not fire for that: retry on the next model.
+                            Err(LlmError::Transient(m))
+                                if m == EMPTY && !request.fallbacks.is_empty() =>
+                            {
+                                request.model = request.fallbacks.remove(0);
+                                LlmError::Transient(m)
+                            }
+                            r => return r,
+                        }
+                    } else {
+                        map_status(status.as_u16(), retry_after, &text)
                     }
-                    map_status(status.as_u16(), retry_after, &text)
                 }
                 Err(e) => LlmError::Transient(e.to_string()),
             };

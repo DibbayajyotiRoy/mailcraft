@@ -1,5 +1,6 @@
 //! Provider config from env: MAILCRAFT_LLM_PROVIDER (openrouter|openai|ollama, default openrouter),
-//! MAILCRAFT_LLM_BASE_URL, MAILCRAFT_LLM_MODEL, MAILCRAFT_LLM_REASONING (off|low|medium|high, default off,
+//! MAILCRAFT_LLM_BASE_URL, MAILCRAFT_LLM_MODEL, MAILCRAFT_LLM_FALLBACK_MODELS (comma list, OpenRouter only),
+//! MAILCRAFT_LLM_REASONING (off|low|medium|high, default off,
 //! OpenRouter only), MAILCRAFT_LLM_GUARDRAILS (default|spicrawl), OPENROUTER_API_KEY (OPENAI_API_KEY for openai).
 //! The key is never logged: `Debug` of this type and of `OpenAiCompatConfig` redact it.
 use crate::personalize::Guardrails;
@@ -53,6 +54,14 @@ impl LlmSettings {
             provider = provider.with_base_url(&u);
         }
         if provider.id == "openrouter" {
+            provider.fallback_models = get("MAILCRAFT_LLM_FALLBACK_MODELS")
+                .map(|v| {
+                    v.split(',')
+                        .map(|m| m.trim().to_owned())
+                        .filter(|m| !m.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
             provider.reasoning = Some(
                 match get("MAILCRAFT_LLM_REASONING").as_deref().unwrap_or("off") {
                     "off" => serde_json::json!({"enabled": false}),
@@ -147,6 +156,10 @@ mod tests {
             .banned_terms
             .iter()
             .any(|t| t.contains("camoufox")));
+        let s =
+            LlmSettings::from_lookup(env(&[k, ("MAILCRAFT_LLM_FALLBACK_MODELS", " a/x, b/y ,")]))
+                .unwrap();
+        assert_eq!(s.provider.fallback_models, ["a/x", "b/y"]);
         assert!(LlmSettings::from_lookup(env(&[k, ("MAILCRAFT_LLM_REASONING", "x")])).is_err());
         let s = LlmSettings::from_lookup(env(&[("MAILCRAFT_LLM_PROVIDER", "ollama")])).unwrap();
         assert_eq!(s.provider.reasoning, None);
