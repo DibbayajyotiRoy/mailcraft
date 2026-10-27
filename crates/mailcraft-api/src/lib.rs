@@ -24,6 +24,7 @@ pub mod metrics;
 pub mod ops;
 pub mod page;
 pub mod public;
+pub mod resolver;
 pub mod services;
 pub mod ssrf;
 pub mod state;
@@ -31,7 +32,6 @@ pub mod templates;
 pub mod transports;
 pub mod webhooks;
 pub mod wiring;
-pub mod resolver;
 
 use std::time::{Duration, Instant};
 

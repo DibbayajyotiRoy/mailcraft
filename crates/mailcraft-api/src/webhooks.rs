@@ -267,6 +267,7 @@ pub async fn enqueue(
 
 /// Outbox -> deliveries: turns new `email_events` rows into `email.<type>` webhook deliveries,
 /// in one transaction with marking them done (at-least-once; payload `data` per SPEC 7.4).
+#[allow(clippy::type_complexity)] // one sqlx row tuple
 pub async fn fan_out(st: &AppState, limit: i64) -> Result<usize, sqlx::Error> {
     let mut tx = st.db.begin().await?;
     let rows: Vec<(i64, Uuid, Uuid, String, Option<String>, Option<String>, Option<String>, DateTime<Utc>, Value)> =

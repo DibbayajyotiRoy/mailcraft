@@ -1,5 +1,8 @@
 //! MIME assembly (mail-builder). DKIM and extra headers are the `Finalizer`'s job.
-use mail_builder::{headers::text::Text, MessageBuilder};
+use mail_builder::{
+    headers::{address::Address, text::Text},
+    MessageBuilder,
+};
 
 /// Split `"Name <a@b>"` or `"a@b"` into (name, address).
 pub fn parse_mailbox(s: &str) -> (String, String) {
@@ -57,9 +60,10 @@ pub fn build(p: &MimeParts) -> Result<Vec<u8>, String> {
     if p.text.is_none() && p.html.is_none() {
         return Err("email has no text or html body".into());
     }
+    // No display name -> a bare address (mail-builder would print `"" <a@b>`).
     let mb = |s: &str| {
         let (n, a) = parse_mailbox(s);
-        (n, a)
+        Address::new_address((!n.is_empty()).then_some(n), a)
     };
     let mut b = MessageBuilder::new()
         .from(mb(p.from))

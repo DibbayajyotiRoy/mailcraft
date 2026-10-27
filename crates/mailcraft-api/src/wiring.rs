@@ -176,13 +176,18 @@ pub async fn assemble(
     };
     let secrets = st.secrets.clone();
     let unsub = st.config.unsub_secret.clone();
-    let engine = mailcraft_engine::Engine::new(pool.clone(), Arc::new(PgResolver::new(pool.clone(), secrets.clone())))
-        .finalizer(Arc::new(DeliverabilityFinalizer::new(pool, secrets, &unsub)))
-        .links(Arc::new(PgLinks {
-            base: public_url(),
-            secret: unsub,
-        }))
-        .limits(Arc::new(limits));
+    let engine = mailcraft_engine::Engine::new(
+        pool.clone(),
+        Arc::new(PgResolver::new(pool.clone(), secrets.clone())),
+    )
+    .finalizer(Arc::new(DeliverabilityFinalizer::new(
+        pool, secrets, &unsub,
+    )))
+    .links(Arc::new(PgLinks {
+        base: public_url(),
+        secret: unsub,
+    }))
+    .limits(Arc::new(limits));
     Ok((st, Arc::new(engine)))
 }
 
@@ -192,8 +197,7 @@ async fn shutdown_signal() {
     };
     #[cfg(unix)]
     let term = async {
-        if let Ok(mut s) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         {
             s.recv().await;
         }

@@ -37,7 +37,12 @@ impl TransportResolver for StaticResolver {
 
 /// Per-email links injected into templates at render time: (unsubscribe_url, preferences_url).
 pub trait LinkMaker: Send + Sync {
-    fn links(&self, workspace_id: Uuid, contact_id: Option<Uuid>, stream: Stream) -> (String, String);
+    fn links(
+        &self,
+        workspace_id: Uuid,
+        contact_id: Option<Uuid>,
+        stream: Stream,
+    ) -> (String, String);
 }
 
 /// No public URL configured: templates still render, links are empty.
