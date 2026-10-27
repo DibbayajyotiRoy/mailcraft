@@ -66,6 +66,7 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `approvals list` | |
 | `approvals approve <id>` / `reject <id>` | Human only. Refused with agent keys. |
 | `kill-switch on\|off` (aliases `pause` / `resume`) | Engaging needs `manage`; releasing needs `admin` (a human). |
+| `settings instructions set "<text>"\|set --file <path>\|get\|clear` | Workspace writing instructions for LLM emails (max 2,000 chars). Changing needs `admin`. |
 | `doctor` | Exit 7 if any check fails. |
 
 Mutating commands also accept `--yes` (skip prompt), `--dry-run`, `--idempotency-key`. Exact subcommand coverage follows the build; SPEC.md 7.2 lists planned extras (`policy`, `audit`, `webhook listen`, `mcp serve`).
@@ -73,7 +74,7 @@ Mutating commands also accept `--yes` (skip prompt), `--dry-run`, `--idempotency
 ## MCP
 Remote: `https://<host>/mcp` (Streamable HTTP; OAuth or `Authorization: Bearer mc_...`). Local: `npx -y @dibbayajyotiroy/mailcraft-mcp` (use only this scoped package; look-alikes would receive your key). Flags `--tools a,b`, `--read-only`. Operation ids from openapi.yaml are tool names.
 
-Tools: account_status, go_live_request, kill_switch_status, kill_switch_engage; email_send, email_get, email_events, email_cancel, email_list; domain_add, domain_check; event_send; automation_create/get/list/pause/resume/simulate/runs; template_create/get/list/update/publish/preview/import/export, content_lint; contact_upsert/get/list/delete; policy_get, policy_propose, approval_list, approval_get, audit_list, doctor. (Batch send, webhooks, segments, suppressions are REST-only for now.)
+Tools: account_status, go_live_request, kill_switch_status, kill_switch_engage, settings_get_instructions, settings_set_instructions (admin); email_send, email_get, email_events, email_cancel, email_list; domain_add, domain_check; event_send; automation_create/get/list/pause/resume/simulate/runs; template_create/get/list/update/publish/preview/import/export, content_lint; contact_upsert/get/list/delete; policy_get, policy_propose, approval_list, approval_get, audit_list, doctor. (Batch send, webhooks, segments, suppressions are REST-only for now.)
 
 Absent from agent sessions: approval_decide, policy_set, kill_switch_set to off, go_live_approve. Inbound-as-untrusted and reply tools are LATER.
 
@@ -206,3 +207,7 @@ mailcraft connect gmail
 ```
 
 Open the printed URL, approve, and the CLI receives the callback on the loopback address. Then `mailcraft doctor`.
+
+## Custom instructions (LLM emails)
+
+`GET /v1/settings` returns `custom_instructions` (string or null); `PUT /v1/settings {"custom_instructions": "..."}` (admin) sets it: trimmed, max 2,000 characters (422 `custom_instructions_too_long` with a hint), empty string clears. A `send_email` step with `mode: llm` may add `config.custom_instructions` (max 1,000 characters), appended after the workspace text. They rank below mailcraft's rules: no invented features, template-owned links, unsubscribe always included. SDK: `mc.settings.instructions.get/set/clear`. See docs/skills/mailcraft-custom-instructions.

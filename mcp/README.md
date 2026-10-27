@@ -43,7 +43,7 @@ claude mcp add mailcraft -e MAILCRAFT_API_URL=http://localhost:8080 -e MAILCRAFT
 
 ## Tools
 
-`account_status`, `email_send` `email_get` `email_list`, `domain_add` `domain_check`, `template_create|get|list|update|publish|preview|import|export`, `content_lint`, `contact_upsert|get|list|delete`, `event_send`, `automation_create|get|list|pause|resume|simulate|runs`, `approval_list` `approval_get`, `kill_switch_status` `kill_switch_engage`, `doctor`, `audit_list`, `policy_get`.
+`account_status`, `email_send` `email_get` `email_list`, `domain_add` `domain_check`, `template_create|get|list|update|publish|preview|import|export`, `content_lint`, `contact_upsert|get|list|delete`, `event_send`, `automation_create|get|list|pause|resume|simulate|runs`, `approval_list` `approval_get`, `settings_get_instructions` `settings_set_instructions` (admin), `kill_switch_status` `kill_switch_engage`, `doctor`, `audit_list`, `policy_get`.
 
 Each tool is one row in `src/tools.ts` (name, zod input, HTTP method + path) and maps 1:1 to a REST route. Mutating tools take `idempotency_key` (sent as `Idempotency-Key`); `email_send` and `event_send` also take `dry_run`. Results are the API envelope as JSON text plus `"schema": 1`. API errors come back as `isError` results with `code`, `message` and `hint` intact.
 

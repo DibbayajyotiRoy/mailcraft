@@ -128,6 +128,17 @@ export class Mailcraft {
     get: () => this.get<KillSwitch>("/v1/kill-switch"),
     set: (on: boolean, keyId?: string, o?: Opts) => this.send<{ on: boolean; key_id: string | null }>("POST", "/v1/kill-switch", { on, key_id: keyId }, o),
   };
+  settings = {
+    /** `get` needs read; `set`/`clear` need an admin key (agent keys get 403). Max 2,000 chars, trimmed. */
+    instructions: {
+      get: async (): Promise<Result<{ custom_instructions: string | null }>> => {
+        const r = await this.get<{ custom_instructions?: string | null }>("/v1/settings");
+        return r.error ? r : { ...r, data: { custom_instructions: r.data.custom_instructions ?? null } };
+      },
+      set: (text: string) => this.send<Obj>("PUT", "/v1/settings", { custom_instructions: text }),
+      clear: () => this.send<Obj>("PUT", "/v1/settings", { custom_instructions: "" }),
+    },
+  };
   account = { status: () => this.get<AccountStatus>("/v1/account/status") };
   goLive = { request: (note?: string, o?: Opts) => this.send<{ approval_id: string; status: "pending" }>("POST", "/v1/go-live-requests", { note }, o) };
   policy = { propose: (keyId: string, policy: KeyPolicy, o?: Opts) => this.send<{ approval_id: string; status: "pending" }>("POST", "/v1/policy/proposals", { key_id: keyId, policy }, o) };
