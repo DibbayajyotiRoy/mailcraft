@@ -1,16 +1,10 @@
 import type { ReactNode } from "react";
 import type { ApiError } from "@/lib/api";
+import { StatusBadge } from "./ui/badge";
+import { Table, TBody, TD, THead, TH, TR } from "./ui/table";
+import { CopyButton } from "./ui/copy";
 
-const TONE: Record<string, string> = {
-  verified: "ok", delivered: "ok", sent: "ok", active: "ok", published: "ok", approved: "ok", pass: "ok", completed: "ok",
-  pending: "warn", pending_approval: "warn", sending: "warn", expired: "warn", queued: "warn", deferred: "warn", draft: "warn", warn: "warn", paused: "warn", not_started: "warn", running: "warn",
-  failed: "bad", bounced: "bad", complained: "bad", rejected: "bad", fail: "bad", cancelled: "bad", suppressed: "bad", revoked: "bad",
-};
-
-/** Colour is never the only signal: the status text is always shown. */
-export function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge ${TONE[status] ?? "neutral"}`}>{status.replace(/_/g, " ")}</span>;
-}
+export { StatusBadge };
 
 export function ErrorBanner({ error }: { error: ApiError }) {
   return (
@@ -31,22 +25,26 @@ export function ActionError({ err }: { err?: string }) {
 
 export type DnsRecord = { record?: string; type: string; name: string; value: string; priority?: number; status: string };
 
+/** Compatibility shim (P2 replaces it with DnsRecordRow usage). */
 export function RecordsTable({ records }: { records: DnsRecord[] }) {
   if (!records.length) return <p className="muted">No records.</p>;
   return (
-    <table>
-      <caption className="sr-only">DNS records</caption>
-      <thead><tr><th scope="col">Purpose</th><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Value</th><th scope="col">Status</th></tr></thead>
-      <tbody>
-        {records.map((r, i) => (
-          <tr key={i}>
-            <td>{r.record ?? ""}</td><td>{r.type}</td><td><code>{r.name}</code></td>
-            <td><code className="wrap">{r.priority != null ? `${r.priority} ` : ""}{r.value}</code></td>
-            <td><StatusBadge status={r.status} /></td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Table caption="DNS records">
+      <THead><TR><TH>Purpose</TH><TH>Type</TH><TH>Name</TH><TH>Value</TH><TH>Status</TH></TR></THead>
+      <TBody>
+        {records.map((r, i) => {
+          const v = `${r.priority != null ? `${r.priority} ` : ""}${r.value}`;
+          return (
+            <TR key={i}>
+              <TD label="Purpose">{r.record ?? ""}</TD><TD label="Type">{r.type}</TD>
+              <TD label="Name"><code className="text-[12.5px]">{r.name}</code></TD>
+              <TD label="Value" className="max-w-[28rem]"><span className="inline-flex items-center gap-1"><code className="break-all text-[12.5px]">{v}</code><CopyButton value={r.value} label={`Copy ${r.type} value`} /></span></TD>
+              <TD label="Status"><StatusBadge status={r.status} /></TD>
+            </TR>
+          );
+        })}
+      </TBody>
+    </Table>
   );
 }
 

@@ -1,0 +1,51 @@
+/* Design tokens (DESIGN.md 4.2-4.4). scripts/check-contrast.mjs parses the three colour blocks below:
+   keep one `--name: #hex;` per declaration, light first, dark second (media), dark third (forced). */
+:root {
+  --bg: #ffffff; --surface: #fafaf9; --surface-2: #f4f4f2; --surface-3: #ecebe8;
+  --border: #e7e5e1; --border-strong: #d3d0ca; --input-border: #8a877f;
+  --fg: #171717; --fg-muted: #5f5e5a; --fg-subtle: #66645e;
+  --accent: #4f46e5; --accent-fg: #ffffff; --accent-soft: #eef0ff;
+  --ok: #15803d; --ok-bg: #e8f7ec; --on-ok: #ffffff;
+  --warn: #92400e; --warn-bg: #fef3c7;
+  --bad: #b91c1c; --bad-bg: #fdecec; --on-bad: #ffffff;
+  --info: #1d4ed8; --info-bg: #e8f0fe;
+  --live: #dc2626; --test: #a16207;
+  --shadow-pop: 0 0 0 1px rgb(0 0 0 / .06), 0 4px 8px -2px rgb(0 0 0 / .08), 0 12px 24px -6px rgb(0 0 0 / .10);
+  --r-sm: 6px; --r-md: 8px; --r-lg: 12px;
+  --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 260ms;
+  --ease-out: cubic-bezier(.2, .8, .2, 1); --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0b0c; --surface: #111113; --surface-2: #18181b; --surface-3: #212126;
+    --border: #26262a; --border-strong: #3a3a40; --input-border: #74747d;
+    --fg: #ededef; --fg-muted: #a1a1aa; --fg-subtle: #8b8b94;
+    --accent: #8b8cff; --accent-fg: #0b0b0c; --accent-soft: #1b1c3a;
+    --ok: #4ade80; --ok-bg: #0f2a1a; --on-ok: #0b0b0c;
+    --warn: #fbbf24; --warn-bg: #2e2208;
+    --bad: #f87171; --bad-bg: #331414; --on-bad: #0b0b0c;
+    --info: #60a5fa; --info-bg: #10223f;
+    --live: #f87171; --test: #facc15;
+    --shadow-pop: 0 0 0 1px rgb(255 255 255 / .06), 0 8px 24px -4px rgb(0 0 0 / .6);
+    color-scheme: dark;
+  }
+}
+[data-theme="dark"] {
+  background: var(--bg); color: var(--fg);
+  --bg: #0b0b0c; --surface: #111113; --surface-2: #18181b; --surface-3: #212126;
+  --border: #26262a; --border-strong: #3a3a40; --input-border: #74747d;
+  --fg: #ededef; --fg-muted: #a1a1aa; --fg-subtle: #8b8b94;
+  --accent: #8b8cff; --accent-fg: #0b0b0c; --accent-soft: #1b1c3a;
+  --ok: #4ade80; --ok-bg: #0f2a1a; --on-ok: #0b0b0c;
+  --warn: #fbbf24; --warn-bg: #2e2208;
+  --bad: #f87171; --bad-bg: #331414; --on-bad: #0b0b0c;
+  --info: #60a5fa; --info-bg: #10223f;
+  --live: #f87171; --test: #facc15;
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / .06), 0 8px 24px -4px rgb(0 0 0 / .6);
+  color-scheme: dark;
+}
+@media (prefers-contrast: more) {
+  :root { --border: #b5b2ab; --fg-muted: #44433f; --fg-subtle: #4f4e4a; }
+  [data-theme="dark"] { --border: #5a5a62; --fg-muted: #c4c4cc; --fg-subtle: #b0b0b8; }
+}
