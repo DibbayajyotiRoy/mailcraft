@@ -11,6 +11,7 @@ mailcraft-core.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
 
 [[bin]]
 name = "mailcraft"
