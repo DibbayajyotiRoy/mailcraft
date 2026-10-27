@@ -67,3 +67,15 @@ export async function saveLlm(d: FormData) {
   for (const k of ["model", "base_url", "api_key"]) if (f(d, k)) llm[k] = f(d, k); // blank key = keep existing
   done(await api("PUT", "/v1/settings", { llm_provider: llm }), "/settings");
 }
+
+export type InstructionsState = { ok?: string; error?: string; saved?: string };
+
+/** useActionState-shaped: success/error stay on the page, no redirect. `intent=clear` sends "" (clears). */
+export async function saveInstructions(_p: InstructionsState, d: FormData): Promise<InstructionsState> {
+  const clear = f(d, "intent") === "clear";
+  const text = clear ? "" : f(d, "custom_instructions");
+  const r = await api("PUT", "/v1/settings", { custom_instructions: text });
+  if (r.error) return { error: `${r.error.code}: ${r.error.message}${r.error.hint ? ` (${r.error.hint})` : ""}` };
+  revalidatePath("/settings");
+  return { ok: text ? "Saved. New emails use these instructions." : "Cleared.", saved: text };
+}

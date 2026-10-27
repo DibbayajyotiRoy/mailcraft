@@ -2,6 +2,7 @@ import { get } from "@/lib/api";
 import { saveLlm, setKill } from "@/lib/actions";
 import { ActionError, ErrorBanner, Json, StatusBadge } from "@/components/ui";
 import { ConfirmButton } from "@/components/Confirm";
+import { InstructionsForm } from "@/components/Instructions";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
         <label>API key {llm.api_key_set && "(set; leave blank to keep)"}<input name="api_key" type="password" autoComplete="off" /></label>
         <button type="submit">Save provider</button>
       </form>
+      <h2>AI writing</h2>
+      {s.error ? <ErrorBanner error={s.error} /> : <InstructionsForm initial={s.data?.custom_instructions ?? ""} />}
       <h2>Kill switch</h2>
       {ks.error ? <ErrorBanner error={ks.error} /> : (
         <form action={setKill} className="inline">
