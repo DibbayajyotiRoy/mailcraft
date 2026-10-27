@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "LLM providers for email content generation (OpenRouter first)"
+description = "LLM providers and guarded slot generation for lifecycle emails (OpenRouter first)"
 
 [dependencies]
 mailcraft-core.workspace = true
@@ -12,6 +12,13 @@ async-trait.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
+regex = "1"
+sha2 = "0.10"
+sqlx.workspace = true
+tokio = { workspace = true, features = ["time"] }
+uuid.workspace = true
 
 [dev-dependencies]
-tokio.workspace = true
+wiremock = "0.6"
+tokio = { workspace = true, features = ["full"] }
