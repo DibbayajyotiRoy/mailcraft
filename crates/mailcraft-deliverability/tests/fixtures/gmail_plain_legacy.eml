@@ -1,0 +1,19 @@
+From: Mail Delivery Subsystem <mailer-daemon@googlemail.com>
+To: {{VERP}}
+Subject: Delivery Status Notification (Failure)
+Date: Tue, 27 Oct 2026 10:08:00 +0000
+Message-ID: <gl-1@googlemail.com>
+Content-Type: text/plain; charset=utf-8
+
+Delivery to the following recipient failed permanently:
+
+     typo.name@gmail.com
+
+Technical details of permanent failure:
+Google tried to deliver your message, but it was rejected by the server for the recipient domain gmail.com by gmail-smtp-in.l.google.com.
+
+The error that the other server returned was:
+550 5.1.1 The email account that you tried to reach does not exist. - gsmtp
+
+----- Original message -----
+Message-ID: <{{MSGID}}@mail.example.test>

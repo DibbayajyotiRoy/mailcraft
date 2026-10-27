@@ -1,9 +1,35 @@
 [package]
 name = "mailcraft-deliverability"
 version = "0.1.0"
-edition.workspace = true
+edition = "2024"
 license.workspace = true
 publish = false
+description = "DKIM keys, DNS plan/verify, outbound finalizer, unsubscribe, bounce/complaint parsing, suppression, warm-up, doctor"
 
 [dependencies]
 mailcraft-core = { path = "../mailcraft-core" }
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+base64 = "0.23"
+hmac = "0.13"
+sha2 = "0.11"
+aes-gcm = "0.10"
+rand = "0.8"
+uuid = { workspace = true }
+rsa = { version = "0.9", features = ["pem"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core"] }
+hickory-resolver = "0.26"
+reqwest.workspace = true
+mail-auth = { version = "0.14", features = ["generate"] }
+mail-builder = "2"
+mail-parser = "1"
+redis = { version = "0.27", features = ["tokio-comp", "script", "connection-manager"] }
+
+[dev-dependencies]
+httpmock = "0.9"

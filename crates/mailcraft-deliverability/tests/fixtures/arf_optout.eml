@@ -1,0 +1,36 @@
+From: scomp@feedback.yahoo.test
+To: fbl@mail.example.test
+Subject: FW: Your October update
+Date: Tue, 27 Oct 2026 11:00:00 +0000
+Message-ID: <cfl-1@feedback.yahoo.test>
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=feedback-report; boundary="ARF1"
+
+--ARF1
+Content-Type: text/plain; charset=utf-8
+
+This is an email abuse report for an email message received from IP 203.0.113.5 on Tue, 27 Oct 2026 10:55:00 +0000.
+
+--ARF1
+Content-Type: message/feedback-report
+
+Feedback-Type: opt-out
+User-Agent: Yahoo!-Mail-Feedback/2.0
+Version: 0.1
+Original-Mail-From: <{{VERP}}>
+Source-IP: 203.0.113.5
+Reported-Domain: mail.example.test
+Arrival-Date: Tue, 27 Oct 2026 10:55:00 +0000
+
+--ARF1
+Content-Type: message/rfc822
+
+Return-Path: <{{VERP}}>
+From: News <hello@mail.example.test>
+To: complainer@yahoo.com
+Subject: Your October update
+Message-ID: <{{MSGID}}@mail.example.test>
+
+Body elided.
+
+--ARF1--

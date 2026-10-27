@@ -1,0 +1,21 @@
+From: postmaster@legacy-exchange.test
+To: {{VERP}}
+Subject: Undeliverable: Your October update
+Date: Tue, 27 Oct 2026 10:05:00 +0000
+Message-ID: <ndr-1@legacy-exchange.test>
+X-MS-Exchange-Message-Is-Ndr:
+Content-Type: text/plain; charset=utf-8
+
+Delivery has failed to these recipients or groups:
+
+former.employee@legacy-exchange.test
+The email address you entered couldn't be found. Please check the recipient's email address and try to resend the message.
+
+Diagnostic information for administrators:
+Generating server: ex01.legacy-exchange.test
+former.employee@legacy-exchange.test
+Remote Server returned '550 5.1.1 RESOLVER.ADR.ExRecipNotFound; not found'
+
+Original message headers:
+Return-Path: <{{VERP}}>
+Message-ID: <{{MSGID}}@mail.example.test>
