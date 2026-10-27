@@ -1,13 +1,14 @@
 # Quickstart
 
-Pre-alpha: commands marked below as the target experience may still return `not_implemented`; see the README status.
+Pre-alpha: commands that are not built yet return `not_implemented`; see the README status.
 
 ## With a domain (three commands)
 
 ```
 echo "MAILCRAFT_SECRET_KEY=$(openssl rand -base64 32)" > .env   # once; encrypts DKIM keys + credentials
 docker compose up -d                 # postgres, redis, mailcraft :8080, dashboard :3000
-mailcraft init                       # secret key, admin, test key, probes ports, prints next steps
+alias mailcraft='docker compose run --rm cli'   # or: cargo install --path crates/mailcraft-cli (install the CLI BEFORE init)
+mailcraft init                       # once per database: creates test + admin keys, prints the admin key once, saves both (profiles default/admin)
 mailcraft domain add example.com     # prints (or creates) SPF/DKIM/DMARC/return-path records, then verifies
 ```
 
@@ -19,6 +20,52 @@ mailcraft domain add example.com     # prints (or creates) SPF/DKIM/DMARC/return
 ```
 mailcraft send --to delivered@test.mailcraft.local --subject "Hello" --text "It works" --json
 ```
+
+Notes:
+
+- The `cli` compose service talks to `http://mailcraft:8080` and stores its config in the `mc-config` volume, so keys survive `--rm`. Without an alias use `docker compose run --rm cli init`. Natively installed CLI: set `MAILCRAFT_API_URL` if the API is not on `localhost:8080`.
+- `init` prints the admin key once. Store it. It is also saved as profile `admin`: `mailcraft --profile admin approvals list` (or `MAILCRAFT_PROFILE=admin`). Approvals, go-live and the kill-switch release need it.
+- Dashboard: `http://localhost:3000/login`, API base URL `http://mailcraft:8080` (pre-filled), API key = the admin key. Ports: `MAILCRAFT_DASHBOARD_PORT`, `MAILCRAFT_PORT`.
+- Verified on a fresh clone: compose up, `init`, test send, dashboard login. Not verified: `domain add`.
+
+## Your first automation
+
+A welcome email whose intro line is written by the LLM inside a fixed slot, with static fallback copy. Needs `OPENROUTER_API_KEY` in `.env` (see `.env.example`); without it the fallback text is sent.
+
+`welcome.json` (template; the `slot` block is where the model writes):
+
+```json
+{"version": 1, "subject": "Welcome {{ first_name }}",
+ "blocks": [
+  {"type": "heading", "text": "Hi {{ first_name }}"},
+  {"type": "slot", "name": "intro", "max_len": 240,
+   "instructions": "One warm sentence welcoming them and naming the next step.",
+   "fallback": "Thanks for signing up. Your account is ready."}]}
+```
+
+`welcome-automation.json` (the step takes a plain `instructions` string and a `from`; there is no `llm{}` object):
+
+```json
+{"name": "welcome", "trigger": "signed_up", "approval": "first_n:5",
+ "steps": [
+  {"key": "mail", "type": "send_email", "config": {
+    "template": "welcome", "mode": "llm", "from": "hello@example.com",
+    "instructions": "Friendly and brief. Mention the product name once."}}]}
+```
+
+```bash
+mailcraft templates import welcome.json --name welcome      # draft
+mailcraft templates publish welcome                          # sends use the published version
+mailcraft automations import welcome-automation.json         # draft
+mailcraft automations publish welcome                        # activates (add --backfill-suppress to skip existing matches)
+mailcraft contacts upsert ana@test.mailcraft.local --first-name Ana --timezone Europe/Berlin
+mailcraft events track signed_up --contact ana@test.mailcraft.local
+mailcraft --profile admin approvals list                     # the first 5 sends wait for a human with the admin key
+```
+
+`from` is required until a domain is verified: without it (and without a verified domain) the run fails immediately with a clear reason, no retries. Until the workspace goes live, automation emails are test-env and go to the sandbox, so a fresh install needs no transport; test-env sends ignore quiet hours. For live sends, quiet hours (09:00-18:00 contact-local, 13:00-17:00 UTC when the contact has no timezone) apply, so set `--timezone` (an invalid zone is a 422). Approving the `automation_first_send` approval releases the email (approve queues it, reject cancels it). `mailcraft automations enable` only resumes a paused automation; a draft needs `publish`.
+
+LLM settings go in `.env` and compose passes them through: `OPENROUTER_API_KEY`, `MAILCRAFT_LLM_MODEL`, `MAILCRAFT_LLM_FALLBACK_MODELS` (comma list, sent as OpenRouter fallbacks and used when a model returns an empty completion; e.g. `MAILCRAFT_LLM_MODEL=nvidia/nemotron-3.5-super-vl:free`, `MAILCRAFT_LLM_FALLBACK_MODELS=deepseek/deepseek-v4-flash`), `MAILCRAFT_LLM_REASONING`, `MAILCRAFT_LLM_GUARDRAILS`, plus `MAILCRAFT_PUBLIC_URL` and `MAILCRAFT_EGRESS_IP`. Without `MAILCRAFT_EGRESS_IP` (or `--ip`), `mailcraft doctor` reports the reverse-DNS and blocklist checks as skipped, not failed.
 
 Going live (a `mc_live_` key) is a human approval in the dashboard. Direct delivery from your own IP is opt-in and refused until `mailcraft doctor` passes; most users should use a relay (`mailcraft connect relay <preset>`).
 

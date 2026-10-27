@@ -73,7 +73,10 @@ pub fn exit_for(status: u16, code: &str) -> u8 {
 #[derive(Default, Clone)]
 pub struct Config {
     pub base_url: Option<String>,
+    /// Key of the selected profile (env `MAILCRAFT_API_KEY` wins on load).
     pub api_key: Option<String>,
+    /// Selected profile name (`default` unless `--profile` / `MAILCRAFT_PROFILE`).
+    pub profile: String,
 }
 
 pub fn config_path() -> PathBuf {
@@ -90,30 +93,58 @@ pub fn config_path() -> PathBuf {
     dir.join("config.json")
 }
 
+fn read_file_json() -> Value {
+    fs::read_to_string(config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(Value::Null)
+}
+
 impl Config {
-    pub fn load() -> Config {
-        let file: Value = fs::read_to_string(config_path())
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or(Value::Null);
-        let s = |k: &str| file[k].as_str().map(String::from);
+    /// File shape: `{"base_url", "profiles": {"default": key, "admin": key}}`. A legacy top-level
+    /// `api_key` still reads as the `default` profile.
+    pub fn load(profile: Option<&str>) -> Config {
+        let file = read_file_json();
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let profile = profile
+            .map(String::from)
+            .or_else(|| env("MAILCRAFT_PROFILE"))
+            .unwrap_or_else(|| "default".into());
+        let from_file = file["profiles"][profile.as_str()]
+            .as_str()
+            .or_else(|| {
+                (profile == "default")
+                    .then(|| file["api_key"].as_str())
+                    .flatten()
+            })
+            .map(String::from);
         Config {
-            base_url: env("MAILCRAFT_API_URL").or(s("base_url")),
-            api_key: env("MAILCRAFT_API_KEY").or(s("api_key")),
+            base_url: env("MAILCRAFT_API_URL").or(file["base_url"].as_str().map(String::from)),
+            api_key: env("MAILCRAFT_API_KEY").or(from_file),
+            profile,
         }
     }
 
-    /// Write base URL + key; file mode 0600 on unix.
-    pub fn save(&self) -> Result<PathBuf, CliErr> {
+    /// Write base URL + `extra` profiles + the selected profile's key, keeping other profiles in
+    /// the file; mode 0600 on unix.
+    pub fn save(&self, extra: &[(&str, &str)]) -> Result<PathBuf, CliErr> {
         let p = config_path();
         let io =
             |e: std::io::Error| CliErr::new("config_write_failed", e.to_string(), exit::FAILURE);
         fs::create_dir_all(p.parent().unwrap()).map_err(io)?;
-        let body = serde_json::to_string_pretty(
-            &json!({"base_url": self.base_url, "api_key": self.api_key}),
-        )
-        .unwrap();
+        let mut profiles = read_file_json()["profiles"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        if let Some(k) = &self.api_key {
+            profiles.insert(self.profile.clone(), json!(k));
+        }
+        for (n, k) in extra {
+            profiles.insert((*n).into(), json!(k));
+        }
+        let body =
+            serde_json::to_string_pretty(&json!({"base_url": self.base_url, "profiles": profiles}))
+                .unwrap();
         #[cfg(unix)]
         {
             use std::{io::Write, os::unix::fs::OpenOptionsExt, os::unix::fs::PermissionsExt};

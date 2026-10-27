@@ -21,7 +21,7 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 
 | Command | Notes |
 |---|---|
-| `init [--url] [--key] [--non-interactive] [--delivery gmail\|relay:<preset>\|domain:<name>\|sandbox]` | Generates the secret key, creates admin and a `mc_test_` key, probes ports, installs skills and the AGENTS.md snippet. |
+| `init [--url] [--key] [--non-interactive] [--delivery gmail\|relay:<preset>\|domain:<name>\|sandbox]` | First run: creates the admin and `mc_test_` keys, prints the admin key once, saves both in the config as profiles `default` (test) and `admin` (select with `--profile admin` / `MAILCRAFT_PROFILE`). |
 | `connect gmail` | OAuth to your own Gmail (test / low volume). Needs `MAILCRAFT_GOOGLE_CLIENT_ID/SECRET` on the server. See QUICKSTART. |
 | `connect relay <preset>` | Relay transport (e.g. `postmark`, `ses`, `mailgun`, `brevo`, `smtp2go`). |
 | `domain add <name>` | Prints records; creates them with `CLOUDFLARE_API_TOKEN`. |
@@ -35,11 +35,13 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `templates import <file> [--name] [--format html\|mjml\|json]` | Format inferred from extension if omitted. |
 | `templates export <id> [--format html\|mjml\|json]` | Default `json`. |
 | `templates list` | |
+| `templates publish <id\|alias> [--version N]` | Makes a version live. |
 | `templates preview <id> --data '<json>'` | Returns subject, html, text, lint. |
-| `contacts` (`list`, `get <email>`, `upsert`) | |
+| `contacts` (`list`, `get <email>`, `upsert <email> [--first-name n] [--data json] [--timezone IANA]`) | `--timezone` (IANA; invalid is 422) drives live-send quiet hours. `properties.timezone` is also lifted into it. |
 | `events track <name> --contact <email> --data '<json>'` | Add `--dry-run` to list the emails it would trigger. |
 | `automations list` | |
-| `automations enable <id>` / `disable <id>` | |
+| `automations publish <id\|name> [--backfill-suppress]` | Activates a draft (publish the template first). |
+| `automations enable <id>` / `disable <id>` | Resume / pause. A draft needs `publish`. |
 | `automations import <file.json>` | See llms-full.txt for the format. First sends go to approval. |
 | `keys create --name <n> --scopes read,send --env test\|live` | `data.token` is the secret, shown once. Scopes are `read`, `send`, `manage`; `admin` is never granted over the API. |
 | `keys list`, `keys revoke <id>` | |

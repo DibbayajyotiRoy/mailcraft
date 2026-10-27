@@ -334,7 +334,7 @@ fn domain_add_and_kill_switch_and_approvals() {
 }
 
 #[test]
-fn init_creates_key_saves_0600_and_never_prints_it() {
+fn init_saves_both_keys_as_profiles_0600_and_shows_admin_once() {
     let m = mock(vec![
         ("GET", "/healthz", 200, json!({"ok": true})),
         (
@@ -374,10 +374,14 @@ fn init_creates_key_saves_0600_and_never_prints_it() {
         String::from_utf8_lossy(&o.stdout)
     );
     let stdout = String::from_utf8_lossy(&o.stdout).to_string();
-    assert!(!stdout.contains("TESTSECRET0123456789") && !stdout.contains("ADMINSECRET"));
+    // the test key is never echoed; the admin key is shown once (stdout json + stderr banner)
+    assert!(!stdout.contains("TESTSECRET0123456789"));
+    assert_eq!(out(&o)["data"]["admin_key"], "mc_live_ADMINSECRET");
+    assert!(String::from_utf8_lossy(&o.stderr).contains("won't be shown again"));
     let cfg: Value =
         serde_json::from_str(&std::fs::read_to_string(d.join("config.json")).unwrap()).unwrap();
-    assert_eq!(cfg["api_key"], "mc_test_TESTSECRET0123456789");
+    assert_eq!(cfg["profiles"]["default"], "mc_test_TESTSECRET0123456789");
+    assert_eq!(cfg["profiles"]["admin"], "mc_live_ADMINSECRET");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -794,4 +798,91 @@ fn settings_instructions_surfaces_api_error() {
     );
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stdout).contains("custom_instructions_too_long"));
+}
+
+#[test]
+fn profile_flag_selects_admin_key() {
+    let m = mock(vec![("GET", "/v1/approvals", 200, env_ok(json!([])))]);
+    let d = conf_dir("profile");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(
+        d.join("config.json"),
+        json!({"base_url": m.url, "profiles": {"default": "mc_test_T", "admin": "mc_live_A"}})
+            .to_string(),
+    )
+    .unwrap();
+    let o = run(&m, &d, None, &["approvals", "list", "--profile", "admin"]);
+    assert_eq!(o.status.code(), Some(0));
+    run(&m, &d, None, &["approvals", "list"]);
+    let seen = m.seen.lock().unwrap();
+    assert!(seen[0].headers.contains("bearer mc_live_a"));
+    assert!(seen[1].headers.contains("bearer mc_test_t"));
+}
+
+#[test]
+fn publish_commands_and_contact_timezone() {
+    let m = mock(vec![
+        (
+            "POST",
+            "/v1/templates/welcome/publish",
+            200,
+            env_ok(json!({"published_version": 2})),
+        ),
+        (
+            "POST",
+            "/v1/automations/onboard/publish",
+            200,
+            env_ok(json!({"status": "active"})),
+        ),
+        (
+            "PUT",
+            "/v1/contacts",
+            200,
+            env_ok(json!({"email": "a@b.co"})),
+        ),
+        (
+            "POST",
+            "/v1/automations/drafty/resume",
+            409,
+            json!({"ok": false, "error": {"code": "invalid_state", "message": "automation is `draft`; automation.resume needs paused"}}),
+        ),
+    ]);
+    let d = conf_dir("publish");
+    let k = Some("mc_test_K");
+    let o = run(
+        &m,
+        &d,
+        k,
+        &["templates", "publish", "welcome", "--version", "2"],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let o = run(
+        &m,
+        &d,
+        k,
+        &["automations", "publish", "onboard", "--backfill-suppress"],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let o = run(
+        &m,
+        &d,
+        k,
+        &[
+            "contacts",
+            "upsert",
+            "a@b.co",
+            "--timezone",
+            "Europe/Berlin",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let o = run(&m, &d, k, &["automations", "enable", "drafty"]);
+    assert!(out(&o)["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .contains("automations publish drafty"));
+    let seen = m.seen.lock().unwrap();
+    assert_eq!(seen[0].body, json!({"version": 2}));
+    assert_eq!(seen[1].body, json!({"backfill_suppress": true}));
+    assert_eq!(seen[2].body["timezone"], "Europe/Berlin");
 }
