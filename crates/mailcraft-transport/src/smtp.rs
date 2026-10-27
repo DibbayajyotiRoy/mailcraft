@@ -163,13 +163,23 @@ crate::impl_transport!(SmtpRelay, "smtp-relay");
 
 #[async_trait::async_trait]
 impl ClassifiedTransport for SmtpRelay {
-    async fn submit(&self, msg: &Outbound) -> Result<SendReceipt, TransportError> {
+    async fn submit_all(
+        &self,
+        msg: &Outbound,
+        rcpts: &[String],
+    ) -> Result<SendReceipt, TransportError> {
         let parse = |s: &str| {
             s.parse::<Address>()
                 .map_err(|e| TransportError::Permanent(format!("bad address {s}: {e}")))
         };
-        let env = Envelope::new(Some(parse(&msg.mail_from)?), vec![parse(&msg.rcpt_to)?])
-            .map_err(|e| TransportError::Permanent(format!("envelope: {e}")))?;
+        let env = Envelope::new(
+            Some(parse(&msg.mail_from)?),
+            rcpts
+                .iter()
+                .map(|r| parse(r))
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+        .map_err(|e| TransportError::Permanent(format!("envelope: {e}")))?;
         let resp = self
             .mailer
             .send_raw(&env, &msg.raw)
@@ -304,6 +314,27 @@ mod tests {
         assert!(cmds.contains(&"RCPT TO:<bob@example.org>".to_string()));
         assert!(data.contains("Subject: Hello") && data.contains("plain body"));
         assert!(data.contains("List-Unsubscribe-Post: List-Unsubscribe=One-Click"));
+    }
+
+    #[tokio::test]
+    async fn every_envelope_recipient_gets_a_rcpt_and_bcc_stays_out_of_headers() {
+        let (port, h) = sink(None).await;
+        let t = SmtpRelay::new(&cfg(port)).unwrap();
+        let rcpts = [
+            "bob@example.org",
+            "cc@example.org",
+            "hidden-bcc@example.net",
+        ]
+        .map(String::from);
+        t.submit_all(&sample(), &rcpts).await.unwrap();
+        let (cmds, data) = h.await.unwrap();
+        for r in &rcpts {
+            assert!(
+                cmds.contains(&format!("RCPT TO:<{r}>")),
+                "{r} missing: {cmds:?}"
+            );
+        }
+        assert!(!data.contains("hidden-bcc@example.net") && !data.contains("Bcc:"));
     }
 
     #[tokio::test]

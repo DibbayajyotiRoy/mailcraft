@@ -354,6 +354,25 @@ impl Engine {
             };
             return self.finish(wid, job, "none", t).await;
         }
+        // Cc recipients share this row's transaction; suppression is applied per recipient and a
+        // suppressed Cc is dropped from both the envelope and the header.
+        let mut cc: Vec<String> = Vec::new();
+        for c in &job.cc {
+            let addr = mime::parse_mailbox(c).1;
+            match self.suppress.is_suppressed(job.workspace_id, &addr).await {
+                Ok(false) => cc.push(c.clone()),
+                Ok(true) => {
+                    tracing::info!(email = %job.id, rcpt = %addr, "cc recipient suppressed, dropped")
+                }
+                Err(e) => {
+                    return self
+                        .defer(wid, job, 60.0, &format!("suppression check failed: {e}"))
+                        .await
+                }
+            }
+        }
+        let mut rcpts = vec![job.to_addr.clone()];
+        rcpts.extend(cc.iter().map(|c| mime::parse_mailbox(c).1));
         let max_age = job
             .max_age_at
             .unwrap_or(job.created_at + self.cfg.default_max_age);
@@ -430,7 +449,7 @@ impl Engine {
         let raw = match mime::build(&MimeParts {
             from: &job.from_addr,
             to: &job.to_addr,
-            cc: &job.cc,
+            cc: &cc,
             reply_to: job.reply_to.as_deref(),
             subject: &job.subject,
             text: job.text.as_deref(),
@@ -488,7 +507,7 @@ impl Engine {
             }
         } else {
             let t = &resolved.as_ref().unwrap().transport;
-            match tokio::time::timeout(self.cfg.send_timeout, t.submit(&out)).await {
+            match tokio::time::timeout(self.cfg.send_timeout, t.submit_all(&out, &rcpts)).await {
                 Ok(r) => r,
                 Err(_) => Err(TransportError::Temporary("send timed out".into())),
             }

@@ -182,7 +182,11 @@ crate::impl_transport!(GmailOAuth, "gmail-oauth");
 
 #[async_trait::async_trait]
 impl ClassifiedTransport for GmailOAuth {
-    async fn submit(&self, msg: &Outbound) -> Result<SendReceipt, TransportError> {
+    async fn submit_all(
+        &self,
+        msg: &Outbound,
+        _rcpts: &[String],
+    ) -> Result<SendReceipt, TransportError> {
         let (used, oldest) = self.cap.usage(CAP_WINDOW).await;
         if used >= self.cap_limit {
             return Err(TransportError::RateLimited {

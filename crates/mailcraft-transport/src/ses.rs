@@ -171,11 +171,15 @@ crate::impl_transport!(SesV2, "ses");
 
 #[async_trait::async_trait]
 impl ClassifiedTransport for SesV2 {
-    async fn submit(&self, msg: &Outbound) -> Result<SendReceipt, TransportError> {
-        // One row per recipient: the envelope is exactly `rcpt_to`.
+    async fn submit_all(
+        &self,
+        msg: &Outbound,
+        rcpts: &[String],
+    ) -> Result<SendReceipt, TransportError> {
+        // The envelope is exactly `rcpts` (headers carry To/Cc; Bcc never appears in headers).
         let mut j = serde_json::json!({
             "Content": { "Raw": { "Data": STANDARD.encode(&msg.raw) } },
-            "Destination": { "ToAddresses": [&msg.rcpt_to] },
+            "Destination": { "ToAddresses": rcpts },
         });
         if let Some(c) = &self.configuration_set {
             j["ConfigurationSetName"] = c.clone().into();

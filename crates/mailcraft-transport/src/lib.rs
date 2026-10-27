@@ -32,8 +32,20 @@ pub struct SendReceipt {
 /// A transport that reports the engine-relevant error class. All transports here implement it.
 #[async_trait::async_trait]
 pub trait ClassifiedTransport: Transport {
-    /// One delivery attempt, no internal retry.
-    async fn submit(&self, msg: &Outbound) -> Result<SendReceipt, TransportError>;
+    /// One delivery attempt to every envelope recipient in `rcpts` (To, Cc; never listed in
+    /// headers if Bcc), in a single transaction. No internal retry. `Outbound::rcpt_to` is the
+    /// primary recipient; core's single-recipient field cannot carry Cc, hence this parameter.
+    async fn submit_all(
+        &self,
+        msg: &Outbound,
+        rcpts: &[String],
+    ) -> Result<SendReceipt, TransportError>;
+
+    /// Single-recipient convenience (`msg.rcpt_to` only).
+    async fn submit(&self, msg: &Outbound) -> Result<SendReceipt, TransportError> {
+        self.submit_all(msg, std::slice::from_ref(&msg.rcpt_to))
+            .await
+    }
 }
 
 /// Lossy mapping onto core's `DeliveryResult`.

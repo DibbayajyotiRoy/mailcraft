@@ -132,6 +132,7 @@ async fn make_due(pool: &PgPool) {
 struct Scripted {
     script: Mutex<VecDeque<Result<SendReceipt, TransportError>>>,
     calls: Mutex<Vec<Uuid>>,
+    last: Mutex<Option<(Vec<String>, String)>>,
     delay_ms: u64,
 }
 impl Scripted {
@@ -156,8 +157,13 @@ impl Transport for Scripted {
 }
 #[async_trait]
 impl ClassifiedTransport for Scripted {
-    async fn submit(&self, m: &Outbound) -> Result<SendReceipt, TransportError> {
+    async fn submit_all(
+        &self,
+        m: &Outbound,
+        rcpts: &[String],
+    ) -> Result<SendReceipt, TransportError> {
         self.calls.lock().unwrap().push(m.email_id);
+        *self.last.lock().unwrap() = Some((rcpts.to_vec(), String::from_utf8_lossy(&m.raw).into()));
         if self.delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.delay_ms)).await;
         }
@@ -609,4 +615,31 @@ async fn per_destination_throttle_pushes_rows() {
         .metrics
         .render()
         .contains("mailcraft_throttle_delays_total"));
+}
+
+#[tokio::test]
+async fn cc_recipients_are_in_the_envelope_suppressed_ones_dropped_and_bcc_never_in_headers() {
+    let Some(pool) = db().await else { return };
+    let fx = fixture(&pool, None, None).await;
+    let id = enqueue(&pool, &fx, "bob@example.org", "live").await;
+    sqlx::query(
+        "UPDATE emails SET cc = '{\"Cy <cy@example.org>\",gone@example.org}' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO suppressions (workspace_id, email, reason) VALUES ($1, 'gone@example.org', 'hard_bounce')")
+        .bind(fx.ws)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let t = Scripted::new(vec![]);
+    let e = engine(&pool, t.clone(), "scripted");
+    e.tick("w1").await.unwrap();
+    assert_eq!(status(&pool, id).await, "sent");
+    let (rcpts, raw) = t.last.lock().unwrap().clone().unwrap();
+    assert_eq!(rcpts, ["bob@example.org", "cy@example.org"]);
+    assert!(raw.contains("cy@example.org") && !raw.contains("gone@example.org"));
+    assert!(!raw.to_lowercase().contains("bcc:"));
 }

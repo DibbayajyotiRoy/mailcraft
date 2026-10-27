@@ -63,7 +63,11 @@ crate::impl_transport!(Sandbox, "sandbox");
 
 #[async_trait::async_trait]
 impl ClassifiedTransport for Sandbox {
-    async fn submit(&self, msg: &Outbound) -> Result<SendReceipt, TransportError> {
+    async fn submit_all(
+        &self,
+        msg: &Outbound,
+        _rcpts: &[String],
+    ) -> Result<SendReceipt, TransportError> {
         match SandboxOutcome::for_rcpt(&msg.rcpt_to) {
             SandboxOutcome::Bounced => Err(TransportError::Permanent(
                 "550 5.1.1 sandbox: no such user".into(),
