@@ -1,6 +1,12 @@
 "use client";
-import { useActionState, useId, useState } from "react";
+import { useActionState, useEffect, useId, useRef, useState } from "react";
+import { Check, ChevronRight, ShieldCheck } from "lucide-react";
 import { saveInstructions, type InstructionsState } from "@/lib/actions";
+import { Button, SubmitButton } from "@/components/ui/button";
+import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/field";
+import { toast } from "@/components/ui/toast";
+import { cn } from "@/lib/cn";
 
 export const MAX = 2000;
 export const PRESETS: { label: string; text: string }[] = [
@@ -20,32 +26,47 @@ export function InstructionsForm({ initial }: { initial: string }) {
   const [show, setShow] = useState(false);
   const id = useId();
   const over = text.length > MAX;
+  const near = !over && text.length > MAX * 0.9;
+  const toasted = useRef<InstructionsState>(undefined);
+  useEffect(() => { if (s.ok && toasted.current !== s) { toasted.current = s; toast.success(s.ok); } }, [s]);
   return (
-    <form action={act} className="stack">
-      <label htmlFor={`${id}-t`}>Custom instructions</label>
-      <textarea id={`${id}-t`} name="custom_instructions" rows={7} value={text} onChange={(e) => setText(e.target.value)}
-        aria-describedby={`${id}-n ${id}-c`} aria-invalid={over} placeholder="e.g. Write like a friendly founder. Keep emails under 120 words." />
-      <p id={`${id}-c`} className={over ? "hint over" : "hint"} aria-live="polite"><span data-testid="count">{text.length}</span> / {MAX} characters{over && " — too long"}</p>
-      <p id={`${id}-n`} className="hint">
-        Shapes tone and style of AI-written emails. It cannot override mailcraft&apos;s safety rules: no invented features, links come only from your templates, and unsubscribe is always included.
-      </p>
-      <div role="group" aria-label="Example instructions" className="inline">
-        <span className="muted">Examples:</span>
-        {PRESETS.map((p) => <button type="button" key={p.label} className="secondary" onClick={() => setText(p.text)}>{p.label}</button>)}
-      </div>
-      <div className="inline">
-        <button type="submit" name="intent" value="save" disabled={pending || over}>Save</button>
-        <button type="submit" name="intent" value="clear" className="secondary" disabled={pending || !initial && !text} onClick={() => setText("")}>Clear</button>
-        <button type="button" className="secondary" aria-expanded={show} aria-controls={`${id}-p`} onClick={() => setShow(!show)}>Preview with a sample email</button>
-      </div>
-      {show && (
-        <div id={`${id}-p`} className="json">
-          <p className="muted">Sample: &ldquo;Welcome email for a new signup&rdquo;. The model is given this extra guidance (no email is generated here):</p>
-          <pre>{text.trim() ? previewText(text) : "(no custom instructions: mailcraft's defaults apply)"}</pre>
-        </div>
-      )}
-      {s.error && <div role="alert" className="banner">{s.error}</div>}
-      {s.ok && <div role="status" className="notice">{s.ok}</div>}
-    </form>
+    <Card id="ai-writing" aria-labelledby={`${id}-h`} className="scroll-mt-20">
+      <form action={act}>
+        <CardHeader title={<span id={`${id}-h`}>AI writing</span>} description="Tell the model how your emails should sound. It shapes tone and style only." />
+        <CardBody className="grid gap-3">
+          <label htmlFor={`${id}-t`} className="text-sm font-medium">Custom instructions</label>
+          <Textarea id={`${id}-t`} name="custom_instructions" rows={7} value={text} onChange={(e) => setText(e.target.value)}
+            aria-describedby={`${id}-n ${id}-c`} aria-invalid={over} placeholder="e.g. Write like a friendly founder. Keep emails under 120 words." />
+          <p id={`${id}-c`} aria-live="polite" className={cn("text-xs tabular-nums", over ? "font-medium text-bad" : near ? "text-warn" : "text-muted")}>
+            <span data-testid="count">{text.length}</span> / {MAX} characters{over && " — too long"}
+          </p>
+          <p id={`${id}-n`} className="flex gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-muted">
+            <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-ok" />
+            <span>Shapes tone and style of AI-written emails. It cannot override mailcraft&apos;s safety rules: no invented features, links come only from your templates, and unsubscribe is always included.</span>
+          </p>
+          <div role="group" aria-label="Example instructions" className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted">Examples:</span>
+            {PRESETS.map((p) => <Button key={p.label} size="sm" variant="secondary" onClick={() => setText(p.text)}>{p.label}</Button>)}
+          </div>
+          <div>
+            <Button variant="ghost" size="sm" className="-ml-2" aria-expanded={show} aria-controls={`${id}-p`} onClick={() => setShow(!show)}>
+              <ChevronRight aria-hidden className={cn("transition-transform duration-[var(--dur-fast)]", show && "rotate-90")} />Preview with a sample email
+            </Button>
+            {show && (
+              <div id={`${id}-p`} className="mt-2 rounded-md border border-border bg-surface-2 p-3">
+                <p className="mb-2 text-sm text-muted">Sample: &ldquo;Welcome email for a new signup&rdquo;. The model is given this extra guidance (no email is generated here):</p>
+                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[12.5px] leading-5">{text.trim() ? previewText(text) : "(no custom instructions: mailcraft's defaults apply)"}</pre>
+              </div>
+            )}
+          </div>
+          {s.error && <p role="alert" className="text-sm font-medium text-bad">{s.error}</p>}
+          {s.ok && <p role="status" className="inline-flex items-center gap-1 text-sm text-ok"><Check aria-hidden className="size-4" />{s.ok}</p>}
+        </CardBody>
+        <CardFooter>
+          <Button type="submit" variant="secondary" name="intent" value="clear" disabled={pending || (!initial && !text)} onClick={() => setText("")}>Clear</Button>
+          <SubmitButton name="intent" value="save" disabled={pending || over}>Save</SubmitButton>
+        </CardFooter>
+      </form>
+    </Card>
   );
 }
