@@ -1,27 +1,21 @@
-import Link from "next/link";
 import { get } from "@/lib/api";
-import { ErrorBanner, StatusBadge } from "@/components/ui";
-import { StateButton } from "@/components/StateButton";
+import { PageHeader } from "@/components/ui/page-header";
+import { ApiErrorState } from "../_p3/ApiErrorState";
+import { parseErr } from "../_p3/err";
+import { AutomationsList, type AutomationRow } from "./AutomationsList";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Automations" };
 
 export default async function Automations({ searchParams }: { searchParams: Promise<{ err?: string }> }) {
   const { err } = await searchParams;
+  const e = parseErr(err);
   const r = await get("/v1/automations");
   return (
     <>
-      <h1>Automations</h1>
-      {err && <ErrorBanner error={{ code: err.split("|")[0], message: err.split("|")[1], hint: err.split("|")[2] || undefined }} />}
-      {r.error ? <ErrorBanner error={r.error} /> : (
-        <table>
-          <thead><tr><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
-          <tbody>{(r.data as any[]).map((a) => (
-            <tr key={a.id}><td><Link href={`/automations/${a.id}`}>{a.name ?? a.id}</Link></td><td><StatusBadge status={a.status} /></td>
-              <td><StateButton id={a.id} status={a.status} from="/automations" /></td></tr>
-          ))}
-            {!(r.data as any[]).length && <tr><td colSpan={3} className="muted">No automations.</td></tr>}</tbody>
-        </table>
-      )}
+      <PageHeader title="Automations" description="Lifecycle emails that run when a contact does something." />
+      {e && <div className="mb-4"><ApiErrorState error={e} /></div>}
+      {r.error ? <ApiErrorState error={r.error} /> : <AutomationsList automations={(Array.isArray(r.data) ? r.data : []) as AutomationRow[]} />}
     </>
   );
 }
