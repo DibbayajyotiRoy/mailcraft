@@ -1,9 +1,12 @@
 # Quickstart
 
+Pre-alpha: commands marked below as the target experience may still return `not_implemented`; see the README status.
+
 ## With a domain (three commands)
 
 ```
-docker compose up -d
+echo "MAILCRAFT_SECRET_KEY=$(openssl rand -base64 32)" > .env   # once; encrypts DKIM keys + credentials
+docker compose up -d                 # postgres, redis, mailcraft :8080, dashboard :3000
 mailcraft init                       # secret key, admin, test key, probes ports, prints next steps
 mailcraft domain add example.com     # prints (or creates) SPF/DKIM/DMARC/return-path records, then verifies
 ```
@@ -48,3 +51,7 @@ mailcraft connect gmail
 ```
 
 Open the printed URL, approve, and the CLI receives the callback on the loopback address. Then `mailcraft doctor`.
+
+## Bring your own relay
+
+`mailcraft connect relay <preset>` with credentials for SES, Postmark, Mailgun, Brevo, SMTP2GO or any SMTP server you own. mailcraft never routes your mail through project-run infrastructure.
