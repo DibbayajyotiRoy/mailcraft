@@ -57,7 +57,7 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `templates list` | |
 | `templates publish <id\|alias> [--version N]` | Makes a version live; sends use the published version. |
 | `templates preview <id> --data '<json>'` | Returns subject, html, text, lint. |
-| `contacts` (`list`, `get <email>`, `upsert <email> [--first-name <n>] [--data <json>] [--timezone <IANA>]`) | `--timezone` sets the contact timezone that quiet hours use. |
+| `contacts` (`list`, `get <email>`, `upsert <email> [--first-name <n>] [--data <json>] [--timezone <IANA>]`) | `--timezone` sets the contact timezone that live-send quiet hours use (invalid is 422; `properties.timezone` is lifted too). |
 | `events track <name> --contact <email> --data '<json>'` | Add `--dry-run` to list the emails it would trigger. |
 | `automations list` | |
 | `automations publish <id\|name> [--backfill-suppress]` | Activates a draft. Run `templates publish` first. |
@@ -129,7 +129,7 @@ Publish both before anything sends: `mailcraft templates publish welcome` then `
 ### Semantics
 - Step types: `delay` (max 30 days), `condition` (ops `eq neq lt gt in contains exists`, evaluated after delays), `wait_for_event` (timeout edge), `send_email`, `update_contact`, `add_to_segment`.
 - `entry_rule`: `once | always | after_days:N | if_no_active_run`. A matching `goal` event exits the run.
-- Send gates: kill switch, suppression, frequency caps (default 1 lifecycle email per 48h, 3 per 7 days), quiet hours (09:00-18:00 recipient-local, weekdays; 13:00-17:00 UTC when the contact has no timezone, test keys too), approval, send caps.
+- Send gates: kill switch, suppression, frequency caps (default 1 lifecycle email per 48h, 3 per 7 days), quiet hours (09:00-18:00 recipient-local, weekdays; 13:00-17:00 UTC when the contact has no timezone; not applied to test-env sends), approval, send caps.
 - A new template version, prompt change or new automation resets to approval.
 
 Import with `mailcraft automations import welcome-automation.json`, then `mailcraft automations publish welcome`. Trigger with `mailcraft events track signed_up --contact ana@example.org --data '{"plan":"free"}'`. Approval: `always | first_n:N | never` (default `first_n:5`; `never` needs admin). Guarantees: at-least-once steps, effectively once via keys `run_id:step_key:attempt_group`. A step failing after retries ends the run `failed` and emits `automation.run.failed`.

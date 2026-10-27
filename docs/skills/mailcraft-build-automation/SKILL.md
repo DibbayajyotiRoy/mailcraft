@@ -41,8 +41,8 @@ Publish both before anything sends: `mailcraft templates publish welcome` then `
 ## Semantics to remember
 - Step types: `delay` (max 30 days), `condition` (ops `eq neq lt gt in contains exists`, evaluated after delays), `wait_for_event` (timeout edge), `send_email`, `update_contact`, `add_to_segment`.
 - `entry_rule`: `once | always | after_days:N | if_no_active_run`. A matching `goal` event exits the run.
-- Send gates: kill switch, suppression, frequency caps (default 1 lifecycle email per 48h, 3 per 7 days), quiet hours (09:00-18:00 recipient-local, weekdays), approval, send caps.
-- Set `from` on the step, or it fails without a verified domain. Set the contact timezone (`contacts upsert --timezone`) or quiet hours (13:00-17:00 UTC) can delay a test run.
+- Send gates: kill switch, suppression, frequency caps (default 1 lifecycle email per 48h, 3 per 7 days), quiet hours (09:00-18:00 recipient-local, weekdays; live sends only), approval, send caps.
+- `from` is required on the step until a domain is verified (otherwise the run fails immediately). Automation emails are test-env (sandbox) until the workspace goes live; quiet hours apply to live sends, so set the contact timezone (`contacts upsert --timezone`).
 - A new template version, prompt change or new automation resets to approval.
 
 ## Pitfalls

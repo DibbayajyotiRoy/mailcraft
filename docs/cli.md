@@ -37,7 +37,7 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `templates list` | |
 | `templates publish <id\|alias> [--version N]` | Makes a version live. |
 | `templates preview <id> --data '<json>'` | Returns subject, html, text, lint. |
-| `contacts` (`list`, `get <email>`, `upsert <email> [--first-name n] [--data json] [--timezone IANA]`) | `--timezone` drives quiet hours. |
+| `contacts` (`list`, `get <email>`, `upsert <email> [--first-name n] [--data json] [--timezone IANA]`) | `--timezone` (IANA; invalid is 422) drives live-send quiet hours. `properties.timezone` is also lifted into it. |
 | `events track <name> --contact <email> --data '<json>'` | Add `--dry-run` to list the emails it would trigger. |
 | `automations list` | |
 | `automations publish <id\|name> [--backfill-suppress]` | Activates a draft (publish the template first). |

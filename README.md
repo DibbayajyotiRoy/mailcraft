@@ -76,7 +76,7 @@ mailcraft events track signed_up --contact ana@test.mailcraft.local
 mailcraft --profile admin approvals list                     # the first 5 sends wait for a human with the admin key
 ```
 
-`from` must be an address on a verified domain; without one the step fails with `no from and no verified transactional domain`. Quiet hours (09:00-18:00 contact-local, 13:00-17:00 UTC when the contact has no timezone) apply to test keys too, so set `--timezone` or a first run can wait hours. `mailcraft automations enable` only resumes a paused automation; a draft needs `publish`.
+`from` is required until a domain is verified: without it (and without a verified domain) the run fails immediately with a clear reason, no retries. Until the workspace goes live, automation emails are test-env and go to the sandbox, so a fresh install needs no transport; test-env sends ignore quiet hours. For live sends, quiet hours (09:00-18:00 contact-local, 13:00-17:00 UTC when the contact has no timezone) apply, so set `--timezone` (an invalid zone is a 422). Approving the `automation_first_send` approval releases the email (approve queues it, reject cancels it). `mailcraft automations enable` only resumes a paused automation; a draft needs `publish`.
 
 
 ## Build from source
