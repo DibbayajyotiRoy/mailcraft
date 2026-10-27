@@ -8,6 +8,8 @@ members = [
   "crates/mailcraft-llm",
   "crates/mailcraft-templates",
   "crates/mailcraft-cli",
+  "crates/mailcraft-deliverability",
+  "crates/mailcraft-automations",
 ]
 
 [workspace.package]

@@ -1076,6 +1076,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mailcraft-automations"
+version = "0.1.0"
+dependencies = [
+ "mailcraft-core",
+]
+
+[[package]]
 name = "mailcraft-cli"
 version = "0.0.1"
 dependencies = [
@@ -1095,6 +1102,13 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "mailcraft-deliverability"
+version = "0.1.0"
+dependencies = [
+ "mailcraft-core",
 ]
 
 [[package]]
