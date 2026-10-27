@@ -6,10 +6,31 @@ permissions: { contents: read }
 jobs:
   rust:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      # integration tests must run for real, not skip
+      MAILCRAFT_REQUIRE_DB: "1"
+      MAILCRAFT_TEST_INFRA: "1"
+      MAILCRAFT_TEST_PG: postgres://postgres:postgres@localhost:5432/postgres
+      MC_TEST_PG: postgres://postgres:postgres@localhost:5432/postgres
+      MAILCRAFT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      MAILCRAFT_TEST_REDIS: redis://localhost:6379
+      MC_TEST_REDIS: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: "rustfmt, clippy" }
+      # version and components come from rust-toolchain.toml, same as local
+      - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -35,8 +56,30 @@ jobs:
         with: { node-version: 22, cache: npm, cache-dependency-path: dashboard/package-lock.json }
       - run: npm ci
       - run: npm run build
+      - run: npm test
   compose:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: MAILCRAFT_SECRET_KEY=ci docker compose config -q
+  node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { dir: [mcp, sdk/ts] }
+    defaults: { run: { working-directory: "${{ matrix.dir }}" } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: "${{ matrix.dir }}/package-lock.json" }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with: { context: ., push: false, cache-from: type=gha, cache-to: "type=gha,mode=max" }
+      - uses: docker/build-push-action@v6
+        with: { context: dashboard, push: false, cache-from: "type=gha,scope=dashboard", cache-to: "type=gha,mode=max,scope=dashboard" }
