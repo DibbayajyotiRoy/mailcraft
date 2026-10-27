@@ -253,9 +253,7 @@ async fn lifecycle(
 
 #[tokio::test]
 async fn memory_lifecycle() {
-    let keys = Arc::new(MemoryKeys::new(
-        SecretBox::from_secret("a-long-test-passphrase").unwrap(),
-    ));
+    let keys = Arc::new(MemoryKeys::new(SecretBox::from_key(&[7u8; 32]).unwrap()));
     let k2 = keys.clone();
     lifecycle(
         &MemoryDomains::default(),
@@ -296,7 +294,7 @@ async fn postgres_lifecycle_and_encryption_at_rest() {
         .await
         .unwrap();
 
-    let secret = SecretBox::from_secret("a-long-test-passphrase").unwrap();
+    let secret = SecretBox::from_key(&[7u8; 32]).unwrap();
     let (domains, keys) = (
         PgDomains::new(pool.clone()),
         PgKeys::new(pool.clone(), secret),
@@ -333,10 +331,7 @@ async fn postgres_lifecycle_and_encryption_at_rest() {
             .unwrap();
     assert!(!String::from_utf8_lossy(&blob).contains("PRIVATE KEY"));
     assert_eq!(blob[0], 1);
-    let wrong = PgKeys::new(
-        pool.clone(),
-        SecretBox::from_secret("another-long-passphrase!").unwrap(),
-    );
+    let wrong = PgKeys::new(pool.clone(), SecretBox::from_key(&[9u8; 32]).unwrap());
     assert_eq!(
         wrong
             .load(row.id, KeyState::Active)
