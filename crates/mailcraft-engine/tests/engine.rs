@@ -1,7 +1,7 @@
 //! Integration tests against a throwaway Postgres (and Redis for the cap/throttle test):
 //!   docker run -d --rm --name mc-pg-engine -e POSTGRES_PASSWORD=x -p 55433:5432 postgres:17-alpine
 //!   docker run -d --rm --name mc-redis-engine -p 56380:6379 redis:7-alpine
-//! Override with MC_TEST_PG / MC_TEST_REDIS. Tests skip (loudly) when Postgres is unreachable.
+//! Override with MAILCRAFT_TEST_PG / MAILCRAFT_TEST_REDIS. Tests skip (loudly) when Postgres is unreachable.
 use async_trait::async_trait;
 use mailcraft_core::transport::{DeliveryResult, Outbound, Transport};
 use mailcraft_engine::{Engine, EngineConfig, Limits, ResolvedTransport, StaticResolver};
@@ -14,14 +14,12 @@ use std::{
 };
 use uuid::Uuid;
 
-const MIGRATION: &str = include_str!("../../../migrations/20261027000001_init.sql");
-
 fn pg_url() -> String {
-    std::env::var("MC_TEST_PG")
-        .unwrap_or_else(|_| "postgres://postgres:x@127.0.0.1:55433/postgres".into())
+    std::env::var("MAILCRAFT_TEST_PG")
+        .unwrap_or_else(|_| "postgres://postgres:x@127.0.0.1:55432/postgres".into())
 }
 fn redis_url() -> String {
-    std::env::var("MC_TEST_REDIS").unwrap_or_else(|_| "redis://127.0.0.1:56380".into())
+    std::env::var("MAILCRAFT_TEST_REDIS").unwrap_or_else(|_| "redis://127.0.0.1:56379".into())
 }
 
 /// A fresh database per test.
@@ -34,6 +32,10 @@ async fn db() -> Option<PgPool> {
     {
         Ok(p) => p,
         Err(e) => {
+            assert!(
+                std::env::var("MAILCRAFT_REQUIRE_DB").is_err(),
+                "postgres required: {e}"
+            );
             eprintln!("SKIP: postgres unreachable at {}: {e}", pg_url());
             return None;
         }
@@ -49,7 +51,7 @@ async fn db() -> Option<PgPool> {
         .connect(&url)
         .await
         .unwrap();
-    sqlx::raw_sql(MIGRATION).execute(&pool).await.unwrap();
+    sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
     Some(pool)
 }
 

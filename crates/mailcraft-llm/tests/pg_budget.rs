@@ -1,19 +1,28 @@
-//! Needs Postgres: MAILCRAFT_TEST_DATABASE_URL=postgres://postgres:x@localhost:55435/postgres (skipped when unset).
+//! Needs Postgres: MAILCRAFT_TEST_PG=postgres://postgres:x@127.0.0.1:55432/postgres (skipped when unset).
 use mailcraft_llm::*;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 
 #[tokio::test]
 async fn atomic_cap_settle_and_isolation() {
-    let Ok(url) = std::env::var("MAILCRAFT_TEST_DATABASE_URL") else {
-        eprintln!("skipped: MAILCRAFT_TEST_DATABASE_URL unset");
-        return;
-    };
-    let pool = PgPoolOptions::new()
+    let url = std::env::var("MAILCRAFT_TEST_PG")
+        .unwrap_or_else(|_| "postgres://postgres:x@127.0.0.1:55432/postgres".into());
+    let pool = match PgPoolOptions::new()
         .max_connections(10)
+        .acquire_timeout(std::time::Duration::from_secs(3))
         .connect(&url)
         .await
-        .unwrap();
+    {
+        Ok(p) => p,
+        Err(e) => {
+            assert!(
+                std::env::var("MAILCRAFT_REQUIRE_DB").is_err(),
+                "postgres required: {e}"
+            );
+            eprintln!("skipped: postgres unreachable ({e})");
+            return;
+        }
+    };
     sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
     let mut ws = vec![];
     for n in ["a", "b"] {

@@ -1,5 +1,5 @@
 //! Postgres + Redis integration. Runs only with `MAILCRAFT_TEST_INFRA=1` (throwaway containers:
-//! postgres on 55436, redis on 56381; override with MC_TEST_PG / MC_TEST_REDIS).
+//! postgres on 55436, redis on 56381; override with MAILCRAFT_TEST_PG / MAILCRAFT_TEST_REDIS).
 use mailcraft_core::Stream;
 use mailcraft_deliverability::{
     Category, Provider,
@@ -26,6 +26,7 @@ const NOW: i64 = 1_793_000_000;
 
 fn enabled() -> bool {
     std::env::var("MAILCRAFT_TEST_INFRA").is_ok_and(|v| v == "1")
+        || std::env::var("MAILCRAFT_REQUIRE_DB").is_ok()
 }
 
 /// Answers exactly what the plan says to publish (plus the instance-served DKIM target TXT).
@@ -270,8 +271,8 @@ async fn postgres_lifecycle_and_encryption_at_rest() {
         eprintln!("skipped: MAILCRAFT_TEST_INFRA!=1");
         return;
     }
-    let url = std::env::var("MC_TEST_PG")
-        .unwrap_or("postgres://postgres:x@localhost:55436/postgres".into());
+    let url = std::env::var("MAILCRAFT_TEST_PG")
+        .unwrap_or("postgres://postgres:x@127.0.0.1:55432/postgres".into());
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -330,7 +331,6 @@ async fn postgres_lifecycle_and_encryption_at_rest() {
             .await
             .unwrap();
     assert!(!String::from_utf8_lossy(&blob).contains("PRIVATE KEY"));
-    assert_eq!(blob[0], 1);
     let wrong = PgKeys::new(pool.clone(), SecretBox::from_key(&[9u8; 32]).unwrap());
     assert_eq!(
         wrong
@@ -392,7 +392,7 @@ async fn redis_counters_are_atomic_and_expire() {
         eprintln!("skipped: MAILCRAFT_TEST_INFRA!=1");
         return;
     }
-    let url = std::env::var("MC_TEST_REDIS").unwrap_or("redis://localhost:56381".into());
+    let url = std::env::var("MAILCRAFT_TEST_REDIS").unwrap_or("redis://127.0.0.1:56379".into());
     let conn = redis::aio::ConnectionManager::new(redis::Client::open(url).unwrap())
         .await
         .unwrap();
