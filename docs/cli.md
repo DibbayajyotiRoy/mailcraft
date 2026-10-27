@@ -28,7 +28,10 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `domain verify <name>` | Exit 7 until verified. |
 | `domain list` | |
 | `send --to --subject --text --html --from --template --data '<json>' --dry-run --idempotency-key` | `--template` with `--data` renders a stored template. `--to` may repeat. |
-| `emails get <id>` | Status, events, policy decisions. |
+| `emails get <id>` | Status, from_addr/to_addr, attempts, last_error, policy decisions. Ids are plain UUIDs. |
+| `emails events <id>` | Event timeline. |
+| `emails cancel <id>` | Cancel a queued, deferred or pending_approval email. |
+| `emails list [--status] [--limit] [--cursor]` | Newest first; `next_cursor` in the envelope. |
 | `templates import <file> [--name] [--format html\|mjml\|json]` | Format inferred from extension if omitted. |
 | `templates export <id> [--format html\|mjml\|json]` | Default `json`. |
 | `templates list` | |
@@ -38,11 +41,11 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `automations list` | |
 | `automations enable <id>` / `disable <id>` | |
 | `automations import <file.json>` | See llms-full.txt for the format. First sends go to approval. |
-| `keys create --name <n> --scopes read,send --env test\|live` | Secret is shown once. `admin` scope needs a human. |
+| `keys create --name <n> --scopes read,send --env test\|live` | `data.token` is the secret, shown once. Scopes are `read`, `send`, `manage`; `admin` is never granted over the API. |
 | `keys list`, `keys revoke <id>` | |
 | `approvals list` | |
 | `approvals approve <id>` / `reject <id>` | Human only. Refused with agent keys. |
-| `kill-switch on\|off` | Agents may turn it on; only a human turns it off. |
+| `kill-switch on\|off` (aliases `pause` / `resume`, also top-level `mailcraft pause` / `mailcraft resume`) | Engaging needs `manage`; releasing needs `admin` (a human). |
 | `doctor` | Exit 7 if any check fails. |
 
 Mutating commands also accept `--yes` (skip prompt), `--dry-run`, `--idempotency-key`. Exact subcommand coverage follows the build; SPEC.md 7.2 lists planned extras (`policy`, `audit`, `webhook listen`, `mcp serve`).
