@@ -53,7 +53,9 @@ pub fn exit_for(status: u16, code: &str) -> u8 {
         | "recipient_not_allowed"
         | "send_cap_exceeded"
         | "kill_switch_active"
-        | "test_key_live_recipient" => return exit::POLICY,
+        | "test_key_live_recipient"
+        | "domain_not_verified"
+        | "recipient_suppressed" => return exit::POLICY,
         "unauthenticated" | "forbidden_scope" => return exit::AUTH,
         "not_found" => return exit::NOT_FOUND,
         "rate_limited" | "llm_unavailable" => return exit::RETRYABLE,

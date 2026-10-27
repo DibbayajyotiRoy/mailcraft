@@ -11,8 +11,59 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Liveness (process is up; says nothing about Postgres or Redis) */
+        /** Liveness only (says nothing about Postgres or Redis) */
         get: operations["healthz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Readiness. Fails on Postgres / migrations; Redis is reported as a warning only. */
+        get: operations["readyz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Prometheus metrics (Bearer MAILCRAFT_METRICS_TOKEN when configured) */
+        get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/openapi.yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** This document */
+        get: operations["openapi"];
         put?: never;
         post?: never;
         delete?: never;
@@ -28,10 +79,545 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** List emails, newest first (scope read) */
+        get: operations["emails_list"];
+        put?: never;
+        /**
+         * Send one email (enqueue). Test keys sandbox it. Supports dry_run and Idempotency-Key.
+         * @description One `emails` row is queued per recipient. `data.status` is `queued` or `pending_approval`
+         *     (202, with `approval_id`; poll GET /v1/approvals/{id}, never decide). A `blocked` policy is
+         *     403 `blocked_by_policy`. `dry_run: true` stores nothing and returns 200 with `rendered`, `lint`, `would_send_via`.
+         *     Scope: send.
+         */
+        post: operations["emails_send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/emails/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
         get?: never;
         put?: never;
-        /** Send one email (queue it). Supports dry_run and Idempotency-Key. */
-        post: operations["emails_send"];
+        /** Send up to 100 emails. Response `data[]` is index-aligned with per-item `{ok,data|error}`. No dry_run. */
+        post: operations["emails_batch_send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/emails/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Email status (scope read) */
+        get: operations["email_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/emails/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a queued, deferred or pending_approval email (scope send) */
+        post: operations["email_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/emails/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Event timeline for one email (scope read) */
+        get: operations["email_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List keys (scope admin); never returns secrets */
+        get: operations["api_key_list"];
+        put?: never;
+        /** Create a key (scope admin). The secret is returned once. Keys made here never hold `admin`. */
+        post: operations["api_key_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a key (scope admin) */
+        get: operations["api_key_get"];
+        put?: never;
+        post?: never;
+        /** Revoke a key (scope admin) */
+        delete: operations["api_key_revoke"];
+        options?: never;
+        head?: never;
+        /** Change a key's policy, allowlist or caps (scope admin) */
+        patch: operations["api_key_update"];
+        trace?: never;
+    };
+    "/v1/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List domains (scope read) */
+        get: operations["domain_list"];
+        put?: never;
+        /** Add a sending domain; returns DNS records (scope manage; DomainService) */
+        post: operations["domain_add"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/domains/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a domain with record status (scope read) */
+        get: operations["domain_get"];
+        put?: never;
+        post?: never;
+        /** Delete a domain (scope manage) */
+        delete: operations["domain_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/domains/{id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-check DNS now (scope manage) */
+        post: operations["domain_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/domains/{id}/rotate-dkim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate the DKIM selector (scope manage) */
+        post: operations["domain_rotate_dkim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List contacts (scope manage) */
+        get: operations["contact_list"];
+        /** Upsert a contact (scope manage; ContactService) */
+        put: operations["contact_upsert"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/contacts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a contact by id or email (scope manage) */
+        get: operations["contact_get"];
+        put?: never;
+        post?: never;
+        /** Delete a contact (suppression records are kept) */
+        delete: operations["contact_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/contacts/{id}/suppress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Suppress a contact (scope manage) */
+        post: operations["contact_suppress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/segments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List segments (scope manage) */
+        get: operations["segment_list"];
+        put?: never;
+        /** Create a segment (scope manage; SegmentService) */
+        post: operations["segment_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/segments/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add contacts (by email) to a segment (scope manage) */
+        post: operations["segment_add_members"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Track an event (scope send or manage; EventService). Deduped by Idempotency-Key. */
+        post: operations["event_send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List approvals (scope read) */
+        get: operations["approval_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/approvals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One approval with preview payload (scope read). Agents poll this. */
+        get: operations["approval_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/approvals/{id}/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve or reject (scope admin; never granted to agent keys, deliberately absent from MCP) */
+        post: operations["approval_decide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/go-live-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask a human to enable live sending (scope manage). Creates a `go_live` approval. */
+        post: operations["go_live_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/policy/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Propose a key policy change; a human approves it (scope manage) */
+        post: operations["policy_propose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/kill-switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workspace switch and paused keys (scope read) */
+        get: operations["kill_switch_status"];
+        put?: never;
+        /**
+         * Engage (scope manage or admin) or disengage (scope admin only). Omit key_id for the whole workspace.
+         * @description Checked at API admission and at dequeue by the worker, so already-queued mail stops.
+         */
+        post: operations["kill_switch_set"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Audit log, newest first (scope read). Args are redacted. */
+        get: operations["audit_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recompute the hash chain (scope admin). `ok:false` names the first bad row. */
+        get: operations["audit_verify"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workspace flags, pending approvals and the calling key (scope read) */
+        get: operations["account_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List endpoints (scope manage); never returns secrets */
+        get: operations["webhook_list"];
+        put?: never;
+        /**
+         * Create an endpoint (scope manage). The `whsec_` secret is returned once. URL passes an SSRF guard.
+         * @description Deliveries are signed per Standard Webhooks (`webhook-id`, `webhook-timestamp`, `webhook-signature: v1,<b64 hmac-sha256>`
+         *     over `id.timestamp.body`) with `svix-*` twins. Retries: immediately, 5s, 5m, 30m, 2h, 5h, 10h, 10h (8 attempts, +/-10% jitter)
+         *     on 5xx/408/429/network; other 4xx is final. 5 consecutive exhausted deliveries disable the endpoint.
+         */
+        post: operations["webhook_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an endpoint (scope manage) */
+        delete: operations["webhook_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a `test.ping` delivery (scope manage) */
+        post: operations["webhook_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhooks/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent deliveries for an endpoint (scope manage) */
+        get: operations["webhook_deliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/webhook-deliveries/{id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-queue a delivery (scope manage) */
+        post: operations["webhook_delivery_replay"];
         delete?: never;
         options?: never;
         head?: never;
@@ -42,14 +628,37 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description action -> decision */
+        KeyPolicy: {
+            /** @enum {string} */
+            send?: "auto" | "needs_approval" | "blocked";
+        };
+        CreateKey: {
+            name: string;
+            /** @enum {string} */
+            env: "test" | "live";
+            scopes: ("read" | "send" | "manage")[];
+            /** Format: uuid */
+            domain_id?: string;
+            policy?: components["schemas"]["KeyPolicy"];
+            /** @description exact addresses or @domain entries; test keys may also use magic addresses */
+            recipient_allowlist?: string[];
+            daily_send_cap?: number;
+            minute_send_cap?: number;
+            /** Format: date-time */
+            expires_at?: string;
+        };
         SendEmail: {
+            /** @description required for live keys; must be on a verified domain */
             from?: string;
             to: string[];
             subject?: string;
             html?: string;
             text?: string;
+            reply_to?: string;
             template?: {
-                id?: string;
+                /** @description alias or uuid */
+                id: string;
                 variables?: Record<string, never>;
             };
             /**
@@ -58,15 +667,44 @@ export interface components {
              */
             stream: "transactional" | "marketing";
             tags?: Record<string, never>[];
+            /** @description custom headers; platform-owned headers are rejected */
+            headers?: {
+                [key: string]: string;
+            };
             /** Format: date-time */
             scheduled_at?: string;
             /** @default false */
             dry_run: boolean;
         };
+        SendResult: {
+            /**
+             * Format: uuid
+             * @description first recipient's email id
+             */
+            id?: string;
+            /** @enum {string} */
+            status?: "queued" | "pending_approval";
+            stream?: string;
+            /** Format: uuid */
+            approval_id?: string;
+            policy_decisions?: Record<string, never>[];
+            recipients?: {
+                email?: string;
+                /** Format: uuid */
+                id?: string;
+            }[];
+        };
         ErrorEnvelope: {
             /** @constant */
             ok: false;
+            request_id?: string;
             error: {
+                /**
+                 * @description Stable. invalid_request, unauthenticated, forbidden_scope, not_found, idempotency_key_reused,
+                 *     rate_limited, domain_not_verified, recipient_suppressed, recipient_not_allowed, blocked_by_policy,
+                 *     send_cap_exceeded, kill_switch_active, test_key_live_recipient, approval_already_decided,
+                 *     invalid_state, not_implemented, internal_error
+                 */
                 code: string;
                 message: string;
                 field?: string;
@@ -87,7 +725,10 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        Id: string;
+        IdempotencyKey: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -116,11 +757,95 @@ export interface operations {
             };
         };
     };
+    readyz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ready */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description not ready */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text exposition format */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    openapi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description yaml */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    emails_list: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                status?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description page of emails */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     emails_send: {
         parameters: {
             query?: never;
             header?: {
-                "Idempotency-Key"?: string;
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
             cookie?: never;
@@ -131,7 +856,48 @@ export interface operations {
             };
         };
         responses: {
-            /** @description queued */
+            /** @description dry run preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description queued or pending_approval */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    emails_batch_send: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    emails: components["schemas"]["SendEmail"][];
+                };
+            };
+        };
+        responses: {
+            /** @description per-item results */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -139,8 +905,925 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    email_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description email */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    email_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    email_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    api_key_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description keys */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    api_key_create: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateKey"];
+            };
+        };
+        responses: {
+            /** @description created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    api_key_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    api_key_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    api_key_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    policy?: components["schemas"]["KeyPolicy"];
+                    recipient_allowlist?: string[];
+                    daily_send_cap?: number;
+                    minute_send_cap?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    domain_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description domains */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             501: components["responses"]["Error"];
+        };
+    };
+    domain_add: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    domain: string;
+                    /** @enum {string} */
+                    stream?: "transactional" | "marketing";
+                    tracking?: {
+                        clicks?: boolean;
+                        opens?: boolean;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    domain_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description domain */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    domain_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    domain_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description domain with updated records */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    domain_rotate_dkim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description domain */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    contact_list: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description page of contacts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    contact_upsert: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    first_name?: string;
+                    last_name?: string;
+                    timezone?: string;
+                    properties?: Record<string, never>;
+                };
+            };
+        };
+        responses: {
+            /** @description contact */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    contact_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description contact */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    contact_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    contact_suppress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description suppressed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    segment_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description segments */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    segment_create: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    filter?: Record<string, never>;
+                };
+            };
+        };
+        responses: {
+            /** @description segment */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    segment_add_members: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    emails: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    event_send: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    contact: {
+                        email: string;
+                    };
+                    properties?: Record<string, never>;
+                    contact_properties?: Record<string, never>;
+                    dry_run?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description dry run result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["Error"];
+        };
+    };
+    approval_list: {
+        parameters: {
+            query?: {
+                status?: "pending" | "approved" | "rejected" | "expired";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description approvals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    approval_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description approval */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    approval_decide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    decision: "approve" | "reject";
+                };
+            };
+        };
+        responses: {
+            /** @description decided */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    go_live_request: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description pending approval */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    policy_propose: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    key_id: string;
+                    policy: components["schemas"]["KeyPolicy"];
+                };
+            };
+        };
+        responses: {
+            /** @description pending approval */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    kill_switch_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    kill_switch_set: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    on: boolean;
+                    /** Format: uuid */
+                    key_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Error"];
+        };
+    };
+    audit_list: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description id cursor */
+                before?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description rows */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    audit_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description {ok, checked, first_bad_id} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    account_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description endpoints */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_create: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uri */
+                    url: string;
+                    /**
+                     * @default [
+                     *       "*"
+                     *     ]
+                     */
+                    events?: string[];
+                    description?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    webhook_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    webhook_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_deliveries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deliveries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_delivery_replay: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }

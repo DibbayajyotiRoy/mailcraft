@@ -24,7 +24,7 @@ With a stored template:
 mailcraft send --to ana@example.org --from hello@example.com --template welcome \
   --data '{"first_name":"Ana","app_url":"https://app.example.com"}' --json
 ```
-Result: `{"ok":true,"data":{"id":"em_...","status":"queued"},"request_id":"req_...","schema":1}`.
+Result: `{"ok":true,"data":{"id":"<uuid>","status":"queued","recipients":[{"email":"...","id":"<uuid>"}]},"request_id":"req_...","schema":1}`.
 
 ## Magic addresses (test keys, any domain, `+label` allowed)
 `delivered@test.mailcraft.local`, `bounced@` (550 5.1.1), `complained@`, `suppressed@`, `deferred@` (4.2.0 then success).
@@ -34,4 +34,4 @@ Result: `{"ok":true,"data":{"id":"em_...","status":"queued"},"request_id":"req_.
 - `domain_not_verified`: see mailcraft-setup-domain. `From` must be on a verified domain (or your Gmail address if connected via Gmail).
 - `template_render_failed`: a variable is missing; undefined variables are errors, not blanks. Pass every variable in `--data`.
 - Transactional mail carries no tracking and no unsubscribe header; do not put marketing content in it.
-- `pending_approval` is HTTP 202, not an error. Tell the human; poll `mailcraft emails get`.
+- `pending_approval` is HTTP 202, not an error. Tell the human; poll `mailcraft approvals list` (the `approval_id` is in the result).

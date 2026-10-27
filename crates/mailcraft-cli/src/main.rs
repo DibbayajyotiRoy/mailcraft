@@ -113,8 +113,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ApprovalsCmd,
     },
-    /// Engage (on) or release (off) the org kill switch.
+    /// Engage (on|pause) or release (off|resume) the kill switch. Engaging needs `manage`; releasing needs `admin`.
     KillSwitch { state: OnOff },
+    /// SPEC name for `kill-switch on`.
+    Pause,
+    /// SPEC name for `kill-switch off`.
+    Resume,
     /// Check port 25, FCrDNS, blocklists, DNS records, delivery path.
     Doctor {
         /// Public egress IP to check FCrDNS and blocklists for (or MAILCRAFT_EGRESS_IP).
@@ -125,7 +129,9 @@ enum Cmd {
 
 #[derive(clap::ValueEnum, Clone)]
 enum OnOff {
+    #[value(alias = "pause")]
     On,
+    #[value(alias = "resume")]
     Off,
 }
 
@@ -170,6 +176,14 @@ enum DomainCmd {
 #[derive(Subcommand)]
 enum EmailsCmd {
     Get {
+        id: String,
+    },
+    /// Event timeline (delivered, bounced, ...).
+    Events {
+        id: String,
+    },
+    /// Cancel a queued, deferred or pending_approval email.
+    Cancel {
         id: String,
     },
     List {
@@ -512,6 +526,10 @@ fn run(cli: &Cli) -> R {
             let api = require_key(&cfg)?;
             match cmd {
                 EmailsCmd::Get { id } => ok(api.get(&format!("/v1/emails/{}", enc(id)))?),
+                EmailsCmd::Events { id } => ok(api.get(&format!("/v1/emails/{}/events", enc(id)))?),
+                EmailsCmd::Cancel { id } => {
+                    ok(api.post(&format!("/v1/emails/{}/cancel", enc(id)), &json!({}), None)?)
+                }
                 EmailsCmd::List {
                     status,
                     limit,
@@ -663,13 +681,13 @@ fn run(cli: &Cli) -> R {
                 }
             }
         }
-        Cmd::KillSwitch { state } => {
+        Cmd::KillSwitch { .. } | Cmd::Pause | Cmd::Resume => {
+            let on = match &cli.cmd {
+                Cmd::KillSwitch { state } => matches!(state, OnOff::On),
+                c => matches!(c, Cmd::Pause),
+            };
             let api = require_key(&cfg)?;
-            ok(api.post(
-                "/v1/kill-switch",
-                &json!({"on": matches!(state, OnOff::On)}),
-                None,
-            )?)
+            ok(api.post("/v1/kill-switch", &json!({"on": on}), None)?)
         }
     }
 }

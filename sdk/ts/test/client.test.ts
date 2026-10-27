@@ -8,10 +8,10 @@ const mk = (res: () => Response | Promise<Response>) => {
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
 
 test("emails.send posts with auth + Idempotency-Key and returns data", async () => {
-  const { f, mc } = mk(() => json({ ok: true, request_id: "req_1", data: { id: "em_1", status: "queued" } }, 202));
+  const { f, mc } = mk(() => json({ ok: true, request_id: "req_1", data: { id: "0192f3a0-7b1c-7a10-8000-000000000001", status: "queued" } }, 202));
   const r = await mc.emails.send({ from: "a@b.co", to: ["x@y.co"], subject: "hi", html: "<p>hi</p>" }, { idempotencyKey: "k1" });
   expect(r.error).toBeNull();
-  expect(r.data?.id).toBe("em_1");
+  expect(r.data?.id).toBe("0192f3a0-7b1c-7a10-8000-000000000001");
   expect(r.requestId).toBe("req_1");
   const [url, init] = f.mock.calls[0];
   expect(url).toBe("http://api.test/v1/emails");
@@ -49,10 +49,10 @@ test("list passes query + cursor, path ids are encoded", async () => {
 
 test("domains.verify, events.track, approvals.get hit the assumed routes", async () => {
   const { f, mc } = mk(() => json({ ok: true, data: {} }));
-  await mc.domains.verify("dom_1");
+  await mc.domains.verify("0192f3a0-7b1c-7a10-8000-0000000000d1");
   await mc.events.track({ name: "signed_up", contact: { email: "a@b.co" } });
-  await mc.approvals.get("ap_1");
+  await mc.approvals.get("0192f3a0-7b1c-7a10-8000-0000000000a1");
   expect(f.mock.calls.map((c) => `${c[1]?.method} ${c[0]}`)).toEqual([
-    "POST http://api.test/v1/domains/dom_1/verify", "POST http://api.test/v1/events", "GET http://api.test/v1/approvals/ap_1",
+    "POST http://api.test/v1/domains/0192f3a0-7b1c-7a10-8000-0000000000d1/verify", "POST http://api.test/v1/events", "GET http://api.test/v1/approvals/0192f3a0-7b1c-7a10-8000-0000000000a1",
   ]);
 });

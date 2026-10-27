@@ -3,7 +3,7 @@ import { get } from "@/lib/api";
 import { ErrorBanner, StatusBadge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
-const STATUSES = ["queued", "sent", "delivered", "deferred", "bounced", "complained", "failed", "cancelled"];
+const STATUSES = ["queued", "pending_approval", "sending", "deferred", "sent", "delivered", "bounced", "failed", "suppressed", "cancelled"];
 
 export default async function Emails({ searchParams }: { searchParams: Promise<{ status?: string; cursor?: string }> }) {
   const { status, cursor } = await searchParams;
@@ -32,7 +32,7 @@ export default async function Emails({ searchParams }: { searchParams: Promise<{
               {(r.data as any[]).map((e) => (
                 <tr key={e.id}>
                   <td><Link href={`/emails/${e.id}`}>{e.subject || "(no subject)"}</Link></td>
-                  <td>{(e.to ?? []).join(", ")}</td><td><StatusBadge status={e.status} /></td><td>{e.created_at}</td>
+                  <td>{e.to_addr}</td><td><StatusBadge status={e.status} /></td><td>{e.created_at}</td>
                 </tr>
               ))}
               {!(r.data as any[]).length && <tr><td colSpan={4} className="muted">No emails.</td></tr>}

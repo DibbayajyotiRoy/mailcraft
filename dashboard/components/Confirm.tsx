@@ -12,7 +12,8 @@ export function KeyForm() {
   return (
     <form action={act} className="stack">
       <label>Name<input name="name" required /></label>
-      <label>Scopes (space or comma separated, optional)<input name="scopes" placeholder="emails:send templates:read" /></label>
+      <label>Environment<select name="env"><option>test</option><option>live</option></select></label>
+      <label>Scopes (read, send, manage; space or comma separated)<input name="scopes" defaultValue="read send" /></label>
       <button type="submit" disabled={pending}>Create key</button>
       {s.error && <div role="alert" className="banner">{s.error}</div>}
       {s.secret && (

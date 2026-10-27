@@ -65,7 +65,7 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `keys list`, `keys revoke <id>` | |
 | `approvals list` | |
 | `approvals approve <id>` / `reject <id>` | Human only. Refused with agent keys. |
-| `kill-switch on\|off` | Agents may turn it on; only a human turns it off. |
+| `kill-switch on\|off` (aliases `pause` / `resume`) | Engaging needs `manage`; releasing needs `admin` (a human). |
 | `doctor` | Exit 7 if any check fails. |
 
 Mutating commands also accept `--yes` (skip prompt), `--dry-run`, `--idempotency-key`. Exact subcommand coverage follows the build; SPEC.md 7.2 lists planned extras (`policy`, `audit`, `webhook listen`, `mcp serve`).
@@ -73,7 +73,7 @@ Mutating commands also accept `--yes` (skip prompt), `--dry-run`, `--idempotency
 ## MCP
 Remote: `https://<host>/mcp` (Streamable HTTP; OAuth or `Authorization: Bearer mc_...`). Local: `npx -y @dibbayajyotiroy/mailcraft-mcp` (use only this scoped package; look-alikes would receive your key). Flags `--tools a,b`, `--read-only`. Operation ids from openapi.yaml are tool names.
 
-Tools: account_status, domain_add, domain_check, transport_add, transport_test, sender_set_default, go_live_request; event_define, event_list, event_send; automation_create/get/list/update/pause/resume/simulate/runs; template_create/update/get/list/publish/preview/import/export, content_lint, llm_draft_preview; email_send, email_batch_send, email_get, email_list, email_cancel, test_send; contact_upsert/get/list/delete/suppress, segment_create/list; policy_get, policy_propose, approval_list, approval_get, suppression_list, audit_list, webhook_create/list/test, logs_list, api_key_create (admin scope), kill_switch_status; docs_search.
+Tools: account_status, go_live_request, kill_switch_status, kill_switch_engage; email_send, email_get, email_events, email_cancel, email_list; domain_add, domain_check; event_send; automation_create/get/list/pause/resume/simulate/runs; template_create/get/list/update/publish/preview/import/export, content_lint; contact_upsert/get/list/delete; policy_get, policy_propose, approval_list, approval_get, audit_list, doctor. (Batch send, webhooks, segments, suppressions are REST-only for now.)
 
 Absent from agent sessions: approval_decide, policy_set, kill_switch_set to off, go_live_approve. Inbound-as-untrusted and reply tools are LATER.
 
