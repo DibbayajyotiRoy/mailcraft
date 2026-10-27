@@ -1,0 +1,15 @@
+From: MAILER-DAEMON@yahoo.com
+To: {{VERP}}
+Subject: Failure Notice
+Date: Tue, 27 Oct 2026 10:06:00 +0000
+Message-ID: <yfail-1@yahoo.test>
+Content-Type: text/plain; charset=utf-8
+
+Sorry, we were unable to deliver your message to the following address.
+
+<closed.account@yahoo.com>:
+554 delivery error: dd This user doesn't have a yahoo.com account (closed.account@yahoo.com) [0] - mta1234.mail.yahoo.test
+
+--- Original message follows ---
+Return-Path: <{{VERP}}>
+Message-ID: <{{MSGID}}@mail.example.test>

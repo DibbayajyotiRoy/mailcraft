@@ -1,0 +1,34 @@
+From: postmaster@contoso-example.test
+To: {{VERP}}
+Subject: Undeliverable: Your October update
+Date: Tue, 27 Oct 2026 10:00:00 +0000
+Message-ID: <dsn-outlook_recipient_not_found@mx.bounce-sender.test>
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="BND"
+
+--BND
+Content-Type: text/plain; charset=utf-8
+
+This is an automated delivery status notification for gone@contoso-example.test.
+
+--BND
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; outlook.com
+Arrival-Date: Tue, 27 Oct 2026 09:59:58 +0000
+
+Final-Recipient: rfc822; gone@contoso-example.test
+Action: failed
+Status: 5.1.10
+Diagnostic-Code: smtp; 550 5.1.10 RESOLVER.ADR.RecipientNotFound; Recipient not found by SMTP address lookup
+
+--BND
+Content-Type: text/rfc822-headers
+
+Return-Path: <{{VERP}}>
+From: News <hello@mail.example.test>
+To: gone@contoso-example.test
+Subject: Your October update
+Message-ID: <{{MSGID}}@mail.example.test>
+
+--BND--

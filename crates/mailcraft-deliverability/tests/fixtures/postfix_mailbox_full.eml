@@ -1,0 +1,34 @@
+From: MAILER-DAEMON@postfix-host.test
+To: {{VERP}}
+Subject: Undelivered Mail Returned to Sender
+Date: Tue, 27 Oct 2026 10:00:00 +0000
+Message-ID: <dsn-postfix_mailbox_full@mx.bounce-sender.test>
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="BND"
+
+--BND
+Content-Type: text/plain; charset=utf-8
+
+This is an automated delivery status notification for full@corp.example.org.
+
+--BND
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mail.postfix-host.test
+Arrival-Date: Tue, 27 Oct 2026 09:59:58 +0000
+
+Final-Recipient: rfc822; full@corp.example.org
+Action: failed
+Status: 5.2.2
+Diagnostic-Code: smtp; 552 5.2.2 <full@corp.example.org>: Recipient address rejected: Mailbox full
+
+--BND
+Content-Type: text/rfc822-headers
+
+Return-Path: <{{VERP}}>
+From: News <hello@mail.example.test>
+To: full@corp.example.org
+Subject: Your October update
+Message-ID: <{{MSGID}}@mail.example.test>
+
+--BND--
