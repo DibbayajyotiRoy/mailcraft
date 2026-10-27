@@ -495,6 +495,38 @@ paths:
         "200": { description: unsubscribed from the token's category }
         "400": { description: invalid link or missing one-click marker }
         "410": { description: expired link }
+  /ingest/raw:
+    post:
+      operationId: ingest_raw
+      security: []
+      summary: Ingest one raw RFC 822 bounce (DSN) or feedback-loop (ARF) report.
+      description: |
+        Authenticated by `MAILCRAFT_INGEST_TOKEN` (`Authorization: Bearer` or `?token=`), not an API key.
+        The report is mapped to an email only through a MAC-verified VERP address inside it; anything
+        else is ignored (`outcome: null`). Records a `bounced` / `complained` event and applies the
+        suppression policy. Idempotent per email.
+      requestBody: { required: true, content: { message/rfc822: { schema: { type: string, format: binary } } } }
+      responses:
+        "200": { description: "`data.outcome` is null when nothing was recorded" }
+        "401": { $ref: "#/components/responses/Error" }
+        "503": { description: ingest token not configured }
+  /ingest/ses:
+    post:
+      operationId: ingest_ses
+      security: []
+      summary: Amazon SES bounce and complaint notifications via SNS (HTTPS subscription).
+      description: |
+        Subscribe the SNS topic to `https://<host>/ingest/ses?token=<MAILCRAFT_INGEST_TOKEN>`. The
+        `TopicArn` must be listed in `MAILCRAFT_SES_TOPIC_ARNS`. Handles `SubscriptionConfirmation`
+        (confirms against an https `sns.*.amazonaws.com` URL only) and `Notification`
+        (Bounce / Complaint; matched to the email by SES message id).
+      requestBody: { required: true, content: { text/plain: { schema: { type: string } } } }
+      responses:
+        "200": { description: processed, ignored or confirmed }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { description: ingest token not configured }
   /v1/setup:
     post:
       operationId: setup

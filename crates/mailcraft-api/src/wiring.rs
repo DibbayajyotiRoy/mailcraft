@@ -53,25 +53,28 @@ pub struct DeliverabilityFinalizer {
     domains: PgDomains,
     keys: PgKeys,
     settings: FinalizerSettings,
+    unsub_secret: Vec<u8>,
     cache: Mutex<HashMap<Uuid, (Instant, Arc<TenantConfig>)>>,
 }
 
 impl DeliverabilityFinalizer {
     pub fn new(pool: PgPool, secrets: SecretBox, unsub_secret: &[u8]) -> Self {
-        let mut verp = b"verp:".to_vec();
-        verp.extend_from_slice(unsub_secret);
         Self {
             domains: PgDomains::new(pool.clone()),
             keys: PgKeys::new(pool, secrets),
             settings: FinalizerSettings {
-                verp_secret: verp,
+                verp_secret: crate::ingest::verp_secret(unsub_secret),
                 unsub_secret: unsub_secret.to_vec(),
                 unsub_base_url: public_url(),
-                unsub_mailto: None, // ponytail: no inbound mailbox yet; one-click POST is the unsubscribe path
+                // e.g. unsub@mx.example.com; needs MAILCRAFT_INBOUND_SMTP_BIND + an MX for that host.
+                unsub_mailto: std::env::var("MAILCRAFT_UNSUB_MAILTO")
+                    .ok()
+                    .filter(|m| !m.is_empty()),
                 unsub_ttl_secs: UNSUB_TTL_SECS,
                 feedback_sender_id: "mailcraft".into(),
                 transactional_unsubscribe: false,
             },
+            unsub_secret: unsub_secret.to_vec(),
             cache: Default::default(),
         }
     }
@@ -100,6 +103,11 @@ impl DeliverabilityFinalizer {
 
 #[async_trait]
 impl Finalizer for DeliverabilityFinalizer {
+    fn return_path(&self, email_id: Uuid, host: &str) -> String {
+        // MAC-signed VERP, checked by the inbound receiver before it trusts a bounce.
+        crate::ingest::return_path(&self.unsub_secret, email_id, host)
+    }
+
     async fn finalize(&self, ctx: &FinalizeCtx, raw: Vec<u8>) -> Result<Vec<u8>> {
         // No domain (Gmail path): the provider signs.
         let Some(domain_id) = ctx.domain_id else {
@@ -226,6 +234,7 @@ pub async fn serve(
         auto::personalizer_from_env(pool),
         auto::EngineConfig::default(),
     );
+    let stop_rx = rx.clone();
     let mut rx2 = rx;
     tasks.spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -236,6 +245,18 @@ pub async fn serve(
             }
         }
     });
+    if let Some(bind) = std::env::var("MAILCRAFT_INBOUND_SMTP_BIND")
+        .ok()
+        .filter(|b| !b.is_empty())
+    {
+        let max = std::env::var("MAILCRAFT_INBOUND_MAX_BYTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5 << 20);
+        let l = tokio::net::TcpListener::bind(&bind).await?;
+        tracing::info!(%bind, "inbound SMTP (bounces, complaints, mailto unsubscribe)");
+        tasks.spawn(crate::smtp_in::serve(st.clone(), l, max, stop_rx));
+    }
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "mailcraft-server listening (api + engine + automations + webhooks)");
     axum::serve(listener, crate::router(st))

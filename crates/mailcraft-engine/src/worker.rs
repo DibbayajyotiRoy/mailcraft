@@ -6,7 +6,6 @@ use crate::{
         db_err, FinalizeCtx, Finalizer, LinkMaker, NoLinks, NoopFinalizer, PgSuppressions,
         ResolvedTransport, SuppressionCheck, TransportResolver,
     },
-    verp_mail_from,
 };
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use mailcraft_core::{retry, Result, Stream};
@@ -539,7 +538,7 @@ impl Engine {
             }
         };
         let mail_from = match &job.return_path_host {
-            Some(h) => verp_mail_from(job.id, h),
+            Some(h) => self.finalizer.return_path(job.id, h),
             None => mime::parse_mailbox(&job.from_addr).1,
         };
         let out = Outbound {
