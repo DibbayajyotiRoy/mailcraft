@@ -1,6 +1,7 @@
 //! Pure validator: no I/O. Every number, host, URL, error code and parameter
 //! name in the slots must exist in the context JSON or an allowlist.
 use crate::contract::Slots;
+use crate::personalize::EXAMPLE_SENTENCES;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -38,6 +39,15 @@ pub struct ValidatorConfig {
     pub allow_exclamation: bool,
 }
 
+/// First-person observation and apology openers (matched on whole words).
+const VOICE_PHRASES: &[&str] = &[
+    "i noticed",
+    "i saw",
+    "i was looking",
+    "sorry to bother",
+    "apologies",
+];
+
 const SPAM_PHRASES: &[&str] = &[
     "act now",
     "limited time",
@@ -72,8 +82,8 @@ impl Default for ValidatorConfig {
             max_preheader_chars: 110,
             max_greeting_chars: 40,
             max_cta_chars: 30,
-            max_body_words: 120,
-            max_paragraphs: 3,
+            max_body_words: 80,
+            max_paragraphs: 2,
             max_caps_ratio: 0.3,
             allow_exclamation: false,
         }
@@ -282,6 +292,14 @@ impl Validator {
                 ),
             );
         }
+        let cta_words = slots.cta_label.split_whitespace().count();
+        if !slots.cta_label.trim().is_empty() && !(2..=4).contains(&cta_words) {
+            v(
+                "length",
+                "cta_label",
+                format!("{cta_words} words, need 2-4"),
+            );
+        }
         for (name, text, max) in [
             ("subject", &slots.subject, c.max_subject_chars),
             ("preheader", &slots.preheader, c.max_preheader_chars),
@@ -304,6 +322,67 @@ impl Validator {
                 "body_paragraphs",
                 format!("{words} words, max {}", c.max_body_words),
             );
+        }
+
+        // greeting slot owns the greeting and the name (bake-off: models repeated "Hi Ana," in the body)
+        let greet = slots.greeting.trim();
+        if !greet.is_empty() && !greet.ends_with(',') {
+            v(
+                "greeting",
+                "greeting",
+                "greeting must end with a comma".into(),
+            );
+        }
+        let g = greet.trim_end_matches(',').trim().to_lowercase();
+        let name = g
+            .split_whitespace()
+            .last()
+            .filter(|_| g.contains(' '))
+            .unwrap_or("");
+        for (i, p) in slots.body_paragraphs.iter().enumerate() {
+            let p = p.trim().to_lowercase();
+            let repeats = |t: &str| {
+                !t.is_empty()
+                    && p.strip_prefix(t)
+                        .is_some_and(|r| !r.starts_with(|c: char| c.is_alphanumeric()))
+            };
+            if repeats(&g)
+                || (!name.is_empty() && p.strip_prefix(name).is_some_and(|r| r.starts_with(',')))
+            {
+                v(
+                    "greeting_repeat",
+                    &format!("body_paragraphs[{i}]"),
+                    "do not repeat the greeting or the name at the start of a paragraph".into(),
+                );
+            }
+        }
+
+        // voice: no first-person observation, no apology openers, no copying the prompt example
+        for (i, p) in slots.body_paragraphs.iter().enumerate() {
+            let slot = format!("body_paragraphs[{i}]");
+            let plain: String = p
+                .to_lowercase()
+                .chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '\'' {
+                        c
+                    } else {
+                        ' '
+                    }
+                })
+                .collect();
+            let plain = format!(
+                " {} ",
+                plain.split_whitespace().collect::<Vec<_>>().join(" ")
+            );
+            for ph in VOICE_PHRASES {
+                if plain.contains(&format!(" {ph} ")) {
+                    v("voice", &slot, format!("avoid {ph:?}"));
+                }
+            }
+            if EXAMPLE_SENTENCES.iter().any(|e| p.contains(e)) {
+                v("example_leak", &slot, "copied the prompt example".into());
+            }
         }
 
         for (slot, text) in slots.texts() {
@@ -595,6 +674,72 @@ mod tests {
             ..ok_slots()
         };
         assert!(rules(&s).contains(&"caps"));
+    }
+    /// Bake-off outputs (nemotron, 2026-10-27, mailer-research/bakeoff.md): greeting repeated in the body.
+    #[test]
+    fn bakeoff_greeting_repeats_are_caught() {
+        let b = |greeting: &str, body: &str| Slots {
+            greeting: greeting.into(),
+            body_paragraphs: vec![body.into()],
+            ..ok_slots()
+        };
+        let c = json!({"hours": 26, "n": 4, "pct": 75, "used": 800, "limit": 1000});
+        let run_c = |s: &Slots| -> Vec<&'static str> {
+            let v = Validator::new(ValidatorConfig::default()).unwrap();
+            v.validate(s, &c).into_iter().map(|x| x.rule).collect()
+        };
+        // J2 / J7: "Hi Ana," twice
+        let j2 = b(
+            "Hi Ana,",
+            "Hi Ana, it has been 26 hours since you signed up.",
+        );
+        assert!(run_c(&j2).contains(&"greeting_repeat"));
+        // J5: no comma in greeting AND repeated
+        let j5 = b(
+            "Hi Ana",
+            "Hi Ana, you made 4 requests. Your success rate is 75%.",
+        );
+        let r = run_c(&j5);
+        assert!(r.contains(&"greeting") && r.contains(&"greeting_repeat"));
+        // J6: bare name + comma in body
+        let j6 = b("Hi Ana", "Ana, your first request was returned.");
+        assert!(run_c(&j6).contains(&"greeting_repeat"));
+        // good: greeting once, body starts with content (also "Hiring" / "Anagram" are not repeats)
+        let ok = b(
+            "Hi Ana,",
+            "You have used 800 of 1000 credits. Anagram: what are you building?",
+        );
+        assert!(run_c(&ok).is_empty(), "{:?}", run_c(&ok));
+        assert!(run_c(&b("Hi,", "Hiring is not a repeat.")).is_empty());
+        assert!(run_c(&b("Hi,", "Hi, again.")).contains(&"greeting_repeat"));
+    }
+    #[test]
+    fn voice_cta_and_example_leak() {
+        for body in [
+            "I noticed you signed up.",
+            "I saw a failed request.",
+            "Sorry to bother you, quick note.",
+            "Apologies for the wait.",
+        ] {
+            assert!(rules(&with_body(body)).contains(&"voice"), "{body}");
+        }
+        assert!(!rules(&with_body("We saw a failed request.")).contains(&"voice"));
+        for e in EXAMPLE_SENTENCES {
+            assert!(rules(&with_body(e)).contains(&"example_leak"), "{e}");
+        }
+        for cta in ["Go", "Open the docs page right now"] {
+            let s = Slots {
+                cta_label: cta.into(),
+                ..ok_slots()
+            };
+            assert!(rules(&s).contains(&"length"), "{cta}");
+        }
+        let s = Slots {
+            body_paragraphs: vec!["a b.".into(); 3],
+            ..ok_slots()
+        };
+        assert!(rules(&s).contains(&"length"));
+        assert!(rules(&with_body(&"word ".repeat(81))).contains(&"length"));
     }
     #[test]
     fn sanitize() {

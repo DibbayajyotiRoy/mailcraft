@@ -14,6 +14,8 @@ pub struct OpenAiCompatConfig {
     pub extra_headers: Vec<(String, String)>,
     /// OpenRouter-only: sends `provider: {require_parameters: true}` and `models` fallbacks.
     pub require_parameters: bool,
+    /// OpenRouter `reasoning` object (`{"enabled":false}` or `{"effort":"low"}`); omitted when None.
+    pub reasoning: Option<Value>,
     pub timeout: Duration,
     pub max_retries: u32,
     pub backoff_base: Duration,
@@ -39,6 +41,7 @@ impl OpenAiCompatConfig {
             api_key: key,
             extra_headers: vec![],
             require_parameters: false,
+            reasoning: None,
             timeout: Duration::from_secs(60),
             max_retries: 3,
             backoff_base: Duration::from_millis(500),
@@ -102,6 +105,9 @@ impl OpenAiCompat {
         if let Some(s) = &r.json_schema {
             b["response_format"] = json!({"type": "json_schema",
                 "json_schema": {"name": "email_slots", "strict": true, "schema": s}});
+        }
+        if let Some(r) = &self.cfg.reasoning {
+            b["reasoning"] = r.clone();
         }
         if self.cfg.require_parameters {
             b["provider"] = json!({"require_parameters": true});
