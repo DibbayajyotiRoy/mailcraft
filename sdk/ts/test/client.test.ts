@@ -56,3 +56,14 @@ test("domains.verify, events.track, approvals.get hit the assumed routes", async
     "POST http://api.test/v1/domains/0192f3a0-7b1c-7a10-8000-0000000000d1/verify", "POST http://api.test/v1/events", "GET http://api.test/v1/approvals/0192f3a0-7b1c-7a10-8000-0000000000a1",
   ]);
 });
+
+test("settings.instructions get/set/clear", async () => {
+  const { f, mc } = mk(() => json({ ok: true, request_id: "r", data: { custom_instructions: "Be warm." } }));
+  expect((await mc.settings.instructions.get()).data).toEqual({ custom_instructions: "Be warm." });
+  await mc.settings.instructions.set("Hi");
+  await mc.settings.instructions.clear();
+  const bodies = f.mock.calls.slice(1).map((c) => [c[1]?.method, JSON.parse(c[1]?.body as string)]);
+  expect(bodies).toEqual([["PUT", { custom_instructions: "Hi" }], ["PUT", { custom_instructions: "" }]]);
+  const e = mk(() => json({ ok: false, error: { code: "forbidden_scope", message: "m" } }, 403));
+  expect((await e.mc.settings.instructions.set("x")).error?.code).toBe("forbidden_scope");
+});

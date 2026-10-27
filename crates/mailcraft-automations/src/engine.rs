@@ -1090,6 +1090,7 @@ impl Engine {
                 slots: slots.clone(),
                 context: Value::Object(vars.clone()),
                 instructions: c.instructions.clone(),
+                custom_instructions: c.custom_instructions.clone(),
             };
             // ponytail: called under the run's row lock; move before the tx if LLM latency hurts
             let got = match self.personalizer.personalize(req).await {

@@ -101,3 +101,20 @@ test("network failure is an isError result without leaking the key", async () =>
   expect(r.content[0].text).not.toContain("mc_test_secret");
   expect(JSON.parse(r.content[0].text).error.code).toBe("network_error");
 });
+
+test("settings_set_instructions PUTs /v1/settings, is destructive, and honours API errors", async () => {
+  seen = [];
+  const c = await client();
+  const tools = (await c.listTools()).tools;
+  expect(tools.find((t) => t.name === "settings_set_instructions")!.annotations!.destructiveHint).toBe(true);
+  expect(tools.find((t) => t.name === "settings_get_instructions")!.annotations!.readOnlyHint).toBe(true);
+  await c.callTool({ name: "settings_set_instructions", arguments: { custom_instructions: "Be warm." } });
+  expect(seen[0].method).toBe("PUT");
+  expect(seen[0].url).toBe("/v1/settings");
+  expect(JSON.parse(seen[0].body)).toEqual({ custom_instructions: "Be warm." });
+  respond = () => [403, { ok: false, error: { code: "forbidden_scope", message: "admin", hint: "use admin" }, request_id: "r" }];
+  const r: any = await c.callTool({ name: "settings_set_instructions", arguments: { custom_instructions: "x" } });
+  respond = () => [200, { ok: true, data: {}, request_id: "req_1" }];
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toContain("forbidden_scope");
+});

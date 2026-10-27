@@ -65,6 +65,7 @@ fn req(ws: Uuid) -> PersonalizeRequest {
         ],
         context: json!({"contact": {"first_name": "Ana"}}),
         instructions: Some("Welcome the contact.".into()),
+        custom_instructions: None,
     }
 }
 

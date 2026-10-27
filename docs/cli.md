@@ -45,6 +45,7 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `keys list`, `keys revoke <id>` | |
 | `approvals list` | |
 | `approvals approve <id>` / `reject <id>` | Human only. Refused with agent keys. |
+| `settings instructions set "<text>"\|set --file <path>\|get\|clear` | Workspace writing instructions for LLM emails (max 2,000 chars). Changing needs `admin`. |
 | `kill-switch on\|off` (aliases `pause` / `resume`, also top-level `mailcraft pause` / `mailcraft resume`) | Engaging needs `manage`; releasing needs `admin` (a human). |
 | `doctor` | Exit 7 if any check fails. |
 

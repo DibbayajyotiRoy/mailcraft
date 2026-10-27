@@ -30,6 +30,8 @@ pub struct PersonalizeRequest {
     pub context: Value,
     /// Per-step instructions from the automation definition.
     pub instructions: Option<String>,
+    /// Per-step `custom_instructions`; the adapter prepends the workspace's.
+    pub custom_instructions: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

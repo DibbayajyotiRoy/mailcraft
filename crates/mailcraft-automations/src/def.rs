@@ -64,6 +64,8 @@ pub enum SendMode {
     Llm,
 }
 
+pub const MAX_STEP_INSTRUCTIONS: usize = 1_000;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SendCfg {
     /// Template alias.
@@ -84,6 +86,9 @@ pub struct SendCfg {
     pub mode: SendMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    /// Per-step writing guidance, appended to the workspace's custom instructions (<= 1,000 chars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_instructions: Option<String>,
     /// Account/transactional-style mail: skips the lifecycle frequency caps (still dedupes by key).
     #[serde(default)]
     pub cap_exempt: bool,
@@ -436,6 +441,21 @@ impl Definition {
                         ));
                     }
                 }
+                StepKind::SendEmail(c) if c.custom_instructions.is_some() => {
+                    let ci = c.custom_instructions.as_deref().unwrap_or_default();
+                    if c.mode != SendMode::Llm {
+                        return bad(format!(
+                            "step `{}`: custom_instructions only applies to `mode: llm` sends",
+                            s.key
+                        ));
+                    }
+                    if ci.trim().chars().count() > MAX_STEP_INSTRUCTIONS {
+                        return bad(format!(
+                            "step `{}`: custom_instructions is over {MAX_STEP_INSTRUCTIONS} characters",
+                            s.key
+                        ));
+                    }
+                }
                 StepKind::Condition(_) if !matches!(&s.next, Some(Next::Branch(_))) => {
                     return bad(format!(
                         "condition `{}` needs next {{true, false}} edges",
@@ -600,5 +620,23 @@ mod tests {
             let e = def(steps).unwrap_err().to_string();
             assert!(e.contains(why), "{e} should contain {why}");
         }
+    }
+
+    #[test]
+    fn step_custom_instructions_validated() {
+        let send = |mode: &str, ci: String| {
+            def(json!([
+                {"key":"t","type":"trigger","config":{"event":"a"},"next":"s"},
+                {"key":"s","type":"send_email","config":{"template":"w","mode":mode,"custom_instructions":ci}}
+            ]))
+        };
+        assert!(send("llm", "x".repeat(1_000)).is_ok());
+        let e = send("llm", "x".repeat(1_001)).unwrap_err().to_string();
+        assert!(
+            e.contains("1000 characters") || e.contains("1_000") || e.contains("over 1000"),
+            "{e}"
+        );
+        let e = send("static", "be brief".into()).unwrap_err().to_string();
+        assert!(e.contains("mode: llm"), "{e}");
     }
 }

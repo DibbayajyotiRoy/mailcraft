@@ -215,6 +215,7 @@ async fn settings_view(st: &AppState, auth: &Auth) -> Result<Value, sqlx::Error>
         "delivery_path": delivery_path(st, auth.0.workspace_id, auth.0.env).await?,
         "default_from": s["default_from"],
         "reply_to": s["reply_to"],
+        "custom_instructions": s["llm"]["custom_instructions"],
     }))
 }
 
@@ -239,7 +240,11 @@ pub struct SettingsIn {
     pub llm_provider: Option<LlmIn>,
     pub default_from: Option<String>,
     pub reply_to: Option<String>,
+    /// Workspace-level writing instructions for LLM emails (<= 2,000 chars, trimmed). Empty string clears.
+    pub custom_instructions: Option<String>,
 }
+
+const MAX_CUSTOM_INSTRUCTIONS: usize = 2_000;
 
 /// Partial update; an empty string clears a field. Admin only.
 pub async fn settings_put(
@@ -258,6 +263,31 @@ pub async fn settings_put(
         }
     }
     let mut llm = serde_json::Map::new();
+    if let Some(ci) = &b.custom_instructions {
+        let ci = ci.trim();
+        let n = ci.chars().count();
+        if n > MAX_CUSTOM_INSTRUCTIONS {
+            return Err(err(
+                "custom_instructions_too_long",
+                422,
+                format!(
+                    "custom_instructions is {n} characters; the limit is {MAX_CUSTOM_INSTRUCTIONS}"
+                ),
+            )
+            .field("custom_instructions")
+            .hint_in(
+                "shorten it; keep to tone and style, mailcraft's safety rules already apply",
+            ));
+        }
+        llm.insert(
+            "custom_instructions".into(),
+            if ci.is_empty() {
+                Value::Null
+            } else {
+                json!(ci)
+            },
+        );
+    }
     if let Some(l) = &b.llm_provider {
         if let Some(k) = &l.kind {
             if !LLM_KINDS.contains(&k.as_str()) {
@@ -294,6 +324,8 @@ pub async fn settings_put(
             };
             llm.insert("api_key_enc".into(), v);
         }
+    }
+    if !llm.is_empty() {
         patch.insert("llm".into(), Value::Object(llm));
     }
     let mut tx = st.db.begin().await?;
@@ -313,7 +345,7 @@ pub async fn settings_put(
         Actor::Key(&auth.0),
         Entry {
             action: "settings.update",
-            args: json!({"default_from": b.default_from, "reply_to": b.reply_to, "llm_kind": b.llm_provider.as_ref().and_then(|l| l.kind.clone()), "llm_key_changed": b.llm_provider.as_ref().is_some_and(|l| l.api_key.is_some())}),
+            args: json!({"default_from": b.default_from, "reply_to": b.reply_to, "llm_kind": b.llm_provider.as_ref().and_then(|l| l.kind.clone()), "custom_instructions_len": b.custom_instructions.as_ref().map(|c| c.trim().chars().count()), "llm_key_changed": b.llm_provider.as_ref().is_some_and(|l| l.api_key.is_some())}),
             decision: "auto",
             approval_id: None,
         },
