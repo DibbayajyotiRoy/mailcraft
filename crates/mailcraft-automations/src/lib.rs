@@ -11,6 +11,8 @@ pub mod contacts;
 pub mod def;
 pub mod engine;
 pub mod error;
+#[cfg(feature = "llm")]
+pub mod llm_adapter;
 pub mod personalize;
 pub mod policy;
 pub mod rules;
@@ -19,6 +21,8 @@ pub use contacts::{Contact, ContactInput};
 pub use def::{install, Definition, EntryRule, Goal, Next, SendCfg, SendMode, Step, StepKind};
 pub use engine::{Engine, EngineConfig, FrequencyCaps, TickStats, TrackInput, Tracked};
 pub use error::{AutomationError, Result};
+#[cfg(feature = "llm")]
+pub use llm_adapter::{personalizer_from_env, LlmAdapter};
 pub use personalize::{
     NoopPersonalizer, PersonalizeError, PersonalizeRequest, Personalized, Personalizer, SlotSpec,
 };

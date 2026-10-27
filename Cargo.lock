@@ -1946,7 +1946,9 @@ dependencies = [
  "async-trait",
  "chrono",
  "chrono-tz",
+ "mailcraft-automations",
  "mailcraft-core",
+ "mailcraft-llm",
  "mailcraft-templates",
  "serde",
  "serde_json",
@@ -1955,6 +1957,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

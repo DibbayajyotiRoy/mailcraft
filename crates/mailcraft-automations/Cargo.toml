@@ -6,9 +6,14 @@ license.workspace = true
 publish = false
 description = "Contacts, segments, events and the journey engine"
 
+[features]
+# LLM-backed Personalizer (adapter over mailcraft-llm). mailcraft-llm depends only on -core, so no cycle.
+llm = ["dep:mailcraft-llm"]
+
 [dependencies]
 mailcraft-core.workspace = true
 mailcraft-templates.workspace = true
+mailcraft-llm = { workspace = true, optional = true }
 async-trait.workspace = true
 chrono.workspace = true
 chrono-tz = "0.10"
@@ -22,3 +27,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"
+mailcraft-llm.workspace = true
+# self dev-dep: turns the `llm` feature on for `cargo test --workspace`
+mailcraft-automations = { path = ".", features = ["llm"] }
