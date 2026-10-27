@@ -49,3 +49,7 @@ chrono = { version = "0.4", features = ["serde"] }
 lto = "thin"
 strip = true
 codegen-units = 1
+
+# RSA key generation in tests is unusably slow unoptimised.
+[profile.dev.package."*"]
+opt-level = 3
