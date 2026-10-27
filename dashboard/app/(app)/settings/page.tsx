@@ -1,44 +1,44 @@
 import { get } from "@/lib/api";
-import { saveLlm, setKill } from "@/lib/actions";
-import { ActionError, ErrorBanner, Json, StatusBadge } from "@/components/ui";
-import { ConfirmButton } from "@/components/Confirm";
+import { ActionError } from "@/components/ui";
+import { ErrorState } from "@/components/ui/error-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { InstructionsForm } from "@/components/Instructions";
+import { DeliveryCard } from "./delivery";
+import { GeneralCard, PolicyCard, ProviderCard } from "./forms";
+import { SettingsNav } from "./nav";
+import { KillSwitchCard } from "./safety";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Settings · mailcraft" };
 
 export default async function Settings({ searchParams }: { searchParams: Promise<{ err?: string }> }) {
   const { err } = await searchParams;
-  const [s, ks, pol] = await Promise.all([get("/v1/settings"), get("/v1/kill-switch"), get("/v1/policy")]);
-  const llm = s.data?.llm_provider ?? {};
-  const dp = s.data?.delivery_path;
+  const [s, ks, pol, tr, st] = await Promise.all([get("/v1/settings"), get("/v1/kill-switch"), get("/v1/policy"), get("/v1/transports"), get("/v1/account/status")]);
+  const d = s.data ?? {};
+  const llm = d.llm_provider ?? {};
+  // Admin-only actions: if the API does not report scopes, do not guess a lock; the server still enforces it.
+  const scopes: string[] | undefined = st.data?.scopes ?? st.data?.key?.scopes;
+  const admin = scopes ? scopes.includes("admin") : true;
+  const e = (r: { error: any }, what: string) => r.error && <ErrorState error={{ ...r.error, message: `Could not load ${what}: ${r.error.message}` }} />;
   return (
     <>
-      <h1>Settings</h1>
+      <PageHeader title="Settings" description="Sender defaults, delivery, AI and safety for this workspace." />
       <ActionError err={err} />
-      <h2>Delivery path</h2>
-      {s.error ? <ErrorBanner error={s.error} /> : <p>{dp ? <><strong>{dp.kind}</strong> {dp.detail ?? ""}</> : "Not configured."}</p>}
-      <h2>LLM provider</h2>
-      <form action={saveLlm} className="stack">
-        <label>Kind<input name="kind" required defaultValue={llm.kind ?? ""} placeholder="anthropic, openai-compatible, ..." /></label>
-        <label>Model<input name="model" defaultValue={llm.model ?? ""} /></label>
-        <label>Base URL<input name="base_url" type="url" defaultValue={llm.base_url ?? ""} /></label>
-        <label>API key {llm.api_key_set && "(set; leave blank to keep)"}<input name="api_key" type="password" autoComplete="off" /></label>
-        <button type="submit">Save provider</button>
-      </form>
-      <h2>AI writing</h2>
-      {s.error ? <ErrorBanner error={s.error} /> : <InstructionsForm initial={s.data?.custom_instructions ?? ""} />}
-      <h2>Kill switch</h2>
-      {ks.error ? <ErrorBanner error={ks.error} /> : (
-        <form action={setKill} className="inline">
-          <input type="hidden" name="from" value="/settings" />
-          <input type="hidden" name="on" value={String(!ks.data.on)} />
-          <StatusBadge status={ks.data.on ? "failed" : "active"} /> {ks.data.on ? "Engaged" : "Off"}
-          {ks.data.on ? <button type="submit">Release</button>
-            : <ConfirmButton className="danger" message="Engage the kill switch? All sending stops immediately.">Engage</ConfirmButton>}
-        </form>
-      )}
-      <h2>Policy</h2>
-      {pol.error ? <ErrorBanner error={pol.error} /> : <Json value={pol.data} />}
+      <div className="grid gap-6 lg:grid-cols-[200px_minmax(0,720px)] lg:gap-10">
+        <SettingsNav />
+        <div className="grid gap-6">
+          {s.error ? e(s, "settings") : (
+            <>
+              <GeneralCard from={d.default_from ?? ""} replyTo={d.reply_to ?? ""} canEdit={admin} />
+              <DeliveryCard path={d.delivery_path} transports={Array.isArray(tr.data) ? tr.data : []} canEdit />
+              <ProviderCard kind={llm.kind ?? ""} model={llm.model ?? ""} baseUrl={llm.base_url ?? ""} keySet={!!llm.api_key_set} canEdit />
+              <InstructionsForm initial={d.custom_instructions ?? ""} />
+            </>
+          )}
+          {pol.error ? e(pol, "the policy") : <PolicyCard send={pol.data?.default?.send ?? ""} keys={pol.data?.keys ?? []} canEdit={admin} />}
+          {ks.error ? e(ks, "the kill switch") : <KillSwitchCard on={!!ks.data.on} admin={admin} />}
+        </div>
+      </div>
     </>
   );
 }
