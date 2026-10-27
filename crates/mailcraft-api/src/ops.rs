@@ -337,9 +337,17 @@ pub async fn kill_switch_get(State(st): State<AppState>, auth: Auth) -> ApiResul
             .bind(auth.0.workspace_id)
             .fetch_all(&st.db)
             .await?;
+    // Who flipped the workspace switch last (the audit log is the record).
+    let last: Option<(DateTime<Utc>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT at, actor_id FROM audit_log WHERE workspace_id = $1 AND action = 'kill_switch.set' \
+         AND args->>'key_id' IS NULL ORDER BY id DESC LIMIT 1",
+    )
+    .bind(auth.0.workspace_id)
+    .fetch_optional(&st.db)
+    .await?;
     Ok(envelope(
         StatusCode::OK,
-        json!({"on": on, "paused_keys": paused}),
+        json!({"on": on, "since": last.as_ref().map(|l| l.0), "by": last.and_then(|l| l.1), "paused_keys": paused}),
     ))
 }
 
@@ -468,21 +476,39 @@ pub async fn audit_verify(State(st): State<AppState>, auth: Auth) -> ApiResult {
 
 pub async fn account_status(State(st): State<AppState>, auth: Auth) -> ApiResult {
     auth.require(Scope::Read)?;
+    let ws = auth.0.workspace_id;
     let (name, kill, live): (String, bool, bool) =
         sqlx::query_as("SELECT name, kill_switch, live_enabled FROM workspaces WHERE id = $1")
-            .bind(auth.0.workspace_id)
+            .bind(ws)
             .fetch_one(&st.db)
             .await?;
     let pending: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM approvals WHERE workspace_id = $1 AND status = 'pending'",
     )
-    .bind(auth.0.workspace_id)
+    .bind(ws)
     .fetch_one(&st.db)
     .await?;
+    let verified: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM domains WHERE workspace_id = $1 AND status = 'verified')",
+    )
+    .bind(ws)
+    .fetch_one(&st.db)
+    .await?;
+    let prefix: String = sqlx::query_scalar("SELECT prefix FROM api_keys WHERE id = $1")
+        .bind(auth.0.id)
+        .fetch_one(&st.db)
+        .await?;
     Ok(envelope(
         StatusCode::OK,
-        json!({"workspace": name, "kill_switch": kill, "live_enabled": live, "pending_approvals": pending,
-               "key": {"id": auth.0.id, "name": auth.0.name, "env": auth.0.env, "scopes": auth.0.scopes}}),
+        json!({
+            "env": auth.0.env, "scopes": auth.0.scopes, "key_prefix": prefix,
+            "kill_switch": kill, "pending_approvals": pending,
+            "delivery_path": crate::admin::delivery_path(&st, ws, auth.0.env).await?,
+            "verified": verified,
+            "limits": {"daily_send_cap": auth.0.daily_cap, "minute_send_cap": auth.0.minute_cap},
+            "workspace": name, "live_enabled": live,
+            "key": {"id": auth.0.id, "name": auth.0.name, "env": auth.0.env, "scopes": auth.0.scopes},
+        }),
     ))
 }
 

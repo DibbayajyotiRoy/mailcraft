@@ -118,3 +118,12 @@ impl ApiError {
         self
     }
 }
+
+/// Optional JSON bodies: an empty body means "all defaults".
+pub fn json_or_default<T: DeserializeOwned + Default>(b: &[u8]) -> Result<T, ApiError> {
+    if b.iter().all(u8::is_ascii_whitespace) {
+        return Ok(T::default());
+    }
+    serde_json::from_slice(b)
+        .map_err(|e| invalid(e.to_string()).hint_in("see openapi.yaml for the request schema"))
+}

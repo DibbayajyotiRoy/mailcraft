@@ -20,6 +20,23 @@ pub struct Config {
     pub metrics_token: Option<String>,
     /// Permit webhook targets on private networks (dev/tests only).
     pub allow_private_webhooks: bool,
+    /// HMAC secret for `/u/{token}`. The finalizer must sign with the same one
+    /// (`FinalizerSettings::unsub_secret`). `MAILCRAFT_UNSUB_SECRET`, else derived from the secret key.
+    pub unsub_secret: Vec<u8>,
+    /// Gmail OAuth client (`MAILCRAFT_GOOGLE_CLIENT_ID` / `_SECRET`); self-hosters bring their own.
+    pub google_oauth: Option<GoogleOauth>,
+}
+
+#[derive(Clone)]
+pub struct GoogleOauth {
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub auth_url: String,
+    pub token_url: String,
+}
+
+fn env(k: &str) -> Option<String> {
+    std::env::var(k).ok().filter(|s| !s.is_empty())
 }
 
 impl Config {
@@ -34,6 +51,16 @@ impl Config {
                 .filter(|s| !s.is_empty()),
             allow_private_webhooks: std::env::var("MAILCRAFT_ALLOW_PRIVATE_WEBHOOKS").as_deref()
                 == Ok("1"),
+            unsub_secret: env("MAILCRAFT_UNSUB_SECRET")
+                .or_else(|| env("MAILCRAFT_SECRET_KEY").map(|k| format!("unsub:{k}")))
+                .unwrap_or_default()
+                .into_bytes(),
+            google_oauth: env("MAILCRAFT_GOOGLE_CLIENT_ID").map(|client_id| GoogleOauth {
+                client_id,
+                client_secret: env("MAILCRAFT_GOOGLE_CLIENT_SECRET"),
+                auth_url: mailcraft_transport::oauth::AUTH_URL.into(),
+                token_url: mailcraft_transport::oauth::TOKEN_URL.into(),
+            }),
         }
     }
 }
@@ -49,6 +76,8 @@ pub struct AppState {
     pub contacts: Arc<dyn ContactService>,
     pub segments: Arc<dyn SegmentService>,
     pub events: Arc<dyn EventService>,
+    /// Deliverability crate's own `SecretBox` over the same key; `None` with stub services.
+    pub dkim_box: Option<mailcraft_deliverability::crypto::SecretBox>,
 }
 
 impl AppState {
@@ -69,6 +98,7 @@ impl AppState {
             contacts: Arc::new(StubContactService),
             segments: Arc::new(StubSegmentService),
             events: Arc::new(StubEventService),
+            dkim_box: None,
         }
     }
 }

@@ -9,6 +9,10 @@ description = "axum HTTP API server"
 [dependencies]
 mailcraft-core.workspace = true
 mailcraft-engine.workspace = true
+mailcraft-deliverability = { path = "../mailcraft-deliverability" }
+mailcraft-automations = { path = "../mailcraft-automations" }
+mailcraft-templates.workspace = true
+mailcraft-transport.workspace = true
 axum.workspace = true
 tokio.workspace = true
 serde.workspace = true

@@ -1,7 +1,19 @@
 //! axum HTTP API. `openapi.yaml` (repo root) is the single source of truth; every route here
 //! must be in it (checked by `tests/api.rs::every_openapi_route_is_mounted`).
+/// Claims the `Idempotency-Key` (or replays the stored response) and opens the work transaction.
+macro_rules! begin {
+    ($st:expr, $auth:expr, $headers:expr, $route:expr, $body:expr) => {
+        match $crate::idem::Guard::begin(&$st, &$auth.0, &$headers, $route, &$body).await? {
+            $crate::idem::Begin::Replay(r) => return Ok(r),
+            $crate::idem::Begin::Fresh(g) => g,
+        }
+    };
+}
+
+pub mod admin;
 pub mod audit;
 pub mod auth;
+pub mod automations;
 pub mod caps;
 pub mod emails;
 pub mod error;
@@ -10,8 +22,13 @@ pub mod integrations;
 pub mod keys;
 pub mod metrics;
 pub mod ops;
+pub mod page;
+pub mod public;
+pub mod services;
 pub mod ssrf;
 pub mod state;
+pub mod templates;
+pub mod transports;
 pub mod webhooks;
 
 use std::time::{Duration, Instant};
@@ -77,6 +94,65 @@ pub fn router(st: AppState) -> Router {
         .route("/readyz", get(ops::readyz))
         .route("/metrics", get(ops::metrics))
         .route("/openapi.yaml", get(openapi_yaml))
+        // public (signed token / first-run)
+        .route(
+            "/u/{token}",
+            get(public::unsubscribe).post(public::unsubscribe),
+        )
+        .route("/v1/setup", post(admin::setup))
+        // ops
+        .route("/v1/doctor", get(admin::doctor))
+        .route("/v1/stats/overview", get(admin::stats_overview))
+        .route(
+            "/v1/settings",
+            get(admin::settings_get).put(admin::settings_put),
+        )
+        .route("/v1/policy", get(admin::policy_get).put(admin::policy_put))
+        .route(
+            "/v1/event-definitions",
+            post(admin::event_defs_create).get(admin::event_defs_list),
+        )
+        .route("/v1/suppressions", get(admin::suppressions_list))
+        .route("/v1/suppressions/{id}", delete(admin::suppressions_delete))
+        // transports
+        .route(
+            "/v1/transports",
+            post(transports::create).get(transports::list),
+        )
+        .route(
+            "/v1/transports/gmail/oauth/start",
+            post(transports::oauth_start),
+        )
+        .route(
+            "/v1/transports/gmail/oauth/complete",
+            post(transports::oauth_complete),
+        )
+        .route("/v1/transports/{id}", delete(transports::delete))
+        .route("/v1/transports/{id}/test", post(transports::test))
+        // templates
+        .route(
+            "/v1/templates",
+            post(templates::create).get(templates::list),
+        )
+        .route("/v1/templates/import", post(templates::import_route))
+        .route(
+            "/v1/templates/{id}",
+            get(templates::get).patch(templates::patch),
+        )
+        .route("/v1/templates/{id}/publish", post(templates::publish))
+        .route("/v1/templates/{id}/preview", post(templates::preview))
+        .route("/v1/templates/{id}/export", get(templates::export))
+        .route("/v1/content/lint", post(templates::lint))
+        // automations
+        .route(
+            "/v1/automations",
+            post(automations::install).get(automations::list),
+        )
+        .route("/v1/automations/{id}", get(automations::get))
+        .route("/v1/automations/{id}/publish", post(automations::publish))
+        .route("/v1/automations/{id}/pause", post(automations::pause))
+        .route("/v1/automations/{id}/resume", post(automations::resume))
+        .route("/v1/automations/{id}/runs", get(automations::runs))
         // emails
         .route("/v1/emails", post(emails::send).get(emails::list))
         .route("/v1/emails/batch", post(emails::batch))
@@ -106,6 +182,15 @@ pub fn router(st: AppState) -> Router {
             "/v1/domains/{id}/rotate-dkim",
             post(integrations::domains_rotate),
         )
+        .route(
+            "/v1/domains/{id}/dkim/activate",
+            post(integrations::dkim_activate),
+        )
+        .route(
+            "/v1/domains/{id}/dkim/purge",
+            post(integrations::dkim_purge),
+        )
+        .route("/v1/domains/{id}/dns/sync", post(integrations::dns_sync))
         // contacts / segments / events (WP4 services)
         .route(
             "/v1/contacts",
@@ -113,7 +198,9 @@ pub fn router(st: AppState) -> Router {
         )
         .route(
             "/v1/contacts/{id}",
-            get(integrations::contacts_get).delete(integrations::contacts_delete),
+            get(integrations::contacts_get)
+                .patch(integrations::contacts_patch)
+                .delete(integrations::contacts_delete),
         )
         .route(
             "/v1/contacts/{id}/suppress",
