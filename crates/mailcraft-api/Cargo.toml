@@ -17,10 +17,19 @@ sqlx.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+reqwest.workspace = true
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
+prometheus = { version = "0.13", default-features = false }
+base64 = "0.22"
+futures-lite = "2"
 
 [dev-dependencies]
 tower.workspace = true
 http-body-util = "0.1"
+tokio = { workspace = true, features = ["io-util"] }
 
 [[bin]]
 name = "mailcraft-server"
