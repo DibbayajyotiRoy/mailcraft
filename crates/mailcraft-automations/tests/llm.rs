@@ -1,4 +1,4 @@
-//! `MAILCRAFT_TEST_DATABASE_URL=postgres://postgres:x@localhost:55443/postgres` (skipped when unset).
+//! `MAILCRAFT_TEST_PG=postgres://postgres:x@127.0.0.1:55432/postgres` (skipped when unset).
 use mailcraft_automations::{llm_adapter::personalizer_from_lookup, PersonalizeRequest, SlotSpec};
 use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, PgPool};
@@ -6,15 +6,24 @@ use uuid::Uuid;
 use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
 async fn pool() -> Option<(PgPool, Uuid)> {
-    let Ok(url) = std::env::var("MAILCRAFT_TEST_DATABASE_URL") else {
-        eprintln!("skipped: MAILCRAFT_TEST_DATABASE_URL unset");
-        return None;
-    };
-    let admin = PgPoolOptions::new()
+    let url = std::env::var("MAILCRAFT_TEST_PG")
+        .unwrap_or_else(|_| "postgres://postgres:x@127.0.0.1:55432/postgres".into());
+    let admin = match PgPoolOptions::new()
         .max_connections(2)
+        .acquire_timeout(std::time::Duration::from_secs(3))
         .connect(&url)
         .await
-        .unwrap();
+    {
+        Ok(p) => p,
+        Err(e) => {
+            assert!(
+                std::env::var("MAILCRAFT_REQUIRE_DB").is_err(),
+                "postgres required: {e}"
+            );
+            eprintln!("skipped: postgres unreachable ({e})");
+            return None;
+        }
+    };
     let db = format!("mc_llm_{}", Uuid::new_v4().simple());
     sqlx::query(&format!("CREATE DATABASE {db}"))
         .execute(&admin)
