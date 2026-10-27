@@ -2029,6 +2029,7 @@ dependencies = [
  "chrono",
  "mail-builder",
  "mailcraft-core",
+ "mailcraft-templates",
  "mailcraft-transport",
  "rand 0.8.8",
  "redis",
