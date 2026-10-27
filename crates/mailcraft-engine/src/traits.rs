@@ -35,6 +35,19 @@ impl TransportResolver for StaticResolver {
     }
 }
 
+/// Per-email links injected into templates at render time: (unsubscribe_url, preferences_url).
+pub trait LinkMaker: Send + Sync {
+    fn links(&self, workspace_id: Uuid, email_id: Uuid, stream: Stream) -> (String, String);
+}
+
+/// No public URL configured: templates still render, links are empty.
+pub struct NoLinks;
+impl LinkMaker for NoLinks {
+    fn links(&self, _: Uuid, _: Uuid, _: Stream) -> (String, String) {
+        (String::new(), String::new())
+    }
+}
+
 pub struct FinalizeCtx {
     pub email_id: Uuid,
     pub workspace_id: Uuid,

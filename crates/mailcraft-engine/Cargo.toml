@@ -9,6 +9,7 @@ description = "Queue worker: claim, send, retry (Postgres SKIP LOCKED)"
 [dependencies]
 mailcraft-core.workspace = true
 mailcraft-transport.workspace = true
+mailcraft-templates.workspace = true
 async-trait.workspace = true
 sqlx.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
