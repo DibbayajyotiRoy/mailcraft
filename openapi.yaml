@@ -7,7 +7,6 @@ info:
     Every success body is `{ok:true, data, request_id}` (lists add `next_cursor`); every failure
     is `{ok:false, error:{code,message,field?,hint?,doc_url,retryable}, request_id}`.
     Mutating routes accept `Idempotency-Key` (24 h replay window, `Idempotent-Replay: true`).
-    Domains, contacts, segments and events answer 501 `not_implemented` until their service is wired.
   license: { name: AGPL-3.0-only, url: https://www.gnu.org/licenses/agpl-3.0.html }
 servers:
   - url: http://localhost:8080
@@ -476,6 +475,315 @@ paths:
       responses:
         "202": { description: queued }
 
+  /u/{token}:
+    get:
+      operationId: unsubscribe_confirm
+      security: []
+      summary: Confirm page for a signed unsubscribe link. State-neutral (link scanners cannot unsubscribe anyone).
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: html confirm form }
+        "400": { description: invalid link }
+        "410": { description: expired link }
+    post:
+      operationId: unsubscribe_one_click
+      security: []
+      summary: RFC 8058 one-click unsubscribe. Body must carry `List-Unsubscribe=One-Click`. 200, never a redirect; idempotent.
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/x-www-form-urlencoded: { schema: { type: string } } } }
+      responses:
+        "200": { description: unsubscribed from the token's category }
+        "400": { description: invalid link or missing one-click marker }
+        "410": { description: expired link }
+  /v1/setup:
+    post:
+      operationId: setup
+      security: []
+      summary: First-run setup. Unauthenticated; works only while no API key exists (409 `invalid_state` after). Secrets are shown once.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SetupRequest" } } } }
+      responses:
+        "201": { description: keys created, content: { application/json: { schema: { $ref: "#/components/schemas/SetupResult" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/doctor:
+    get:
+      operationId: doctor
+      summary: Server-side health checks (scope read). The CLI adds local probes (port 25, FCrDNS, blocklists).
+      responses:
+        "200": { description: checks, content: { application/json: { schema: { $ref: "#/components/schemas/DoctorResult" } } } }
+  /v1/stats/overview:
+    get:
+      operationId: stats_overview
+      summary: Event totals and a per-day series from email_events (scope read)
+      parameters: [{ name: days, in: query, schema: { type: integer, minimum: 1, maximum: 90, default: 7 } }]
+      responses:
+        "200": { description: stats, content: { application/json: { schema: { $ref: "#/components/schemas/StatsOverview" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/settings:
+    get:
+      operationId: settings_get
+      summary: Workspace settings; secrets are write-only (scope read)
+      responses:
+        "200": { description: settings, content: { application/json: { schema: { $ref: "#/components/schemas/Settings" } } } }
+    put:
+      operationId: settings_put
+      summary: Partial update; an empty string clears a field (scope admin)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SettingsUpdate" } } } }
+      responses:
+        "200": { description: settings, content: { application/json: { schema: { $ref: "#/components/schemas/Settings" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/policy:
+    get:
+      operationId: policy_get
+      summary: Workspace default send policy and each active key's policy (scope read)
+      responses:
+        "200": { description: policy, content: { application/json: { schema: { $ref: "#/components/schemas/PolicyView" } } } }
+    put:
+      operationId: policy_put
+      summary: Set the workspace default policy (scope admin). Agents use POST /v1/policy/proposals.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [default], properties: { default: { $ref: "#/components/schemas/KeyPolicy" } } } } } }
+      responses:
+        "200": { description: saved }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/event-definitions:
+    post:
+      operationId: event_definition_create
+      summary: Declare (or update) an event name and optional JSON schema (scope manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/EventDefinition" } } } }
+      responses:
+        "201": { description: saved, content: { application/json: { schema: { $ref: "#/components/schemas/EventDefinition" } } } }
+    get:
+      operationId: event_definition_list
+      summary: List declared events (scope manage)
+      responses:
+        "200": { description: definitions }
+  /v1/suppressions:
+    get:
+      operationId: suppression_list
+      summary: Suppressed addresses, newest first (scope read)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: reason, in: query, schema: { type: string, enum: [hard_bounce, soft_bounce_limit, complaint, unsubscribe, manual, spam_trap] } }
+      responses:
+        "200": { description: page of suppressions }
+  /v1/suppressions/{id}:
+    delete:
+      operationId: suppression_delete
+      summary: Remove a suppression; `id` is the URL-encoded email address (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: deleted }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/transports:
+    post:
+      operationId: transport_create
+      summary: Add an smtp-relay (with `preset`) or ses transport (scope manage). Secrets are write-only.
+      description: |
+        `smtp-relay` config: `{host,port,tls?,username?,password}` or, with `preset` (postmark, mailgun, resend, brevo, smtp2go, ses),
+        `{username?,password,region?}`. `ses` config: `{region,access_key_id,secret_access_key,session_token?}`.
+        Gmail is connected with `/v1/transports/gmail/oauth/*`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CreateTransport" } } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Transport" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: transport_list
+      summary: List transports (scope manage)
+      responses:
+        "200": { description: transports }
+  /v1/transports/{id}:
+    delete:
+      operationId: transport_delete
+      summary: Delete a transport that has sent nothing (409 `transport_in_use` otherwise; scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: deleted }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/transports/{id}/test:
+    post:
+      operationId: transport_test
+      summary: Reachability / credential check (scope manage). Always 200; `ok:false` carries the reason.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: result, content: { application/json: { schema: { type: object, properties: { id: { type: string }, kind: { type: string }, ok: { type: boolean }, detail: { type: string } } } } } }
+  /v1/transports/gmail/oauth/start:
+    post:
+      operationId: transport_gmail_oauth_start
+      summary: Begin the Gmail OAuth flow (PKCE; scope manage). 501 `oauth_not_configured` without MAILCRAFT_GOOGLE_CLIENT_ID.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [redirect_uri], properties: { redirect_uri: { type: string }, login_hint: { type: string } } } } } }
+      responses:
+        "200": { description: consent URL, content: { application/json: { schema: { type: object, properties: { auth_url: { type: string }, state: { type: string } } } } } }
+  /v1/transports/gmail/oauth/complete:
+    post:
+      operationId: transport_gmail_oauth_complete
+      summary: Exchange the authorization code and store the encrypted refresh token (scope manage)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [state, code, redirect_uri], properties: { state: { type: string }, code: { type: string }, redirect_uri: { type: string } } } } } }
+      responses:
+        "200": { description: transport, content: { application/json: { schema: { $ref: "#/components/schemas/Transport" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/templates:
+    post:
+      operationId: template_create
+      summary: Create a template with a draft v1 (scope manage). Give `html`, `mjml` or `content` (+`format`, default json).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CreateTemplate" } } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Template" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: template_list
+      summary: List templates, newest first (scope read)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200": { description: page of templates }
+  /v1/templates/import:
+    post:
+      operationId: template_import
+      summary: Import html, mjml or canonical json as a new template (scope manage)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ImportTemplate" } } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Template" } } } }
+  /v1/templates/{id}:
+    get:
+      operationId: template_get
+      summary: Newest version with its canonical block tree; `id` is a uuid or alias (scope read)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: template }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: template_update
+      summary: Rename and/or add a new draft version (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PatchTemplate" } } } }
+      responses:
+        "200": { description: updated }
+  /v1/templates/{id}/publish:
+    post:
+      operationId: template_publish
+      summary: Make a version (default newest) the one sends use (scope manage). Body optional `{version}`.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: published }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/templates/{id}/preview:
+    post:
+      operationId: template_preview
+      summary: Render with sample data merged with `variables` (scope read). Undefined variable -> 422 `template_render_failed`.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { variables: { type: object }, version: { type: integer } } } } } }
+      responses:
+        "200": { description: preview, content: { application/json: { schema: { $ref: "#/components/schemas/TemplatePreview" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/templates/{id}/export:
+    get:
+      operationId: template_export
+      summary: Export as html, mjml or canonical json (scope read)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: format, in: query, schema: { type: string, enum: [html, mjml, json], default: html } }
+        - { name: version, in: query, schema: { type: integer } }
+      responses:
+        "200": { description: "{format, content}" }
+  /v1/content/lint:
+    post:
+      operationId: content_lint
+      summary: Lint html / mjml / template json without saving it (scope read)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { html: { type: string }, mjml: { type: string }, content: {}, format: { type: string, enum: [html, mjml, json] }, subject: { type: string }, stream: { type: string, enum: [transactional, marketing] }, variables: { type: object } } } } } }
+      responses:
+        "200": { description: lint issues, content: { application/json: { schema: { type: object, properties: { lint: { type: array, items: { $ref: "#/components/schemas/LintIssue" } }, warnings: { type: array, items: { type: string } } } } } } }
+  /v1/automations:
+    post:
+      operationId: automation_create
+      summary: Install (validate and store) an automation as a new draft version (scope manage)
+      description: Body is a `Definition` (`steps[]` begins with a `trigger` step); a top-level `trigger` (event name or trigger config) is accepted and becomes that step.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AutomationDefinition" } } } }
+      responses:
+        "201": { description: installed, content: { application/json: { schema: { $ref: "#/components/schemas/Automation" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: automation_list
+      summary: List automations (scope read)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, paused] } }
+      responses:
+        "200": { description: page of automations }
+  /v1/automations/{id}:
+    get:
+      operationId: automation_get
+      summary: Automation with its current steps; `id` is a uuid or name (scope read)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: automation, content: { application/json: { schema: { $ref: "#/components/schemas/Automation" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/automations/{id}/publish:
+    post:
+      operationId: automation_publish
+      summary: Activate. Optional `{backfill_suppress}` keeps existing matches from entering (scope manage).
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: active }
+  /v1/automations/{id}/pause:
+    post:
+      operationId: automation_pause
+      summary: Pause an active automation (409 `invalid_state` otherwise; scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: paused }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/automations/{id}/resume:
+    post:
+      operationId: automation_resume
+      summary: Resume a paused automation (409 `invalid_state` otherwise; scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: active }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/automations/{id}/runs:
+    get:
+      operationId: automation_runs
+      summary: Runs, newest first (scope read)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: status, in: query, schema: { type: string, enum: [active, waiting, completed, exited, failed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200": { description: page of runs }
+  /v1/domains/{id}/dkim/activate:
+    post:
+      operationId: domain_dkim_activate
+      summary: Switch signing to a standby selector created by rotate-dkim (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [selector], properties: { selector: { type: string } } } } } }
+      responses:
+        "200": { description: keys }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/domains/{id}/dkim/purge:
+    post:
+      operationId: domain_dkim_purge
+      summary: Delete retired DKIM keys older than 7 days and their records (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: "{purged: [selector]}" }
+  /v1/domains/{id}/dns/sync:
+    post:
+      operationId: domain_dns_sync
+      summary: Write the plan's records to Cloudflare; `dry_run` only reports changes (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [provider], properties: { provider: { type: string, enum: [cloudflare] }, dry_run: { type: boolean, default: false }, api_token: { type: string, description: "write-only; falls back to CLOUDFLARE_API_TOKEN" } } } } } }
+      responses:
+        "200": { description: changes }
+        "502": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer, description: "mc_test_... or mc_live_... key" }
@@ -489,6 +797,143 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    SetupRequest: { type: object, additionalProperties: false, properties: { admin_email: { type: string, format: email } } }
+    SetupResult: { type: object, properties: { workspace_id: { type: string, format: uuid }, admin_key: { type: string }, test_key: { type: string } } }
+    DoctorResult:
+      type: object
+      properties:
+        checks:
+          type: array
+          items: { type: object, required: [id, status, detail, hint], properties: { id: { type: string }, status: { type: string, enum: [pass, fail, warn, skipped] }, detail: { type: string }, hint: { type: string } } }
+    StatsOverview:
+      type: object
+      properties:
+        totals: { type: object, properties: { sent: { type: integer }, delivered: { type: integer }, bounced: { type: integer }, complained: { type: integer }, deferred: { type: integer } } }
+        series: { type: array, items: { type: object, properties: { date: { type: string, format: date }, sent: { type: integer }, delivered: { type: integer }, bounced: { type: integer }, complained: { type: integer } } } }
+    DeliveryPath: { type: object, properties: { kind: { type: string, enum: [sandbox, gmail-oauth, smtp-relay, ses, direct] }, detail: { type: string } } }
+    Settings:
+      type: object
+      properties:
+        llm_provider: { type: object, properties: { kind: { type: string, enum: [openrouter, openai, ollama] }, model: { type: [string, "null"] }, base_url: { type: [string, "null"] }, api_key_set: { type: boolean } } }
+        delivery_path: { $ref: "#/components/schemas/DeliveryPath" }
+        default_from: { type: [string, "null"] }
+        reply_to: { type: [string, "null"] }
+    SettingsUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        llm_provider: { type: object, additionalProperties: false, properties: { kind: { type: string }, model: { type: string }, base_url: { type: string }, api_key: { type: string, description: write-only } } }
+        default_from: { type: string }
+        reply_to: { type: string }
+    PolicyView:
+      type: object
+      properties:
+        default: { $ref: "#/components/schemas/KeyPolicy" }
+        keys: { type: array, items: { type: object, properties: { key_id: { type: string, format: uuid }, name: { type: string }, policy: { $ref: "#/components/schemas/KeyPolicy" } } } }
+    EventDefinition: { type: object, required: [name], additionalProperties: false, properties: { name: { type: string, maxLength: 128 }, schema: { type: object }, description: { type: string } } }
+    CreateTransport:
+      type: object
+      required: [kind, config]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [smtp-relay, ses] }
+        preset: { type: string, enum: [postmark, mailgun, resend, brevo, smtp2go, ses] }
+        name: { type: string }
+        label: { type: string, enum: [test, low-volume, production] }
+        daily_cap: { type: integer, minimum: 1 }
+        is_default: { type: boolean }
+        config: { type: object, description: write-only credentials, see the operation description }
+    Transport:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string }
+        name: { type: string }
+        label: { type: string }
+        is_default: { type: boolean }
+        daily_cap: { type: [integer, "null"] }
+        status: { type: string }
+        from: { type: [string, "null"], description: gmail-oauth only }
+        detail: { type: object, description: "non-secret facts, e.g. host/port/region" }
+        created_at: { type: string, format: date-time }
+    CreateTemplate:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        alias: { type: string, description: defaults to a slug of name }
+        stream: { type: string, enum: [transactional, marketing] }
+        subject: { type: string }
+        html: { type: string }
+        mjml: { type: string }
+        content: { description: "string, or an object for format json" }
+        format: { type: string, enum: [json, mjml, html] }
+        text: { type: string, description: accepted, generated instead }
+        variables: { type: array, items: { type: string }, description: accepted, derived instead }
+    ImportTemplate:
+      type: object
+      required: [format, name, content]
+      additionalProperties: false
+      properties:
+        format: { type: string, enum: [html, mjml, json] }
+        name: { type: string }
+        content: { description: string, or an object for json }
+        alias: { type: string }
+        stream: { type: string, enum: [transactional, marketing] }
+        subject: { type: string }
+    PatchTemplate:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        html: { type: string }
+        mjml: { type: string }
+        content: {}
+        format: { type: string, enum: [json, mjml, html] }
+        subject: { type: string }
+        text: { type: string }
+        variables: { type: array, items: { type: string } }
+    Template:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        alias: { type: string }
+        name: { type: string }
+        subject: { type: string }
+        status: { type: string, enum: [draft, published] }
+        version: { type: integer }
+        published_version: { type: [integer, "null"] }
+        warnings: { type: array, items: { type: string } }
+    LintIssue: { type: object, properties: { rule: { type: string }, severity: { type: string, enum: [error, warning] }, message: { type: string }, path: { type: string } } }
+    TemplatePreview:
+      type: object
+      properties:
+        subject: { type: string }
+        html: { type: string }
+        text: { type: string }
+        lint: { type: array, items: { $ref: "#/components/schemas/LintIssue" } }
+    AutomationDefinition:
+      type: object
+      required: [name, steps]
+      properties:
+        name: { type: string }
+        trigger: { description: "event name or trigger config; becomes the first step" }
+        entry_rule: { type: string, enum: [once, always, after_days, if_no_active_run] }
+        entry_days: { type: integer }
+        goal: { type: object }
+        approval: { type: string, description: "always | never | first_n:N" }
+        caps: { type: object }
+        steps: { type: array, items: { type: object, required: [key, type], properties: { key: { type: string }, type: { type: string, enum: [trigger, condition, delay, wait_for_event, send_email, update_contact, add_to_segment, exit] }, config: { type: object }, next: {} } } }
+    Automation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [draft, active, paused] }
+        trigger: { type: string }
+        version: { type: integer }
+        steps: { type: array, items: { type: object } }
     KeyPolicy:
       type: object
       description: action -> decision

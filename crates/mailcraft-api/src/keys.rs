@@ -1,7 +1,7 @@
 //! `/v1/keys`: API key CRUD. Admin scope only; keys minted over the API can never hold `admin`
 //! (SPEC 4.5: agent keys cannot raise their own limits). Admin keys come from `bootstrap`.
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
 };
 use chrono::{DateTime, Utc};
@@ -20,6 +20,7 @@ use crate::{
     auth::Auth,
     error::{envelope, envelope_list, err, invalid, not_found, ApiJson, ApiResult},
     idem::{Begin, Guard},
+    page,
     state::AppState,
 };
 
@@ -178,15 +179,32 @@ struct KeyView {
 
 const COLS: &str = "id, name, prefix, env, scopes, domain_id, policy, recipient_allowlist, daily_send_cap, minute_send_cap, paused, expires_at, revoked_at, last_used_at, created_at";
 
-pub async fn list(State(st): State<AppState>, auth: Auth) -> ApiResult {
+#[derive(Deserialize)]
+pub struct ListQ {
+    limit: Option<u32>,
+    cursor: Option<String>,
+}
+
+pub async fn list(State(st): State<AppState>, auth: Auth, Query(q): Query<ListQ>) -> ApiResult {
     auth.require(Scope::Admin)?;
-    let rows: Vec<KeyView> = sqlx::query_as(&format!(
-        "SELECT {COLS} FROM api_keys WHERE workspace_id = $1 ORDER BY created_at DESC, id"
+    let (at, after) = page::decode(q.cursor.as_deref())?;
+    let lim = page::limit(q.limit);
+    let mut rows: Vec<KeyView> = sqlx::query_as(&format!(
+        "SELECT {COLS} FROM api_keys WHERE workspace_id = $1 AND (created_at, id::text) < ($2, $3) \
+         ORDER BY created_at DESC, id::text DESC LIMIT $4"
     ))
     .bind(auth.0.workspace_id)
+    .bind(at)
+    .bind(after)
+    .bind(lim + 1)
     .fetch_all(&st.db)
     .await?;
-    Ok(envelope_list(rows, None))
+    let next = (rows.len() as i64 > lim).then(|| {
+        rows.truncate(lim as usize);
+        let l = rows.last().unwrap();
+        page::encode(l.created_at, l.id)
+    });
+    Ok(envelope_list(rows, next))
 }
 
 pub async fn get(State(st): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -> ApiResult {

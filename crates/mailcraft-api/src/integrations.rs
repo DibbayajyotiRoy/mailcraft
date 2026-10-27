@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::{
     audit::{self, Actor, Entry},
     auth::Auth,
-    error::{envelope, envelope_list, invalid, ApiJson, ApiResult},
+    error::{envelope, envelope_list, invalid, not_found, ApiError, ApiJson, ApiResult},
     idem::{header_key, Begin, Guard},
     state::AppState,
 };
@@ -318,4 +318,172 @@ pub async fn events_track(
         StatusCode::ACCEPTED,
         st.events.track(ws, b.clone())
     )
+}
+
+// ------------------------------------------------- domain DKIM + DNS provider
+
+use mailcraft_deliverability::{
+    dns::cloudflare::Cloudflare,
+    service as dsvc,
+    store::{
+        postgres::{PgDomains, PgKeys},
+        DomainStore, KeyStore,
+    },
+};
+
+/// Deliverability stores for a domain the caller owns. 501 when the state has no real services.
+async fn dstores(st: &AppState, auth: &Auth, id: Uuid) -> ApiResult<(PgDomains, PgKeys)> {
+    let secret = st
+        .dkim_box
+        .clone()
+        .ok_or_else(|| ApiError(mailcraft_core::Error::not_implemented("domains")))?;
+    let domains = PgDomains::new(st.db.clone());
+    match domains.get(id).await? {
+        Some(d) if d.workspace_id == auth.0.workspace_id => {}
+        _ => return Err(not_found("domain")),
+    }
+    Ok((domains, PgKeys::new(st.db.clone(), secret)))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivateDkim {
+    pub selector: String,
+}
+
+/// Switch signing to a standby selector (after `rotate-dkim` and its record verified).
+pub async fn dkim_activate(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+    ApiJson(b): ApiJson<ActivateDkim>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    let (_, keys) = dstores(&st, &auth, id).await?;
+    if !keys
+        .list(id)
+        .await?
+        .iter()
+        .any(|k| k.selector == b.selector)
+    {
+        return Err(not_found("dkim selector"));
+    }
+    dsvc::activate_dkim(&keys, id, &b.selector, chrono::Utc::now().timestamp()).await?;
+    record(
+        &st,
+        &auth,
+        "domain.activate_dkim",
+        json!({"domain_id": id, "selector": b.selector}),
+    )
+    .await?;
+    Ok(envelope(
+        StatusCode::OK,
+        json!({"keys": keys.list(id).await?}),
+    ))
+}
+
+/// Delete retired keys older than 7 days (and their records).
+pub async fn dkim_purge(State(st): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    let (domains, keys) = dstores(&st, &auth, id).await?;
+    let gone =
+        dsvc::purge_retired_dkim(&domains, &keys, id, chrono::Utc::now().timestamp()).await?;
+    record(
+        &st,
+        &auth,
+        "domain.purge_dkim",
+        json!({"domain_id": id, "selectors": gone}),
+    )
+    .await?;
+    Ok(envelope(StatusCode::OK, json!({"purged": gone})))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DnsSync {
+    /// Only `cloudflare` today.
+    pub provider: String,
+    /// Report the changes without writing them.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// Zone:Read + DNS:Edit token; used for this call only. Falls back to `CLOUDFLARE_API_TOKEN`.
+    #[serde(default)]
+    pub api_token: Option<String>,
+}
+
+pub async fn dns_sync(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+    ApiJson(b): ApiJson<DnsSync>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    if b.provider != "cloudflare" {
+        return Err(invalid("provider must be `cloudflare`").field("provider"));
+    }
+    let token = b
+        .api_token
+        .clone()
+        .or_else(|| std::env::var("CLOUDFLARE_API_TOKEN").ok())
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| {
+            invalid("no Cloudflare token")
+                .field("api_token")
+                .hint_in("pass api_token or set CLOUDFLARE_API_TOKEN on the server")
+        })?;
+    let (domains, _) = dstores(&st, &auth, id).await?;
+    let changes = dsvc::sync_cloudflare(&domains, &Cloudflare::new(token), id, b.dry_run).await?;
+    if !b.dry_run {
+        record(
+            &st,
+            &auth,
+            "domain.dns_sync",
+            json!({"domain_id": id, "provider": "cloudflare", "changes": changes.len()}),
+        )
+        .await?;
+    }
+    Ok(envelope(
+        StatusCode::OK,
+        json!({"provider": "cloudflare", "dry_run": b.dry_run, "changes": changes}),
+    ))
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchContact {
+    #[serde(default)]
+    pub first_name: Option<String>,
+    #[serde(default)]
+    pub last_name: Option<String>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    /// Merged shallowly into existing properties.
+    #[serde(default)]
+    pub properties: Option<Value>,
+}
+
+pub async fn contacts_patch(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+    ApiJson(b): ApiJson<PatchContact>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    let ws = auth.0.workspace_id;
+    let cur = st.contacts.get(ws, &id).await?;
+    let email = cur["email"].as_str().unwrap_or_default().to_string();
+    let v = st
+        .contacts
+        .upsert(
+            ws,
+            UpsertContact {
+                email,
+                first_name: b.first_name,
+                last_name: b.last_name,
+                timezone: b.timezone,
+                properties: b.properties,
+            },
+        )
+        .await?;
+    Ok(envelope(StatusCode::OK, v))
 }
