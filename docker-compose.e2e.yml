@@ -1,0 +1,13 @@
+# Test-only overlay for scripts/e2e.sh: an SMTP sink (Mailpit) that shares the server's network
+# namespace (plaintext SMTP is only allowed to localhost), and a route to a webhook receiver on the host.
+services:
+  sink:
+    image: axllent/mailpit:v1.27
+    network_mode: "service:mailcraft"
+    depends_on: [mailcraft]
+  mailcraft:
+    environment:
+      MAILCRAFT_ALLOW_PRIVATE_WEBHOOKS: "1"
+      MAILCRAFT_EGRESS_IP: "203.0.113.10"
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["${E2E_SINK_HTTP_PORT:-8025}:8025"]

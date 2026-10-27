@@ -40,6 +40,7 @@ WITH claimed AS (
 SELECT e.id, e.workspace_id, e.api_key_id, e.domain_id, e.transport_id, e.stream, e.env,
        e.from_addr, e.to_addr, e.cc, e.reply_to, e.subject, e.headers, e.attempts, e.max_age_at,
        e.created_at, e.rcpt_domain, e.message_id, e.template_id, e.template_vars,
+       COALESCE(e.contact_id, (SELECT c.id FROM contacts c WHERE c.workspace_id = e.workspace_id AND c.email = lower(e.to_addr))) AS contact_id,
        b.html, b.text, w.kill_switch, w.name AS workspace_name, w.postal_address,
        COALESCE(k.paused, false) AS key_paused, k.daily_send_cap, k.minute_send_cap,
        d.return_path_host
@@ -71,6 +72,7 @@ struct Job {
     message_id: Option<String>,
     template_id: Option<Uuid>,
     template_vars: Option<serde_json::Value>,
+    contact_id: Option<Uuid>,
     html: Option<String>,
     text: Option<String>,
     kill_switch: bool,
@@ -367,6 +369,27 @@ impl Engine {
                 }
             }
         };
+        // Marketing mail honours a one-click topic opt-out (`/u/{token}` -> contact_topics.opted_in).
+        let suppressed = suppressed
+            || (stream == Stream::Marketing
+                && match job.contact_id {
+                    None => false,
+                    Some(c) => match sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS (SELECT 1 FROM contact_topics ct JOIN topics t ON t.id = ct.topic_id \
+                         WHERE ct.contact_id = $1 AND NOT ct.opted_in AND t.key IN ('product','digest'))",
+                    )
+                    .bind(c)
+                    .fetch_one(&self.pool)
+                    .await
+                    {
+                        Ok(b) => b,
+                        Err(e) => {
+                            return self
+                                .defer(wid, job, 60.0, &format!("topic check failed: {e}"))
+                                .await
+                        }
+                    },
+                });
         if suppressed {
             let t = Transition {
                 status: "suppressed",
@@ -494,6 +517,7 @@ impl Engine {
         let ctx = FinalizeCtx {
             email_id: job.id,
             workspace_id: job.workspace_id,
+            contact_id: job.contact_id,
             domain_id: job.domain_id,
             stream,
             from_domain,
@@ -618,7 +642,7 @@ impl Engine {
         let doc = doc.ok_or("template has no version")?;
         let t: mailcraft_templates::Template =
             serde_json::from_value(doc).map_err(|e| format!("template: {e}"))?;
-        let (unsub, prefs) = self.links.links(job.workspace_id, job.id, stream);
+        let (unsub, prefs) = self.links.links(job.workspace_id, job.contact_id, stream);
         let mut vars = job
             .template_vars
             .clone()

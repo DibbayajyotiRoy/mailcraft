@@ -1924,6 +1924,7 @@ dependencies = [
  "chrono",
  "futures-lite",
  "http-body-util",
+ "mail-auth",
  "mailcraft-automations",
  "mailcraft-core",
  "mailcraft-deliverability",
