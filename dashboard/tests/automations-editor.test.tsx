@@ -22,7 +22,7 @@ globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {
 
 const options = {
   templates: [{ id: "11111111-1111-4111-8111-111111111111", alias: "welcome", name: "Welcome", published: true }, { id: "22222222-2222-4222-8222-222222222222", alias: "winback", name: "Win-back", published: false }],
-  segments: ["vip"], events: ["signed_up", "logged_in"], senders: ["hello@example.com"],
+  segments: ["vip"], events: ["signed_up", "logged_in"], senders: [{ address: "hello@example.com", status: "ready" }],
 };
 const names = () => screen.getAllByRole("article").map((a) => a.getAttribute("aria-label")).filter((l) => l?.startsWith("step"));
 

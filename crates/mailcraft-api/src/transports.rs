@@ -1,12 +1,14 @@
 //! `/v1/transports`: delivery paths (smtp-relay with presets, ses, gmail-oauth). Manage scope.
 //!
 //! `transports.config_enc` = `SecretBox::seal(json, transport_id bytes)`. Plaintext JSON per kind:
-//! * `smtp-relay`: `{host, port, tls: "starttls"|"implicit"|"none", username?, password?}`
+//! * `smtp-relay`: `{host, port, tls: "starttls"|"implicit"|"none", username?, password?, mailbox_sender?,
+//!   aliases?, display_names?}`; `aliases` / `display_names` ({address: name}) belong to a mailbox relay
+//!   (the login plus its "send as" addresses; see `senders.rs`)
 //! * `ses`: `{region, access_key_id, secret_access_key, session_token?}`
 //! * `gmail-oauth`: `{client_id, client_secret?, refresh_token, email?}`
 //!
 //! Secrets are write-only: no response or audit row contains them.
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use axum::{
     extract::{Path, State},
@@ -14,7 +16,7 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use chrono::{DateTime, Utc};
-use mailcraft_core::auth::Scope;
+use mailcraft_core::{address, auth::Scope};
 use mailcraft_transport::{
     oauth::{self, Pkce, GMAIL_SEND_SCOPE},
     smtp::{SmtpConfig, PRESETS},
@@ -28,6 +30,7 @@ use crate::{
     audit::{self, Actor, Entry},
     auth::Auth,
     error::{envelope, envelope_list, err, invalid, not_found, ApiJson, ApiResult},
+    senders,
     state::AppState,
 };
 
@@ -56,6 +59,53 @@ fn s<'a>(c: &'a Value, k: &str) -> Option<&'a str> {
 
 fn need<'a>(c: &'a Value, k: &str) -> ApiResult<&'a str> {
     s(c, k).ok_or_else(|| invalid(format!("config.{k} is required")).field(&format!("config.{k}")))
+}
+
+/// The extra addresses a mailbox relay sends as (`aliases`, e.g. Zoho "Send mail as") and the display
+/// name of each address (login included). Lowercased, de-duplicated, validated.
+fn mailbox_extras(
+    c: &Value,
+    login: Option<&str>,
+) -> ApiResult<(Vec<String>, BTreeMap<String, String>)> {
+    if c["aliases"].is_null() && c["display_names"].is_null() {
+        return Ok(Default::default());
+    }
+    let login = login.map(str::to_ascii_lowercase).ok_or_else(|| {
+        invalid("config.aliases and config.display_names need config.mailbox_sender")
+            .field("config.aliases")
+    })?;
+    let mut aliases: Vec<String> = Vec::new();
+    for a in c["aliases"].as_array().map_or(&[][..], Vec::as_slice) {
+        let addr = a.as_str().and_then(|a| match address::parse_mailbox(a) {
+            Some((None, addr)) => Some(addr.to_ascii_lowercase()),
+            _ => None,
+        });
+        let addr = addr.ok_or_else(|| {
+            invalid("config.aliases must be a list of plain email addresses")
+                .field("config.aliases")
+        })?;
+        if addr != login && !aliases.contains(&addr) {
+            aliases.push(addr);
+        }
+    }
+    if aliases.len() > 20 {
+        return Err(invalid("at most 20 aliases").field("config.aliases"));
+    }
+    let mut names = BTreeMap::new();
+    for (k, v) in c["display_names"].as_object().into_iter().flatten() {
+        let addr = k.to_ascii_lowercase();
+        if addr != login && !aliases.contains(&addr) {
+            return Err(
+                invalid(format!("display name for {k}: not the login or an alias"))
+                    .field("config.display_names"),
+            );
+        }
+        let n = senders::clean_name(&addr, v.as_str().unwrap_or_default())?;
+        if !n.is_empty() {
+            names.insert(addr, n);
+        }
+    }
+    Ok((aliases, names))
 }
 
 /// Validates and canonicalises the request into `(stored config, public detail)`.
@@ -122,16 +172,21 @@ fn build(b: &CreateTransport) -> ApiResult<(Value, Value)> {
                 TlsMode::None => "none",
             };
             let mailbox_sender = c["mailbox_sender"].as_bool().unwrap_or(false);
-            if mailbox_sender && user.is_none() {
+            if mailbox_sender
+                && !user
+                    .as_deref()
+                    .is_some_and(|u| matches!(address::parse_mailbox(u), Some((None, _))))
+            {
                 return Err(invalid(
                     "config.mailbox_sender needs config.username (the mailbox address)",
                 )
                 .field("config.mailbox_sender"));
             }
-            let secret = json!({"host": host, "port": port, "tls": tls_s, "username": user, "password": s(c, "password"), "mailbox_sender": mailbox_sender});
+            let (aliases, names) = mailbox_extras(c, user.as_deref().filter(|_| mailbox_sender))?;
+            let secret = json!({"host": host, "port": port, "tls": tls_s, "username": user, "password": s(c, "password"), "mailbox_sender": mailbox_sender, "aliases": aliases, "display_names": names});
             Ok((
                 secret,
-                json!({"host": host, "port": port, "tls": tls_s, "preset": b.preset, "mailbox_sender": mailbox_sender}),
+                json!({"host": host, "port": port, "tls": tls_s, "preset": b.preset, "mailbox_sender": mailbox_sender, "aliases": aliases, "display_names": names}),
             ))
         }
         "ses" => {
@@ -265,6 +320,86 @@ pub async fn list(State(st): State<AppState>, auth: Auth) -> ApiResult {
     .fetch_all(&st.db)
     .await?;
     Ok(envelope_list(rows, None))
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchTransport {
+    /// Replaces the relay's "send as" addresses.
+    #[serde(default)]
+    pub aliases: Option<Vec<String>>,
+    /// Replaces the `{address: display name}` map.
+    #[serde(default)]
+    pub display_names: Option<BTreeMap<String, String>>,
+}
+
+/// Edit what a mailbox relay sends as: its aliases and the display name of each address.
+pub async fn patch(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+    ApiJson(b): ApiJson<PatchTransport>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    let mut tx = st.db.begin().await?;
+    let (kind, enc): (String, Vec<u8>) = sqlx::query_as(
+        "SELECT kind, config_enc FROM transports WHERE id = $1 AND workspace_id = $2 FOR UPDATE",
+    )
+    .bind(id)
+    .bind(auth.0.workspace_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| not_found("transport"))?;
+    let mut c: Value = st
+        .secrets
+        .open(&enc, id.as_bytes())
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or_else(|| {
+            err(
+                "transport_config_unreadable",
+                500,
+                "cannot read the stored config",
+            )
+        })?;
+    if kind != "smtp-relay" || c["mailbox_sender"].as_bool() != Some(true) {
+        return Err(invalid(
+            "only a mailbox relay (smtp-relay with mailbox_sender) has aliases and display names",
+        )
+        .field("id"));
+    }
+    if let Some(a) = &b.aliases {
+        c["aliases"] = json!(a);
+    }
+    if let Some(d) = &b.display_names {
+        c["display_names"] = json!(d);
+    }
+    let (aliases, names) = mailbox_extras(&c, c["username"].as_str())?;
+    c["aliases"] = json!(aliases);
+    c["display_names"] = json!(names);
+    sqlx::query("UPDATE transports SET config_enc = $2 WHERE id = $1")
+        .bind(id)
+        .bind(st.secrets.seal(c.to_string().as_bytes(), id.as_bytes()))
+        .execute(&mut *tx)
+        .await?;
+    audit::append(
+        &mut tx,
+        auth.0.workspace_id,
+        Actor::Key(&auth.0),
+        Entry {
+            action: "transport.update",
+            args: json!({"transport_id": id, "aliases": aliases, "display_names": names}),
+            decision: "auto",
+            approval_id: None,
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    senders::forget(id);
+    Ok(envelope(
+        StatusCode::OK,
+        json!({"id": id, "aliases": aliases, "display_names": names}),
+    ))
 }
 
 pub async fn delete(State(st): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -> ApiResult {

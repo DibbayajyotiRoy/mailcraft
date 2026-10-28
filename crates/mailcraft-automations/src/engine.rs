@@ -90,10 +90,24 @@ pub struct TickStats {
     pub runs_advanced: usize,
 }
 
+/// Picks the transport (and the display-name form of `From`) for a send step. The API implements
+/// it over its connected mailboxes; without one a send uses the workspace default transport.
+#[async_trait::async_trait]
+pub trait SendRouter: Send + Sync {
+    /// `(From header, transport id to pin)`; `explicit` is the step's `transport_id`.
+    async fn route(
+        &self,
+        ws: Uuid,
+        from: &str,
+        explicit: Option<Uuid>,
+    ) -> Result<(String, Option<Uuid>)>;
+}
+
 #[derive(Clone)]
 pub struct Engine {
     pool: PgPool,
     personalizer: Arc<dyn Personalizer>,
+    router: Option<Arc<dyn SendRouter>>,
     cfg: Arc<EngineConfig>,
 }
 
@@ -190,8 +204,14 @@ impl Engine {
         Self {
             pool,
             personalizer,
+            router: None,
             cfg: Arc::new(cfg),
         }
+    }
+
+    pub fn router(mut self, r: Arc<dyn SendRouter>) -> Self {
+        self.router = Some(r);
+        self
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -1225,6 +1245,11 @@ impl Engine {
             None => mailcraft_templates::render_subject(&template, &vars)?,
         };
 
+        let (from, transport_id) = match &self.router {
+            Some(r) => r.route(auto.workspace_id, &from, c.transport_id).await?,
+            None => (from, c.transport_id),
+        };
+
         // 6. approval policy
         let pending_approval = match parse_approval(&auto.approval)? {
             None => false,
@@ -1257,8 +1282,8 @@ impl Engine {
         let inserted: Option<Uuid> = sqlx::query_scalar(
             "INSERT INTO emails (id, workspace_id, domain_id, stream, source, from_addr, to_addr, reply_to, subject,
                template_id, template_vars, tags, contact_id, automation_run_id, generation_id, idempotency_key, status,
-               policy_decisions, next_attempt_at, max_age_at, created_at, env)
-             VALUES ($1,$2,$3,$4,'automation',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$18,$20)
+               policy_decisions, next_attempt_at, max_age_at, created_at, env, transport_id)
+             VALUES ($1,$2,$3,$4,'automation',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$18,$20,$21)
              ON CONFLICT (workspace_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id",
         )
         .bind(email_id)
@@ -1281,6 +1306,7 @@ impl Engine {
         .bind(now)
         .bind(now + Duration::hours(72))
         .bind(env)
+        .bind(transport_id)
         .fetch_optional(&mut *tx)
         .await?;
         let Some(email_id) = inserted else {

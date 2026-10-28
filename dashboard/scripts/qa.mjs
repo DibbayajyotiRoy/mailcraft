@@ -67,7 +67,9 @@ const ROUTES = [
   ["segment-edit", "/contacts?tab=segments", click("button", "Edit Pro customers")], ["segment-edit-json", "/contacts?tab=segments", click("button", "Edit EU or UK")],
   ["segment-delete", "/contacts?tab=segments", click("button", "Delete Nudged")], ["segment-members", "/contacts?tab=segments", click("button", "Add contacts to Nudged")],
   ["domains", "/domains"], ["keys", "/keys"], ["keys-create", "/keys", click("button", /Create (your first )?key|New key|Create/)],
-  ["settings", "/settings"], ["notfound", "/nope"], ["design", "/dev/design"],
+  ["settings", "/settings"], ["settings-senders-edit", "/settings", click("button", /Edit addresses of dev@example.com/)], ["settings-senders-connect", "/settings", click("button", "Connect a mailbox")],
+  ["email-compose-other-from", "/emails", async (p) => { await click("button", "New email")(p); await p.getByRole("dialog").getByLabel("From", { exact: true }).selectOption({ label: "Other address…" }); }],
+  ["notfound", "/nope"], ["design", "/dev/design"],
 ].filter(([n]) => n.includes(only));
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/usr/bin/google-chrome", args: ["--no-sandbox"] });

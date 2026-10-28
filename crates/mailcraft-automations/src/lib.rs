@@ -19,7 +19,7 @@ pub mod rules;
 
 pub use contacts::{Contact, ContactInput};
 pub use def::{install, Definition, EntryRule, Goal, Next, SendCfg, SendMode, Step, StepKind};
-pub use engine::{Engine, EngineConfig, FrequencyCaps, TickStats, TrackInput, Tracked};
+pub use engine::{Engine, EngineConfig, FrequencyCaps, SendRouter, TickStats, TrackInput, Tracked};
 pub use error::{AutomationError, Result};
 #[cfg(feature = "llm")]
 pub use llm_adapter::{personalizer_from_env, LlmAdapter};

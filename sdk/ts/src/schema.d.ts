@@ -234,6 +234,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/senders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The From addresses you can pick, derived from what is connected (scope read)
+         * @description Every mailbox relay's login and aliases, plus the workspace `default_from` when it is not one of them.
+         *     Read-only: add or change addresses on the transport (`POST` / `PATCH /v1/transports`). `status`: `ready`
+         *     (the address's mailbox relay or verified domain covers it), `needs_domain` (add and verify its domain),
+         *     `transport_missing` (no transport to send through). `transport` is where a send from this address goes,
+         *     by the routing order in `POST /v1/emails`.
+         */
+        get: operations["sender_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/keys": {
         parameters: {
             query?: never;
@@ -296,7 +320,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a domain with record status (scope read) */
+        /**
+         * Get a domain with record status (scope read)
+         * @description Besides the DNS records: `transport_id` (the transport sends from this domain use, `null` = the workspace
+         *     default) and, when a mailbox relay logs in or sends as an address on this domain, `relay_senders` (those
+         *     addresses; `relay_sender` is the first). Sends from those addresses need no domain records.
+         */
         get: operations["domain_get"];
         put?: never;
         post?: never;
@@ -304,7 +333,11 @@ export interface paths {
         delete: operations["domain_delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Bind a domain to a transport (scope manage)
+         * @description `{transport_id}`: sends from this domain go through that transport; `null` unbinds it (the workspace default is used).
+         */
+        patch: operations["domain_patch"];
         trace?: never;
     };
     "/v1/domains/{id}/verify": {
@@ -1017,11 +1050,13 @@ export interface paths {
         put?: never;
         /**
          * Add an smtp-relay (with `preset`) or ses transport (scope manage). Secrets are write-only.
-         * @description `smtp-relay` config: `{host,port,tls?,username?,password,mailbox_sender?}` or, with `preset` (postmark, mailgun, resend, brevo, smtp2go, ses),
+         * @description `smtp-relay` config: `{host,port,tls?,username?,password,mailbox_sender?,aliases?,display_names?}` or, with `preset` (postmark, mailgun, resend, brevo, smtp2go, ses),
          *     `{username?,password,region?}`. `ses` config: `{region,access_key_id,secret_access_key,session_token?}`.
          *     `mailbox_sender: true` (needs `username`) sends with the mailbox address as the envelope sender, for
          *     mailbox relays such as Zoho, Gmail/Workspace or Outlook that refuse any other MAIL FROM; bounces then go to
-         *     that mailbox. Gmail is connected with `/v1/transports/gmail/oauth/*`.
+         *     that mailbox. With it, `aliases` (plain addresses the mailbox may send as) and `display_names`
+         *     (`{address: name}`) make those addresses From options: see `GET /v1/senders`. Gmail is connected with
+         *     `/v1/transports/gmail/oauth/*`.
          */
         post: operations["transport_create"];
         delete?: never;
@@ -1044,7 +1079,13 @@ export interface paths {
         delete: operations["transport_delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Edit a mailbox relay's aliases and display names (scope manage)
+         * @description `aliases`: the other addresses the mailbox sends as (the provider's "send mail as"); `display_names`:
+         *     `{address: name}` for the login and each alias. A field you send replaces the stored one.
+         *     400 unless the transport is an `smtp-relay` with `mailbox_sender`.
+         */
+        patch: operations["transport_patch"];
         trace?: never;
     };
     "/v1/transports/{id}/test": {
@@ -1305,7 +1346,7 @@ export interface paths {
         put?: never;
         /**
          * Install (validate and store) an automation as a new version (scope manage)
-         * @description Body is a `Definition` (`steps[]` begins with a `trigger` step); a top-level `trigger` (event name or trigger config) is accepted and becomes that step. A `send_email` step's `config.template` is a published template's alias or id. A new name creates a `draft`. An existing name (names are the key, so this is also how you edit) stores version N+1 and leaves the status alone; if it is `active`, new entries run the new version at once while runs already in flight finish on their own version.
+         * @description Body is a `Definition` (`steps[]` begins with a `trigger` step); a top-level `trigger` (event name or trigger config) is accepted and becomes that step. A `send_email` step's `config.template` is a published template's alias or id; its `config.from` routes like `POST /v1/emails` (a connected mailbox address goes through that mailbox, with its display name) and `config.transport_id` forces a transport. A new name creates a `draft`. An existing name (names are the key, so this is also how you edit) stores version N+1 and leaves the status alone; if it is `active`, new entries run the new version at once while runs already in flight finish on their own version.
          */
         post: operations["automation_create"];
         delete?: never;
@@ -1592,6 +1633,7 @@ export interface components {
                 api_key_set?: boolean;
             };
             delivery_path?: components["schemas"]["DeliveryPath"];
+            /** @description the default From address, picked from GET /v1/senders */
             default_from?: string | null;
             reply_to?: string | null;
             /** @description Workspace writing instructions for LLM emails */
@@ -1786,9 +1828,27 @@ export interface components {
             /** Format: date-time */
             expires_at?: string;
         };
+        Sender: {
+            address?: string;
+            display_name?: string | null;
+            /** @enum {string} */
+            kind?: "login" | "alias" | "domain";
+            /** Format: uuid */
+            transport_id?: string | null;
+            /** @description transport name */
+            transport?: string | null;
+            is_default?: boolean;
+            /** @enum {string} */
+            status?: "ready" | "needs_domain" | "transport_missing";
+        };
         SendEmail: {
-            /** @description required for live keys; must be on a verified domain */
+            /** @description required for live keys; an address on a verified domain or a connected mailbox (login or alias). A bare connected address gets its display name. */
             from?: string;
+            /**
+             * Format: uuid
+             * @description send through this transport. Otherwise the transport is chosen by `from`: a mailbox relay with that login or alias, then the transport bound to the domain (`PATCH /v1/domains/{id}`), then the workspace default. The choice is recorded in `policy_decisions` (rule `routing`).
+             */
+            transport_id?: string;
             to: string[];
             subject?: string;
             html?: string;
@@ -1803,7 +1863,7 @@ export interface components {
              * @default transactional
              * @enum {string}
              */
-            stream: "transactional" | "marketing";
+            stream?: "transactional" | "marketing";
             tags?: Record<string, never>[];
             /** @description custom headers; platform-owned headers are rejected */
             headers?: {
@@ -1812,7 +1872,7 @@ export interface components {
             /** Format: date-time */
             scheduled_at?: string;
             /** @default false */
-            dry_run: boolean;
+            dry_run?: boolean;
         };
         SendResult: {
             /**
@@ -1849,12 +1909,17 @@ export interface components {
              * @default marketing
              * @enum {string}
              */
-            stream: "transactional" | "marketing";
+            stream?: "transactional" | "marketing";
             recipients: components["schemas"]["BroadcastRecipient"][];
             /** @description upper bound on sends per day; the lowest of this and the transport / key caps applies */
             max_per_day?: number;
+            /**
+             * Format: uuid
+             * @description send through this transport; see SendEmail
+             */
+            transport_id?: string;
             /** @default false */
-            dry_run: boolean;
+            dry_run?: boolean;
         };
         BroadcastResult: {
             /**
@@ -2351,6 +2416,28 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    sender_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description senders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["Sender"][];
+                    };
+                };
+            };
+        };
+    };
     api_key_list: {
         parameters: {
             query?: never;
@@ -2559,6 +2646,34 @@ export interface operations {
                 content?: never;
             };
             501: components["responses"]["Error"];
+        };
+    };
+    domain_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    transport_id?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description the domain */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
         };
     };
     domain_verify: {
@@ -3819,6 +3934,43 @@ export interface operations {
             };
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    transport_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    aliases?: string[];
+                    display_names?: {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description the stored aliases and display names */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id?: string;
+                        aliases?: string[];
+                        display_names?: Record<string, never>;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     transport_test: {

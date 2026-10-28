@@ -10,6 +10,7 @@ import { Field, Input, Select } from "@/components/ui/field";
 import { StatusBadge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
 import { addRelay, gmailStart, testTransport, type Result } from "./actions";
+import { AddressRows } from "./address-rows";
 
 export type Transport = { id: string; kind: string; name?: string; label?: string; is_default?: boolean; status?: string; from?: string | null; detail?: Record<string, unknown> };
 export const PRESETS = ["postmark", "mailgun", "resend", "brevo", "smtp2go", "ses", "custom"] as const;
@@ -38,35 +39,42 @@ export function TestButton({ id, label }: { id: string; label: string }) {
   );
 }
 
-function AddRelay({ canEdit }: { canEdit: boolean }) {
+/** `mailbox`: the "Connect a mailbox" flavour used by the Senders card (a custom SMTP host, sending as the login). */
+export function AddRelay({ canEdit, mailbox: asMailbox = false }: { canEdit: boolean; mailbox?: boolean }) {
   const [open, setOpen] = useState(false);
   const [s, act] = useActionState(addRelay, {} as Result);
   const [seen, setSeen] = useState<Result>();
   useEffect(() => { if (s.ok && seen !== s) { setSeen(s); toast.success(s.ok); setOpen(false); } }, [s, seen]);
-  const [preset, setPreset] = useState<string>("postmark");
+  const [preset, setPreset] = useState<string>(asMailbox ? "custom" : "postmark");
+  const [mailbox, setMailbox] = useState(asMailbox);
+  const [user, setUser] = useState("");
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button variant="secondary" disabled={!canEdit}><Plus aria-hidden />Add relay</Button></DialogTrigger>
-      <DialogContent title="Add an SMTP relay" description="Send through a provider that owns IP reputation. Credentials are encrypted and never shown again.">
+      <DialogTrigger asChild><Button variant="secondary" disabled={!canEdit}><Plus aria-hidden />{asMailbox ? "Connect a mailbox" : "Add relay"}</Button></DialogTrigger>
+      <DialogContent className="max-h-[calc(100dvh-32px)] overflow-y-auto" title={asMailbox ? "Connect a mailbox" : "Add an SMTP relay"}
+        description={asMailbox ? "Send as a mailbox you already have (Zoho, Google Workspace, Outlook). Its address, and any aliases you add, become From options. Credentials are encrypted and never shown again." : "Send through a provider that owns IP reputation. Credentials are encrypted and never shown again."}>
         <form action={act} className="grid gap-4">
-          <Field label="Provider">{(a) => <Select {...a} name="preset" value={preset} onChange={(e) => setPreset(e.target.value)}>{PRESETS.map((p) => <option key={p}>{p}</option>)}</Select>}</Field>
-          <Field label="Username" description={preset === "postmark" ? "Postmark uses the server token as both username and password." : "Leave empty if the provider needs none."}>
-            {(a) => <Input {...a} name="username" mono autoComplete="off" />}
+          {!asMailbox && <Field label="Provider">{(a) => <Select {...a} name="preset" value={preset} onChange={(e) => setPreset(e.target.value)}>{PRESETS.map((p) => <option key={p}>{p}</option>)}</Select>}</Field>}
+          {asMailbox && <input type="hidden" name="preset" value="custom" />}
+          <Field label={mailbox ? "Mailbox address (username)" : "Username"} description={mailbox ? "The address you sign in with." : preset === "postmark" ? "Postmark uses the server token as both username and password." : "Leave empty if the provider needs none."}>
+            {(a) => <Input {...a} name="username" mono autoComplete="off" value={user} onChange={(e) => setUser(e.target.value)} placeholder={mailbox ? "dev@example.com" : undefined} />}
           </Field>
           <Field label="Password or API key">{(a) => <Input {...a} name="password" type="password" mono required autoComplete="new-password" />}</Field>
           {preset === "custom" && <div className="grid grid-cols-[1fr_7rem] gap-3">
             <Field label="SMTP host">{(a) => <Input {...a} name="host" mono required placeholder="smtp.zoho.in" autoComplete="off" />}</Field>
             <Field label="Port">{(a) => <Input {...a} name="port" type="number" inputMode="numeric" min={1} max={65535} defaultValue={587} required />}</Field>
           </div>}
-          {preset === "custom" && <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" name="mailbox_sender" className="mt-0.5 size-4 accent-[var(--accent)]" />
+          {preset === "custom" && !asMailbox && <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" name="mailbox_sender" checked={mailbox} onChange={(e) => setMailbox(e.target.checked)} className="mt-0.5 size-4 accent-[var(--accent)]" />
             <span><span className="font-medium">Send as this mailbox</span><span className="block text-muted">For Zoho, Google Workspace or Outlook, which only accept the username as sender. Bounces go to that inbox.</span></span>
           </label>}
+          {preset === "custom" && asMailbox && <input type="hidden" name="mailbox_sender" value="on" />}
+          {preset === "custom" && mailbox && <AddressRows login={user.trim()} />}
           {preset === "ses" && <Field label="AWS region">{(a) => <Input {...a} name="region" placeholder="us-east-1" autoComplete="off" />}</Field>}
           {s.error && <p role="alert" className="text-sm font-medium text-bad">{s.error}</p>}
           <div className="flex justify-end gap-2">
             <DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose>
-            <SubmitButton>Add relay</SubmitButton>
+            <SubmitButton>{asMailbox ? "Connect mailbox" : "Add relay"}</SubmitButton>
           </div>
         </form>
       </DialogContent>

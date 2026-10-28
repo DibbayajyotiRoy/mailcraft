@@ -233,7 +233,8 @@ pub async fn serve(
         pool.clone(),
         auto::personalizer_from_env(pool),
         auto::EngineConfig::default(),
-    );
+    )
+    .router(Arc::new(st.clone()));
     let stop_rx = rx.clone();
     let mut rx2 = rx;
     tasks.spawn(async move {

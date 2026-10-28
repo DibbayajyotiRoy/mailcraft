@@ -5,6 +5,8 @@ export type SendResult = components["schemas"]["SendResult"];
 export type CreateKey = components["schemas"]["CreateKey"];
 export type KeyPolicy = components["schemas"]["KeyPolicy"];
 export type CreateBroadcast = components["schemas"]["CreateBroadcast"];
+/** A From address you can pick (`GET /v1/senders`); derived from what is connected, read-only. */
+export type Sender = components["schemas"]["Sender"];
 export type BroadcastRecipient = components["schemas"]["BroadcastRecipient"];
 export type BroadcastResult = components["schemas"]["BroadcastResult"];
 export type Broadcast = components["schemas"]["Broadcast"];
@@ -23,7 +25,7 @@ type Opts = { idempotencyKey?: string };
 // and pinned by docs/contract/fixtures.json. Ids are plain UUIDs.
 export type Email = { id: string; status: string; stream: string; env: "test" | "live"; from_addr: string; to_addr: string; subject: string; tags: Obj[]; policy_decisions: Obj[]; scheduled_at: string | null; attempts: number; last_error: string | null; sent_at: string | null; created_at: string };
 export type EmailEvent = { type: string; enhanced_code: string | null; diagnostic: string | null; occurred_at: string };
-export type DryRun = { dry_run: true; status: string; stream: string; policy_decisions: Obj[]; rendered: { subject?: string; html?: string; text?: string; headers: Obj }; lint: Obj[]; would_send_via: string };
+export type DryRun = { dry_run: true; status: string; stream: string; policy_decisions: Obj[]; rendered: { subject?: string; html?: string; text?: string; headers: Obj }; lint: Obj[]; would_send_via: string; /** name of the transport this send would use */ transport?: string | null };
 export type BatchItem = { ok: true; data: SendResult } | { ok: false; error: ApiError };
 export type Approval = { id: string; kind: "email" | "go_live" | "policy_change"; status: "pending" | "approved" | "rejected" | "expired"; subject_id: string | null; requested_by: string | null; payload: Obj; decided_by_key: string | null; decided_at: string | null; created_at: string };
 export type ApiKey = { id: string; name: string; prefix: string; env: "test" | "live"; scopes: string[]; domain_id: string | null; policy: KeyPolicy; recipient_allowlist: string[] | null; daily_send_cap: number | null; minute_send_cap: number | null; paused: boolean; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; created_at: string };
@@ -34,7 +36,8 @@ export type AuditRow = { id: number; at: string; actor_type: string; actor_id: s
 
 // Bodies the spec leaves untyped for the routes below; shapes taken from the handlers in crates/mailcraft-api.
 export type DnsRecord = { record: string; type: string; name: string; value: string; priority?: number; status: string; checked_at?: string | null; detail?: string | null; /** what DNS returned at that name, when the record is wrong */ found?: string | null };
-export type Domain = { id: string; name: string; status: "not_started" | "pending" | "verified" | "failed"; records: DnsRecord[]; stream?: string; last_checked_at?: string | null; /** set when sends from this mailbox address go through the default relay and need no records */ relay_sender?: string };
+export type Domain = { id: string; name: string; status: "not_started" | "pending" | "verified" | "failed"; records: DnsRecord[]; stream?: string; last_checked_at?: string | null; /** an address a mailbox relay logs in as or sends as on this domain: sends from it need no records */ relay_sender?: string; /** every such address (`relay_sender` is the first) */ relay_senders?: string[]; /** sends from this domain go through this transport; null = the workspace default */ transport_id?: string | null };
+export type TransportAddresses = { id: string; aliases: string[]; display_names: Record<string, string> };
 export type Template = { id: string; name: string; alias?: string; subject?: string; preheader?: string; html?: string; mjml?: string; text?: string; status?: string; version?: number; published_version?: number | null; warnings?: string[]; /** GET only: the author's own html/mjml, else the block tree as JSON text */ source_format?: "html" | "mjml" | "json"; source?: string; template?: Obj };
 export type TemplateVersion = { version: number; source_format: string; created_at: string; published_at: string | null; published: boolean };
 export type TemplatePreview = { subject: string; html: string; text: string; lint: Obj[]; variables?: string[]; warnings?: string[] };
@@ -53,7 +56,7 @@ export type AutomationRun = { id: string; version: number; contact_id: string; c
 export type AutomationRunDetail = AutomationRun & { steps: { step_key: string; result: Obj; at: string }[] };
 export type TestRunStarted = { run_id: string; automation_id: string; contact_id: string; env: "test" | "live"; status: "started" };
 export type Transport = { id: string; kind: string; name: string; label: string; is_default: boolean; daily_cap: number | null; status: string; from?: string | null; detail?: Obj; created_at: string };
-export type CreateTransport = { kind: "smtp-relay" | "ses"; preset?: "postmark" | "mailgun" | "resend" | "brevo" | "smtp2go" | "ses"; name?: string; label?: "test" | "low-volume" | "production"; daily_cap?: number; is_default?: boolean; /** write-only credentials; `mailbox_sender: true` (needs `username`) sends as the mailbox address, for Zoho / Gmail / Outlook relays */ config: Obj & { mailbox_sender?: boolean } };
+export type CreateTransport = { kind: "smtp-relay" | "ses"; preset?: "postmark" | "mailgun" | "resend" | "brevo" | "smtp2go" | "ses"; name?: string; label?: "test" | "low-volume" | "production"; daily_cap?: number; is_default?: boolean; /** write-only credentials; `mailbox_sender: true` (needs `username`) sends as the mailbox address, for Zoho / Gmail / Outlook relays */ config: Obj & { mailbox_sender?: boolean; /** with mailbox_sender: other addresses the mailbox sends as */ aliases?: string[]; /** `{ address: name }` for the login and each alias */ display_names?: Record<string, string> } };
 
 export class Mailcraft {
   private base: string;
@@ -109,14 +112,20 @@ export class Mailcraft {
     verify: (id: string) => this.send<Domain>("POST", `/v1/domains/${enc(id)}/verify`),
     list: (q: Page = {}) => this.get<Domain[]>("/v1/domains", q),
     get: (id: string) => this.get<Domain>(`/v1/domains/${enc(id)}`),
+    /** Bind the domain to a transport; `null` unbinds it (the workspace default is used). Needs manage. */
+    update: (id: string, d: { transport_id: string | null }, o?: Opts) => this.send<Domain>("PATCH", `/v1/domains/${enc(id)}`, d, o),
     remove: (id: string) => this.request<Obj>("DELETE", `/v1/domains/${enc(id)}`),
   };
+  /** The From addresses you can pick: connected mailbox logins and aliases. Read-only; derived. */
+  senders = { list: () => this.get<Sender[]>("/v1/senders") };
   /** Delivery paths. Credentials in `config` are write-only. */
   transports = {
     create: (t: CreateTransport, o?: Opts) => this.send<Transport>("POST", "/v1/transports", t, o),
     list: () => this.get<Transport[]>("/v1/transports"),
     /** Always 200; `ok:false` carries the reason. */
     test: (id: string) => this.send<{ id: string; kind: string; ok: boolean; detail: string }>("POST", `/v1/transports/${enc(id)}/test`),
+    /** Mailbox relays only (400 otherwise). A field you send replaces the stored one. Needs manage. */
+    update: (id: string, t: { aliases?: string[]; display_names?: Record<string, string> }, o?: Opts) => this.send<TransportAddresses>("PATCH", `/v1/transports/${enc(id)}`, t, o),
     remove: (id: string) => this.request<Obj>("DELETE", `/v1/transports/${enc(id)}`),
   };
   templates = {

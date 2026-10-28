@@ -173,6 +173,13 @@ enum ConnectCmd {
         /// Bounces then go to that mailbox instead of mailcraft.
         #[arg(long)]
         mailbox_sender: bool,
+        /// With --mailbox-sender: another address this mailbox sends as (provider "send mail as").
+        /// Repeatable.
+        #[arg(long = "alias")]
+        aliases: Vec<String>,
+        /// With --mailbox-sender: `address=Display Name`, shown as the From name. Repeatable.
+        #[arg(long = "display-name")]
+        display_names: Vec<String>,
     },
 }
 
@@ -710,7 +717,19 @@ fn run(cli: &Cli) -> R {
                     username,
                     password,
                     mailbox_sender,
+                    aliases,
+                    display_names,
                 } => {
+                    let names = display_names
+                        .iter()
+                        .map(|d| {
+                            d.split_once('=')
+                                .map(|(a, n)| (a.trim().to_string(), json!(n.trim())))
+                                .ok_or_else(|| {
+                                    CliErr::usage("--display-name wants address=Display Name")
+                                })
+                        })
+                        .collect::<Result<serde_json::Map<_, _>, _>>()?;
                     let pw = password
                         .clone()
                         .or_else(|| std::env::var("MAILCRAFT_SMTP_PASSWORD").ok());
@@ -718,7 +737,9 @@ fn run(cli: &Cli) -> R {
                     let preset = (preset != "custom").then_some(preset);
                     let body = json!({"kind": "smtp-relay", "preset": preset,
                         "config": {"host": host, "port": port, "username": username, "password": pw,
-                            "mailbox_sender": mailbox_sender}});
+                            "mailbox_sender": mailbox_sender,
+                            "aliases": (!aliases.is_empty()).then_some(aliases),
+                            "display_names": (!names.is_empty()).then_some(names)}});
                     ok(api.post("/v1/transports", &body, None)?)
                 }
             }

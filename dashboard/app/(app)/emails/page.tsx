@@ -14,6 +14,7 @@ import { EmailTrail, PolicyDecisions, type MailEvent } from "@/components/emails
 import { RetryError } from "@/components/ui/error-state";
 import { MessagePreview } from "@/components/monitor/message-preview";
 import { emailsHref, type EmailQuery } from "@/components/monitor/helpers";
+import { initialFrom, sendersOf } from "@/lib/senders";
 import { sendEmail } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -24,14 +25,16 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
   const q = new URLSearchParams({ limit: "25" });
   for (const k of ["status", "q", "from", "to"] as const) if (query[k]) q.set(k, query[k]!); // filtered by the API
   if (cursor) q.set("cursor", cursor);
-  const [r, peek, peekEv, settings, tpls] = await Promise.all([
+  const [r, peek, peekEv, settings, tpls, snd] = await Promise.all([
     get(`/v1/emails?${q}`),
     open ? get(`/v1/emails/${encodeURIComponent(open)}`) : null,
     open ? get(`/v1/emails/${encodeURIComponent(open)}/events`) : null,
     get("/v1/settings"),
     get("/v1/templates"),
+    get("/v1/senders"),
   ]);
-  const compose = <ComposeEmail defaultFrom={settings.data?.default_from ?? ""} templates={Array.isArray(tpls.data) ? tpls.data : []} send={sendEmail} />;
+  const senders = sendersOf(snd);
+  const compose = <ComposeEmail defaultFrom={initialFrom(settings.data?.default_from, senders)} senders={senders} templates={Array.isArray(tpls.data) ? tpls.data : []} send={sendEmail} />;
   const header = <PageHeader title="Emails" description="Every message you send, and what happened to it." action={compose} />;
   if (r.error) return <>{header}<EmailFilters query={query} /><RetryError error={r.error} /></>;
 

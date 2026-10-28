@@ -114,3 +114,22 @@ export MAILCRAFT_SMTP_PASSWORD='<app password>'
 mailcraft connect relay custom --host smtp.zoho.in --port 587 \
   --username dev@example.com --mailbox-sender
 ```
+
+Several From addresses:
+
+- **One mailbox, several "send as" aliases** (Zoho, Workspace): list the aliases, with a display name for
+  each address. The envelope sender stays the login; the From header is the alias.
+
+  ```sh
+  mailcraft connect relay custom --host smtp.zoho.in --port 587 \
+    --username dev@example.com --mailbox-sender \
+    --alias partner@example.com --alias support@example.com \
+    --display-name 'dev@example.com=Example Developers' --display-name 'support@example.com=Example Support'
+  ```
+
+- **Several mailboxes or products**: connect each mailbox as its own relay, and bind a domain to a transport
+  with `PATCH /v1/domains/{id} {"transport_id": ...}` (Domains page: "Sends via").
+
+A send picks its transport from the From address: an explicit `transport_id`, else the mailbox relay with that
+login or alias, else the transport bound to the From domain, else the default transport. The choice is recorded
+in the email's `policy_decisions` (rule `routing`). `GET /v1/senders` lists the From addresses you can pick.

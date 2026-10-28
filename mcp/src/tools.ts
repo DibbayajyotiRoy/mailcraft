@@ -28,11 +28,13 @@ const source = { html: z.string().optional(), mjml: z.string().optional(), conte
 
 export const TOOLS: ToolDef[] = [
   { name: "account_status", description: "Workspace, calling key (id, name, env test/live, scopes), live_enabled, kill_switch, pending_approvals count. Call first.", input: {}, method: "GET", path: "/v1/account/status", mutating: false },
+  { name: "sender_list", description: "The From addresses you can pick: address, display_name, transport (where a send from it goes), is_default, status ready|needs_domain|transport_missing. Read-only; a human adds addresses and transports. Use an address as email_send `from`.", input: {}, method: "GET", path: "/v1/senders", mutating: false },
   {
     name: "email_send",
-    description: "Send (queue) one email. Result status is queued or pending_approval (poll approval_get with approval_id, never decide); a blocked policy is an error with code blocked_by_policy. Test keys sandbox mail; use delivered@test.mailcraft.local. Use dry_run to render and lint without sending. Pass idempotency_key to make retries safe.",
+    description: "Send (queue) one email. `from` is one of sender_list's addresses (or an address on a verified domain); the transport is chosen by `from` unless you pass transport_id. Result status is queued or pending_approval (poll approval_get with approval_id, never decide); a blocked policy is an error with code blocked_by_policy. Test keys sandbox mail; use delivered@test.mailcraft.local. Use dry_run to render and lint without sending. Pass idempotency_key to make retries safe.",
     input: {
-      from: z.string().optional(), to: z.array(z.string()).min(1).max(50), subject: z.string().optional(),
+      from: z.string().optional(), transport_id: z.string().optional().describe("force this transport (UUID from sender_list); omit to route by `from`"),
+      to: z.array(z.string()).min(1).max(50), subject: z.string().optional(),
       html: z.string().optional(), text: z.string().optional(),
       template: z.object({ id: z.string(), variables: obj.optional() }).optional(),
       stream: z.enum(["transactional", "marketing"]).optional(),
@@ -50,7 +52,8 @@ export const TOOLS: ToolDef[] = [
     name: "broadcast_send",
     description: "Send ONE template to a list of recipients (up to 5000): each row becomes a queued email and contacts are upserted. A live key mails real people; test keys sandbox it. ALWAYS run it first with dry_run:true and read data.skipped[] (reason per dropped row: invalid_email, duplicate, invalid_data, suppressed, unsubscribed, not_allowed, missing_variable) and data.schedule (pacing under the daily cap), and check the rendering with broadcast_preview. Result status is queued or pending_approval (one approval_id for the whole broadcast: poll approval_get, never decide). Pass idempotency_key so a retry cannot send twice. Per-recipient template variables: first_name, last_name, email, data.<column>.",
     input: {
-      template_id: z.string().describe("template id or alias"), from: z.string(),
+      template_id: z.string().describe("template id or alias"), from: z.string().describe("one of sender_list's addresses, or an address on a verified domain"),
+      transport_id: z.string().optional().describe("force this transport (UUID from sender_list); omit to route by `from`"),
       recipients: z.array(recipient).min(1).max(5000),
       subject: z.string().optional().describe("replaces the template subject; may use the same variables"),
       stream: stream.optional().describe("default marketing"),

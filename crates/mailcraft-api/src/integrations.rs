@@ -72,25 +72,89 @@ pub async fn domains_add(
     r
 }
 
-/// Marks a domain whose mailbox the default relay logs in as (`relay_sender`): sends from that
-/// address need no domain records (see `emails::mailbox_relay_sender`).
+/// Adds to each domain the transport it is bound to (`transport_id`) and, for a domain whose
+/// addresses a mailbox relay logs in as or sends as (`relay_senders`; `relay_sender` is the first),
+/// the marker that sends from those addresses need no domain records (see `senders::Routing`).
 async fn with_relay(st: &AppState, ws: Uuid, mut d: Value) -> ApiResult<Value> {
-    if let Some(m) = crate::emails::mailbox_relay_sender(st, ws).await? {
-        let dom = mailcraft_core::address::domain_of(&m).to_ascii_lowercase();
-        let mark = |v: &mut Value| {
-            if v["name"]
-                .as_str()
-                .is_some_and(|n| n.eq_ignore_ascii_case(&dom))
-            {
-                v["relay_sender"] = json!(m);
-            }
-        };
-        match d.as_array_mut() {
-            Some(a) => a.iter_mut().for_each(mark),
-            None => mark(&mut d),
+    let relays = crate::senders::relays(st, ws).await?;
+    let bound: std::collections::HashMap<Uuid, Uuid> = sqlx::query_as::<_, (Uuid, Uuid)>(
+        "SELECT id, transport_id FROM domains WHERE workspace_id = $1 AND transport_id IS NOT NULL",
+    )
+    .bind(ws)
+    .fetch_all(&st.db)
+    .await?
+    .into_iter()
+    .collect();
+    let mark = |v: &mut Value| {
+        let name = v["name"].as_str().unwrap_or_default().to_ascii_lowercase();
+        let addrs: Vec<&String> = relays
+            .iter()
+            .flat_map(|r| r.addresses())
+            .filter(|a| mailcraft_core::address::domain_of(a).eq_ignore_ascii_case(&name))
+            .collect();
+        if let Some(first) = addrs.first() {
+            v["relay_sender"] = json!(first);
+            v["relay_senders"] = json!(addrs);
         }
+        v["transport_id"] = v["id"]
+            .as_str()
+            .and_then(|i| i.parse::<Uuid>().ok())
+            .and_then(|i| bound.get(&i))
+            .map_or(Value::Null, |t| json!(t));
+    };
+    match d.as_array_mut() {
+        Some(a) => a.iter_mut().for_each(mark),
+        None => mark(&mut d),
     }
     Ok(d)
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchDomain {
+    /// Send from this domain through this transport; `null` = the workspace default.
+    pub transport_id: Option<Uuid>,
+}
+
+pub async fn domains_patch(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+    ApiJson(b): ApiJson<PatchDomain>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    let ws = auth.0.workspace_id;
+    if let Some(t) = b.transport_id {
+        let ok: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM transports WHERE id = $1 AND workspace_id = $2)",
+        )
+        .bind(t)
+        .bind(ws)
+        .fetch_one(&st.db)
+        .await?;
+        if !ok {
+            return Err(not_found("transport").field("transport_id"));
+        }
+    }
+    let n = sqlx::query("UPDATE domains SET transport_id = $3 WHERE id = $1 AND workspace_id = $2")
+        .bind(id)
+        .bind(ws)
+        .bind(b.transport_id)
+        .execute(&st.db)
+        .await?
+        .rows_affected();
+    if n == 0 {
+        return Err(not_found("domain"));
+    }
+    record(
+        &st,
+        &auth,
+        "domain.update",
+        json!({"domain_id": id, "transport_id": b.transport_id}),
+    )
+    .await?;
+    let d = serde_json::to_value(st.domains.get(ws, id).await?).unwrap_or_default();
+    Ok(envelope(StatusCode::OK, with_relay(&st, ws, d).await?))
 }
 
 pub async fn domains_list(State(st): State<AppState>, auth: Auth) -> ApiResult {

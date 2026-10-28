@@ -79,6 +79,9 @@ pub struct SendCfg {
     pub from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
+    /// Send through this transport instead of the one the `from` address routes to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_id: Option<Uuid>,
     /// Overrides the template subject.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
