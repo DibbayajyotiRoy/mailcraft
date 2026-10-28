@@ -1,5 +1,5 @@
 "use client";
-import { Activity, CheckSquare, Globe, KeyRound, Layers, Mail, Settings, Users, Workflow, type LucideIcon } from "lucide-react";
+import { Activity, CheckSquare, Globe, KeyRound, Layers, Mail, Megaphone, Settings, Users, Workflow, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 type Item = { href: string; label: string; icon: LucideIcon; badge?: "approvals" };
 export const NAV_GROUPS: { label: string; items: Item[] }[] = [
   { label: "Monitor", items: [{ href: "/", label: "Overview", icon: Activity }, { href: "/emails", label: "Emails", icon: Mail }, { href: "/approvals", label: "Approvals", icon: CheckSquare, badge: "approvals" }] },
-  { label: "Build", items: [{ href: "/templates", label: "Templates", icon: Layers }, { href: "/automations", label: "Automations", icon: Workflow }, { href: "/contacts", label: "Contacts", icon: Users }] },
+  { label: "Build", items: [{ href: "/templates", label: "Templates", icon: Layers }, { href: "/broadcasts", label: "Broadcasts", icon: Megaphone }, { href: "/automations", label: "Automations", icon: Workflow }, { href: "/contacts", label: "Contacts", icon: Users }] },
   { label: "Setup", items: [{ href: "/domains", label: "Domains", icon: Globe }, { href: "/keys", label: "API keys", icon: KeyRound }, { href: "/settings", label: "Settings", icon: Settings }] },
 ];
 

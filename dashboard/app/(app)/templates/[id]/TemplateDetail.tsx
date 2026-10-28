@@ -17,6 +17,7 @@ import { KeyValue } from "@/components/ui/stat-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
+import { Personalization } from "@/components/Personalization";
 import { PublishButton } from "./PublishButton";
 import { lintSummary, templateVariables, type Lint } from "./util";
 
@@ -65,6 +66,7 @@ export function TemplateDetail({ template: t, initial }: { template: any; initia
         title={<span className="inline-flex flex-wrap items-center gap-3">{name}{t.status && <StatusBadge status={t.status} />}</span>}
         description={t.subject ? <>Subject: <span className="text-fg">{t.subject}</span></> : "No subject set"}
         action={<>
+          <Personalization />
           {["json", "html", "mjml"].map((f) => (
             <a key={f} href={`/templates/${id}/export?format=${f}`} download className={cn(buttonVariants({ variant: "secondary" }), "max-sm:hidden")}><Download aria-hidden />{f.toUpperCase()}</a>
           ))}

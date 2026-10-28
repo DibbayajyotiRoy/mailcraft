@@ -5,6 +5,7 @@ import { importTemplate } from "@/lib/actions";
 import { Button, SubmitButton } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { Personalization } from "@/components/Personalization";
 
 type Format = "json" | "html" | "mjml";
 const HINT: Record<Format, string> = {
@@ -51,6 +52,10 @@ export function ImportTemplate() {
             <Field label="Format">{(a) => <Select {...a} name="format" value={format} onChange={(e) => setFormat(e.target.value as Format)}><option value="html">HTML</option><option value="mjml">MJML</option><option value="json">JSON</option></Select>}</Field>
           </div>
           <Field label="File" description="Optional: .html, .mjml or .json fills the fields below.">{(a) => <Input {...a} type="file" accept=".html,.mjml,.json,text/html,application/json" onChange={(e) => onFile(e.target.files?.[0])} />}</Field>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted">
+            <span>Merge fields use {"{{ name }}"}.</span>
+            <Personalization />
+          </div>
           <Field label="Content" description={HINT[format]} error={errors.content}>{(a) => <Textarea {...a} name="content" mono rows={10} value={content} onChange={(e) => setContent(e.target.value)} />}</Field>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>

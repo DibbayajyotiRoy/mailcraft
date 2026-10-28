@@ -45,7 +45,7 @@ function AddRelay({ canEdit }: { canEdit: boolean }) {
           </Field>
           <Field label="Password or API key">{(a) => <Input {...a} name="password" type="password" mono required autoComplete="new-password" />}</Field>
           {preset === "custom" && <div className="grid grid-cols-[1fr_7rem] gap-3">
-            <Field label="SMTP host">{(a) => <Input {...a} name="host" mono required placeholder="smtppro.zoho.in" autoComplete="off" />}</Field>
+            <Field label="SMTP host">{(a) => <Input {...a} name="host" mono required placeholder="smtp.zoho.in" autoComplete="off" />}</Field>
             <Field label="Port">{(a) => <Input {...a} name="port" type="number" inputMode="numeric" min={1} max={65535} defaultValue={587} required />}</Field>
           </div>}
           {preset === "custom" && <label className="flex items-start gap-2 text-sm">

@@ -128,37 +128,49 @@ const settings = { llm_provider: { kind: "openrouter", model: "anthropic/claude-
 const policy = { default: { send: "needs_approval" }, keys: [{ key_id: "k1", name: "Production sender", policy: { send: "auto" } }] };
 const transports = [{ id: "tr1", kind: "smtp-relay", name: "postmark", label: "production", is_default: true, status: "active" }];
 
-const LISTS = { "/v1/emails": EMAILS, "/v1/approvals": APPROVALS, "/v1/domains": DOMAINS, "/v1/keys": KEYS, "/v1/templates": TEMPLATES, "/v1/contacts": CONTACTS, "/v1/segments": SEGMENTS, "/v1/transports": transports };
+const NOW = Date.now();
+const BROADCASTS = [
+  { id: "b1", template_id: "t1", template_name: "Welcome", from: "Dev <dev@spicrawl.com>", subject: "Spring launch, {{ first_name }}", stream: "marketing", env: "live", status: "sending", total: 120, created_at: ago(95),
+    counts: { queued: 84, sent: 20, delivered: 12, bounced: 1, failed: 0, skipped: 5 }, first_at: ago(94), last_at: new Date(NOW + 84 * 1728e3).toISOString() },
+  { id: "b2", template_id: "t2", template_name: "Receipt", from: "Dev <dev@spicrawl.com>", subject: "", stream: "marketing", env: "live", status: "done", total: 8, created_at: ago(60 * 30),
+    counts: { queued: 0, sent: 1, delivered: 6, bounced: 1, failed: 0, skipped: 0 }, first_at: null, last_at: null },
+  { id: "b3", template_id: "t1", template_name: "Welcome", from: "Dev <dev@spicrawl.com>", subject: "Pilot customers", stream: "marketing", env: "live", status: "pending_approval", total: 40, created_at: ago(5),
+    counts: { queued: 40, sent: 0, delivered: 0, bounced: 0, failed: 0, skipped: 2 }, first_at: ago(-1), last_at: ago(-60) },
+];
+const RECIPIENT_STATUS = ["queued", "queued", "sent", "delivered", "delivered", "bounced", "queued", "delivered"];
+const broadcastDetail = (b, status) => {
+  const all = Array.from({ length: 40 }, (_, i) => ({ id: `em_${String(i).padStart(2, "0")}`, email: `user${i}@example.com`, status: RECIPIENT_STATUS[i % 8], last_error: RECIPIENT_STATUS[i % 8] === "bounced" ? "550 5.1.1 mailbox does not exist" : null, scheduled_at: ago(-i * 29), sent_at: ["sent", "delivered", "bounced"].includes(RECIPIENT_STATUS[i % 8]) ? ago(100 - i) : null }));
+  const rows = status ? all.filter((r) => r.status === status) : all;
+  return { ...b, recipients: rows.slice(0, 25), next_cursor: rows.length > 25 ? rows[24].id : null,
+    skipped: [{ email: "old@example.com", reason: "suppressed", detail: null }, { email: "bob@x", reason: "invalid_email", detail: null }, { email: "cy@example.com", reason: "missing_variable", detail: "needs a value for data.company" }] };
+};
+
+const LISTS = { "/v1/broadcasts": BROADCASTS, "/v1/emails": EMAILS, "/v1/approvals": APPROVALS, "/v1/domains": DOMAINS, "/v1/keys": KEYS, "/v1/templates": TEMPLATES, "/v1/contacts": CONTACTS, "/v1/segments": SEGMENTS, "/v1/transports": transports };
 
 const body = (res, data, extra = {}, code = 200) => { res.statusCode = code; res.end(JSON.stringify({ ok: true, data, ...extra })); };
 const fail = (res, e, code) => { res.statusCode = code; res.end(JSON.stringify({ ok: false, error: e })); };
 const notFound = (res, what) => fail(res, { code: "not_found", message: `No such ${what}` }, 404);
 
-createServer((req, res) => {
+createServer(async (req, res) => {
   const u = new URL(req.url, "http://x"), p = u.pathname, q = u.searchParams; let m;
+  let input = {};
+  if (req.method !== "GET") { let raw = ""; for await (const c of req) raw += c; try { input = JSON.parse(raw || "{}"); } catch {} }
   res.setHeader("content-type", "application/json");
   if (process.env.FAIL) return fail(res, { code: "unreachable", message: "Cannot reach the database", hint: "Check the server" }, 503);
   if (req.method !== "GET") {
     if (p === "/v1/contacts/import" || p === "/v1/segments/preview") {
-      let raw = ""; req.on("data", (c) => (raw += c));
-      return req.on("end", () => {
-        if (p === "/v1/segments/preview") return body(res, { count: 12, sample: CONTACTS.slice(0, 3).map(({ email, first_name, last_name }) => ({ email, first_name, last_name })) });
-        const rows = JSON.parse(raw || "{}").contacts ?? [];
-        body(res, { imported: rows.filter((r) => !/^bad@/.test(r.email)).length, failed: rows.flatMap((r, index) => (/^bad@/.test(r.email) ? [{ index, email: r.email, error: { code: "invalid_request", message: "Rejected by the mock" } }] : [])) });
-      });
+      if (p === "/v1/segments/preview") return body(res, { count: 12, sample: CONTACTS.slice(0, 3).map(({ email, first_name, last_name }) => ({ email, first_name, last_name })) });
+      const rows = input.contacts ?? [];
+      return body(res, { imported: rows.filter((r) => !/^bad@/.test(r.email)).length, failed: rows.flatMap((r, index) => (/^bad@/.test(r.email) ? [{ index, email: r.email, error: { code: "invalid_request", message: "Rejected by the mock" } }] : [])) });
     }
     if (p === "/v1/events") return body(res, { event_id: "ev9", duplicate: false, triggered_automations: [{ id: "a1", run_id: "run_9" }] }, {}, 202);
     if (p === "/v1/automations") {
-      let raw = ""; req.on("data", (c) => (raw += c));
-      req.on("end", () => {
-        const def = JSON.parse(raw || "{}"), bad = (def.steps ?? []).find((s) => s.config?.template === "missing");
-        if (bad) return fail(res, { code: "invalid_request", message: `automation \`${def.name}\`: step \`${bad.key}\`: template \`missing\` does not exist or has no published version`, hint: "Publish the template first, or pick another." }, 422);
-        const id = "a_" + (AUTOMATIONS.length + 1), old = AUTOMATIONS.find((a) => a.name === def.name);
-        if (old) { old.steps = def.steps; old.current_version += 1; return body(res, { id: old.id, name: old.name, version: old.current_version, status: old.status, trigger: old.trigger_event, steps: def.steps }, {}, 201); }
-        AUTOMATIONS.push({ id, name: def.name, status: "draft", trigger: def.steps?.[0]?.config?.event, trigger_event: def.steps?.[0]?.config?.event ?? "", current_version: 1, entry_rule: def.entry_rule, approval: def.approval, stats: {}, steps: def.steps, created_at: ago(0) });
-        body(res, { id, name: def.name, version: 1, status: "draft", trigger: def.steps?.[0]?.config?.event, steps: def.steps }, {}, 201);
-      });
-      return;
+      const def = input, bad = (def.steps ?? []).find((s) => s.config?.template === "missing");
+      if (bad) return fail(res, { code: "invalid_request", message: `automation \`${def.name}\`: step \`${bad.key}\`: template \`missing\` does not exist or has no published version`, hint: "Publish the template first, or pick another." }, 422);
+      const id = "a_" + (AUTOMATIONS.length + 1), old = AUTOMATIONS.find((a) => a.name === def.name);
+      if (old) { old.steps = def.steps; old.current_version += 1; return body(res, { id: old.id, name: old.name, version: old.current_version, status: old.status, trigger: old.trigger_event, steps: def.steps }, {}, 201); }
+      AUTOMATIONS.push({ id, name: def.name, status: "draft", trigger: def.steps?.[0]?.config?.event, trigger_event: def.steps?.[0]?.config?.event ?? "", current_version: 1, entry_rule: def.entry_rule, approval: def.approval, stats: {}, steps: def.steps, created_at: ago(0) });
+      return body(res, { id, name: def.name, version: 1, status: "draft", trigger: def.steps?.[0]?.config?.event, steps: def.steps }, {}, 201);
     }
     if ((m = p.match(/^\/v1\/automations\/([^/]+)\/(publish|pause|resume|archive|unarchive)$/))) {
       const a = AUTOMATIONS.find((x) => x.id === m[1] || x.name === m[1]); if (!a) return notFound(res, "automation");
@@ -166,14 +178,24 @@ createServer((req, res) => {
       return body(res, { id: a.id, name: a.name, status: a.status });
     }
     if ((m = p.match(/^\/v1\/automations\/([^/]+)\/test$/))) {
-      let raw = ""; req.on("data", (c) => (raw += c));
-      req.on("end", () => { const b = JSON.parse(raw || "{}"); if (b.email === "nobody") return fail(res, { code: "invalid_request", message: "`nobody` is not a valid email address", hint: "Use name@domain.com" }, 422); body(res, { run_id: "run_test_" + Date.now(), automation_id: m[1], env: "test", status: "started" }, {}, 202); });
-      return;
+      if (input.email === "nobody") return fail(res, { code: "invalid_request", message: "`nobody` is not a valid email address", hint: "Use name@domain.com" }, 422);
+      return body(res, { run_id: "run_test_" + Date.now(), automation_id: m[1], env: "test", status: "started" }, {}, 202);
     }
     if ((m = p.match(/^\/v1\/templates\/([^/]+)\/preview$/))) {
       const t = TEMPLATES.find((x) => x.id === m[1] || x.alias === m[1]);
       return body(res, { subject: t?.subject, html: html(t?.name ?? "Template"), text: "", lint: t?.id === "t1" ? [] : [{ rule: "missing-alt", severity: "warning", message: "Image has no alt text", path: "blocks[2]" }, { rule: "no-unsubscribe", severity: "error", message: "Marketing email needs an unsubscribe link", path: "footer" }] });
     }
+    if (p === "/v1/broadcasts/preview") {
+      const r = input.recipient ?? {}, name = r.first_name || "there";
+      if (r.email === "bad@example.com") return fail(res, { code: "template_render_failed", message: "variable render failed: undefined value", hint: "give the value a fallback: {{ first_name | default(\"there\") }}" }, 422);
+      return body(res, { subject: (input.subject || "Welcome aboard").replace(/\{\{\s*first_name[^}]*\}\}/g, name), html: html(`Hello ${name}`).replace("{{ first_name }}", name), text: `Hi ${name},\n\nthanks for joining us.` });
+    }
+    if (p === "/v1/broadcasts") {
+      const n = (input.recipients ?? []).length, cap = input.max_per_day ? Math.min(50, input.max_per_day) : 50;
+      if (!input.dry_run) return body(res, { id: "b1", status: "queued", queued: n, skipped: [] }, {}, 202);
+      return body(res, { dry_run: true, queued: n, skipped: [], schedule: { daily_cap: cap, transport_daily_cap: 50, spacing_seconds: 86400 / cap, first_at: new Date().toISOString(), last_at: new Date(Date.now() + Math.max(0, n - 1) * 864e5 / cap).toISOString() } });
+    }
+    if (p === "/v1/emails") return body(res, { id: "em_00", status: "queued", recipients: [{ email: "ana@example.com", id: "em_00" }] }, {}, 202);
     return body(res, p.endsWith("/test") ? { ok: false, detail: "535 authentication failed" } : {});
   }
   if (p === "/v1/kill-switch") return body(res, { on: false });
@@ -188,6 +210,7 @@ createServer((req, res) => {
   if (p === "/v1/automations") { if (process.env.EMPTY) return body(res, []); const st = q.get("status"); return body(res, AUTOMATIONS.filter((a) => (st ? a.status === st : a.status !== "archived")).map(listRow)); }
   if (p === "/v1/events/names") return body(res, process.env.EMPTY ? [] : EVENT_NAMES);
   if (process.env.EMPTY && LISTS[p]) return body(res, []);
+  if ((m = p.match(/^\/v1\/broadcasts\/([^/]+)$/))) { const b = BROADCASTS.find((x) => x.id === m[1]); return b ? body(res, broadcastDetail(b, q.get("status"))) : notFound(res, "broadcast"); }
   if (p === "/v1/emails") {
     let rows = EMAILS; const s = q.get("status"); if (s) rows = rows.filter((e) => e.status === s);
     const lim = Number(q.get("limit") || 25), start = Number(q.get("cursor") || 0), out = rows.slice(start, start + lim);

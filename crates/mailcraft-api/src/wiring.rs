@@ -34,7 +34,7 @@ fn category(s: Stream) -> Category {
     }
 }
 
-fn public_url() -> String {
+pub(crate) fn public_url() -> String {
     std::env::var("MAILCRAFT_PUBLIC_URL")
         .ok()
         .filter(|u| !u.is_empty())

@@ -2744,3 +2744,468 @@ async fn segment_rules_preview_edit_and_delete() {
         403
     );
 }
+
+// -------------------------------------------------------------- broadcasts
+
+impl Ctx {
+    /// Live-ready workspace: go-live, footer identity, a verified domain, a default transport with a cap.
+    async fn live_ready(&self, cap: Option<i32>) {
+        sqlx::query("UPDATE workspaces SET live_enabled = true, legal_name = 'Acme', postal_address = '1 Main St' WHERE id = $1")
+            .bind(self.ws).execute(&self.st.db).await.unwrap();
+        sqlx::query("INSERT INTO domains (workspace_id, name, status, return_path_host) VALUES ($1,'acme.io','verified','bounce.acme.io')")
+            .bind(self.ws).execute(&self.st.db).await.unwrap();
+        sqlx::query("INSERT INTO transports (workspace_id, kind, name, config_enc, is_default, daily_cap) VALUES ($1,'smtp-relay','zoho','\\x00',true,$2)")
+            .bind(self.ws).bind(cap).execute(&self.st.db).await.unwrap();
+    }
+    async fn template(&self, alias: &str, text: &str, subject: &str) {
+        let (s, b) = self
+            .c("POST", "/v1/templates", Some(json!({"name": alias, "alias": alias, "stream": "marketing",
+                "content": {"version": 1, "subject": subject, "blocks": [{"type": "paragraph", "text": text}]}})))
+            .await;
+        assert_eq!(s, 201, "{b}");
+        let (s, b) = self
+            .c("POST", &format!("/v1/templates/{alias}/publish"), None)
+            .await;
+        assert_eq!(s, 200, "{b}");
+    }
+}
+
+fn reasons(b: &Value) -> Vec<(String, String)> {
+    let mut v: Vec<_> = b["data"]["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["email"].as_str().unwrap().to_owned(),
+                s["reason"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+#[tokio::test]
+async fn broadcast_screens_paces_and_links_rows() {
+    let c = ctx!();
+    c.live_ready(Some(100)).await;
+    c.template(
+        "hello",
+        "Hi {{ first_name | default(\"there\") }} at {{ data.company | default('your team') }}",
+        "News for {{ first_name | default(\"you\") }}",
+    )
+    .await;
+    sqlx::query("INSERT INTO suppressions (workspace_id, email, reason) VALUES ($1,'bounced@x.io','hard_bounce')")
+        .bind(c.ws).execute(&c.st.db).await.unwrap();
+    // an existing contact who opted out of marketing via /u/{token}
+    let (_, ct) = c
+        .c("PUT", "/v1/contacts", Some(json!({"email": "gone@x.io"})))
+        .await;
+    let cid: Uuid = ct["data"]["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("INSERT INTO topics (workspace_id, key, name) VALUES ($1,'product','product')")
+        .bind(c.ws)
+        .execute(&c.st.db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO contact_topics (contact_id, topic_id, opted_in) SELECT $1, id, false FROM topics WHERE key = 'product'").bind(cid).execute(&c.st.db).await.unwrap();
+
+    let body = json!({
+    "template_id": "hello", "from": "Dev <dev@acme.io>", "stream": "marketing",
+    "recipients": [
+        {"email": "ada@x.io", "first_name": "Ada", "last_name": "Lovelace", "data": {"company": "Analytical Engines"}},
+        {"email": "grace@x.io", "first_name": "  ", "data": {"company": ""}},
+        {"email": "ADA@x.io"}, {"email": "not-an-email"}, {"email": "bounced@x.io"}, {"email": "gone@x.io"},
+        {"email": "badcol@x.io", "data": {"Company Name": "x"}},
+    ]});
+    // dry run stores nothing
+    let (s, b) = c.c("POST", "/v1/broadcasts", Some(json!({"dry_run": true, "template_id": "hello", "from": "dev@acme.io", "recipients": body["recipients"]}))).await;
+    assert_eq!(s, 200, "{b}");
+    assert_eq!(b["data"]["queued"], 2);
+    assert_eq!(b["data"]["schedule"]["daily_cap"], 100);
+    let n: i64 = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM broadcasts) + (SELECT count(*) FROM emails)",
+    )
+    .fetch_one(&c.st.db)
+    .await
+    .unwrap();
+    assert_eq!(n, 0);
+
+    let (s, b) = c.c("POST", "/v1/broadcasts", Some(body.clone())).await;
+    assert_eq!(s, 202, "{b}");
+    assert_eq!(
+        (b["data"]["status"].as_str(), b["data"]["queued"].as_i64()),
+        (Some("queued"), Some(2))
+    );
+    assert_eq!(
+        reasons(&b),
+        vec![
+            ("ADA@x.io".to_owned(), "duplicate".to_owned()),
+            ("badcol@x.io".to_owned(), "invalid_data".to_owned()),
+            ("bounced@x.io".to_owned(), "suppressed".to_owned()),
+            ("gone@x.io".to_owned(), "unsubscribed".to_owned()),
+            ("not-an-email".to_owned(), "invalid_email".to_owned()),
+        ]
+    );
+    let bid: Uuid = b["data"]["id"].as_str().unwrap().parse().unwrap();
+
+    // rows: ordinary emails linked to the broadcast, one variables object each, paced 14.4 min apart
+    type Row = (String, String, Value, String, bool, Option<Uuid>);
+    let rows: Vec<Row> = sqlx::query_as("SELECT to_addr, source, template_vars, status, scheduled_at IS NOT NULL, contact_id FROM emails WHERE broadcast_id = $1 ORDER BY id")
+        .bind(bid).fetch_all(&c.st.db).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        (
+            rows[0].0.as_str(),
+            rows[0].1.as_str(),
+            rows[0].3.as_str(),
+            rows[0].4
+        ),
+        ("ada@x.io", "broadcast", "queued", true)
+    );
+    assert_eq!(
+        rows[0].2,
+        json!({"email": "ada@x.io", "first_name": "Ada", "last_name": "Lovelace", "data": {"company": "Analytical Engines"}})
+    );
+    assert_eq!(
+        rows[1].2,
+        json!({"email": "grace@x.io", "data": {}}),
+        "blank values are left out so `default` applies"
+    );
+    assert!(rows.iter().all(|r| r.5.is_some()));
+    let gap: f64 = sqlx::query_scalar("SELECT extract(epoch FROM max(scheduled_at) - min(scheduled_at))::float8 FROM emails WHERE broadcast_id = $1").bind(bid).fetch_one(&c.st.db).await.unwrap();
+    assert!((gap - 864.0).abs() < 1.0, "{gap}");
+    // contacts were upserted (reuses ContactService); extra columns land in properties
+    let props: Value = sqlx::query_scalar(
+        "SELECT properties FROM contacts WHERE workspace_id = $1 AND email = 'ada@x.io'",
+    )
+    .bind(c.ws)
+    .fetch_one(&c.st.db)
+    .await
+    .unwrap();
+    assert_eq!(props["company"], "Analytical Engines");
+    // a second broadcast queues behind the first one's tail
+    let (_, b2) = c.c("POST", "/v1/broadcasts", Some(json!({"template_id": "hello", "from": "dev@acme.io", "recipients": [{"email": "linus@x.io"}]}))).await;
+    let t2: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT scheduled_at FROM emails WHERE broadcast_id = $1")
+            .bind(b2["data"]["id"].as_str().unwrap().parse::<Uuid>().unwrap())
+            .fetch_one(&c.st.db)
+            .await
+            .unwrap();
+    let last: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT max(scheduled_at) FROM emails WHERE broadcast_id = $1")
+            .bind(bid)
+            .fetch_one(&c.st.db)
+            .await
+            .unwrap();
+    assert!(t2 > last, "{t2} vs {last}");
+
+    // list + detail
+    let (_, l) = c.c("GET", "/v1/broadcasts", None).await;
+    assert_eq!(l["data"].as_array().unwrap().len(), 2);
+    let first = l["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == bid.to_string())
+        .unwrap();
+    assert_eq!(
+        first["counts"],
+        json!({"queued": 2, "sent": 0, "delivered": 0, "bounced": 0, "failed": 0, "skipped": 5})
+    );
+    assert_eq!(
+        (first["status"].as_str(), first["template_name"].as_str()),
+        (Some("sending"), Some("hello"))
+    );
+    let (_, d) = c
+        .c("GET", &format!("/v1/broadcasts/{bid}?limit=1"), None)
+        .await;
+    assert_eq!(d["data"]["recipients"].as_array().unwrap().len(), 1);
+    let cur = d["data"]["next_cursor"].as_str().unwrap();
+    let (_, d2) = c
+        .c(
+            "GET",
+            &format!("/v1/broadcasts/{bid}?limit=1&cursor={cur}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (
+            d2["data"]["recipients"][0]["email"].as_str(),
+            d2["data"]["next_cursor"].is_null()
+        ),
+        (Some("grace@x.io"), true)
+    );
+    assert_eq!(d["data"]["skipped"].as_array().unwrap().len(), 5);
+    assert_eq!(
+        c.c("GET", &format!("/v1/broadcasts/{}", Uuid::new_v4()), None)
+            .await
+            .0,
+        404
+    );
+    // audited
+    let a: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = 'broadcast.create'")
+            .fetch_one(&c.st.db)
+            .await
+            .unwrap();
+    assert_eq!(a, 2);
+}
+
+#[tokio::test]
+async fn broadcast_skips_rows_the_template_cannot_render() {
+    let c = ctx!();
+    c.live_ready(None).await;
+    c.template(
+        "strict",
+        "Hello {{ first_name }} from {{ data.company }}",
+        "Hi",
+    )
+    .await;
+    let (s, b) = c.c("POST", "/v1/broadcasts", Some(json!({"template_id": "strict", "from": "dev@acme.io", "recipients": [
+        {"email": "a@x.io", "first_name": "A", "data": {"company": "Acme"}}, {"email": "b@x.io", "first_name": "B"}, {"email": "c@x.io", "data": {"company": "Z"}}]}))).await;
+    assert_eq!(s, 202, "{b}");
+    assert_eq!(b["data"]["queued"], 1);
+    assert_eq!(
+        reasons(&b).iter().map(|r| r.1.as_str()).collect::<Vec<_>>(),
+        ["missing_variable", "missing_variable"]
+    );
+    let mut why: Vec<_> = b["data"]["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| (s["email"].as_str().unwrap(), s["detail"].as_str().unwrap()))
+        .collect();
+    why.sort();
+    assert_eq!(
+        why,
+        [
+            ("b@x.io", "needs a value for data.company"),
+            ("c@x.io", "needs a value for first_name")
+        ]
+    );
+    assert!(
+        b["data"]["schedule"]["daily_cap"].is_null(),
+        "no cap: not paced"
+    );
+    let none: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM emails WHERE scheduled_at IS NOT NULL")
+            .fetch_one(&c.st.db)
+            .await
+            .unwrap();
+    assert_eq!(none, 0);
+    // nothing deliverable is an error, not an empty broadcast
+    let (s, b) = c.c("POST", "/v1/broadcasts", Some(json!({"template_id": "strict", "from": "dev@acme.io", "recipients": [{"email": "b@x.io"}]}))).await;
+    assert_eq!((s, code(&b)), (422, "no_deliverable_recipients"), "{b}");
+    // the subject override uses the same variables
+    let (s, b) = c.c("POST", "/v1/broadcasts", Some(json!({"template_id": "strict", "from": "dev@acme.io", "subject": "Hello {{ first_name }}", "max_per_day": 10, "recipients": [
+        {"email": "a@x.io", "first_name": "A", "data": {"company": "Acme"}}]}))).await;
+    assert_eq!(s, 202, "{b}");
+    assert_eq!(b["data"]["schedule"]["daily_cap"], 10);
+    let subj: String = sqlx::query_scalar("SELECT subject FROM emails WHERE broadcast_id = $1")
+        .bind(b["data"]["id"].as_str().unwrap().parse::<Uuid>().unwrap())
+        .fetch_one(&c.st.db)
+        .await
+        .unwrap();
+    assert_eq!(subj, "Hello A");
+}
+
+#[tokio::test]
+async fn broadcast_preview_and_gates() {
+    let c = ctx!();
+    c.live_ready(None).await;
+    c.template(
+        "hello",
+        "Hi {{ first_name | default(\"there\") }}, {{ data.plan | default('free') }}",
+        "Hey",
+    )
+    .await;
+    let pv = |r: Value, subject: Option<&str>| json!({"template_id": "hello", "subject": subject, "recipient": r});
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/broadcasts/preview",
+            Some(pv(
+                json!({"email": "ada@x.io", "first_name": "Ada", "data": {"plan": "pro"}}),
+                Some("For {{ first_name }}"),
+            )),
+        )
+        .await;
+    assert_eq!(s, 200, "{b}");
+    assert!(
+        b["data"]["html"].as_str().unwrap().contains("Hi Ada, pro")
+            && b["data"]["html"].as_str().unwrap().contains("Unsubscribe")
+    );
+    assert_eq!(b["data"]["subject"], "For Ada");
+    let (_, b) = c
+        .c(
+            "POST",
+            "/v1/broadcasts/preview",
+            Some(pv(json!({"email": "x@x.io"}), None)),
+        )
+        .await;
+    assert!(b["data"]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Hi there, free"));
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/broadcasts/preview",
+            Some(pv(json!({"email": "x@x.io"}), Some("For {{ first_name }}"))),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (422, "template_render_failed"), "{b}");
+    assert_eq!(
+        c.c(
+            "POST",
+            "/v1/broadcasts/preview",
+            Some(json!({"template_id": "nope", "recipient": {"email": "a@b.co"}}))
+        )
+        .await
+        .0,
+        404
+    );
+    assert_eq!(
+        c.c(
+            "POST",
+            "/v1/broadcasts/preview",
+            Some(pv(json!({"email": "nope"}), None))
+        )
+        .await
+        .0,
+        400
+    );
+
+    // same gates as a single send: scope, unverified domain, kill switch
+    let ro = c.key(&[Scope::Read]).await;
+    let rec = json!([{"email": "a@x.io"}]);
+    assert_eq!(
+        call(
+            &c.app,
+            "POST",
+            "/v1/broadcasts",
+            Some(&ro),
+            Some(json!({"template_id": "hello", "from": "dev@acme.io", "recipients": rec}))
+        )
+        .await
+        .0,
+        403
+    );
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/broadcasts",
+            Some(json!({"template_id": "hello", "from": "dev@other.io", "recipients": rec})),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (422, "domain_not_verified"), "{b}");
+    assert_eq!(
+        c.c(
+            "POST",
+            "/v1/broadcasts",
+            Some(json!({"template_id": "hello", "from": "dev@acme.io", "recipients": []}))
+        )
+        .await
+        .0,
+        400
+    );
+    c.c("POST", "/v1/kill-switch", Some(json!({"on": true})))
+        .await;
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/broadcasts",
+            Some(json!({"template_id": "hello", "from": "dev@acme.io", "recipients": rec})),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (403, "kill_switch_active"), "{b}");
+}
+
+#[tokio::test]
+async fn broadcast_with_test_key_and_approval_policy() {
+    let c = ctx!();
+    c.live_ready(Some(50)).await;
+    c.template("hello", "Hi {{ first_name }}", "Hey").await;
+    // test key: sandbox addresses only, never paced
+    let mut db = c.st.db.acquire().await.unwrap();
+    let (_, tk) = insert_key(
+        &mut db,
+        c.ws,
+        &spec("t", KeyEnv::Test, &[Scope::Read, Scope::Send]),
+    )
+    .await
+    .unwrap();
+    let (s, b) = call(&c.app, "POST", "/v1/broadcasts", Some(&tk), Some(json!({"template_id": "hello", "from": "dev@acme.io", "recipients": [
+        {"email": "delivered@test.mailcraft.local", "first_name": "A"}, {"email": "real@example.com", "first_name": "B"}]}))).await;
+    assert_eq!(s, 202, "{b}");
+    assert_eq!(
+        (b["data"]["queued"].as_i64(), reasons(&b)),
+        (
+            Some(1),
+            vec![("real@example.com".to_owned(), "not_allowed".to_owned())]
+        )
+    );
+    let (env, paced): (String, bool) =
+        sqlx::query_as("SELECT env, scheduled_at IS NOT NULL FROM emails")
+            .fetch_one(&c.st.db)
+            .await
+            .unwrap();
+    assert_eq!((env.as_str(), paced), ("test", false));
+    drop(db);
+
+    // a key that needs approval: one approval gates every row, approving releases them on schedule
+    let mut db = c.st.db.acquire().await.unwrap();
+    let mut sp = spec("p", KeyEnv::Live, &[Scope::Read, Scope::Send]);
+    sp.policy = Some(json!({"send": "needs_approval"}));
+    let (_, pk) = insert_key(&mut db, c.ws, &sp).await.unwrap();
+    drop(db);
+    let (s, b) = call(
+        &c.app,
+        "POST",
+        "/v1/broadcasts",
+        Some(&pk),
+        Some(
+            json!({"template_id": "hello", "from": "dev@acme.io", "recipients": [
+        {"email": "a@x.io", "first_name": "A"}, {"email": "b@x.io", "first_name": "B"}]}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        (s, b["data"]["status"].as_str()),
+        (202, Some("pending_approval")),
+        "{b}"
+    );
+    let aid = b["data"]["approval_id"].as_str().unwrap();
+    let bid: Uuid = b["data"]["id"].as_str().unwrap().parse().unwrap();
+    let db = c.st.db.clone();
+    let st = |s: &'static str| {
+        let db = db.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(&format!(
+                "SELECT count(*) FROM emails WHERE broadcast_id = $1 AND status = '{s}'"
+            ))
+            .bind(bid)
+            .fetch_one(&db)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(st("pending_approval").await, 2);
+    let (_, l) = c.c("GET", "/v1/broadcasts", None).await;
+    assert_eq!(l["data"][0]["status"], "pending_approval");
+    let (s, b) = c
+        .c(
+            "POST",
+            &format!("/v1/approvals/{aid}/decide"),
+            Some(json!({"decision": "approve"})),
+        )
+        .await;
+    assert_eq!(s, 200, "{b}");
+    assert_eq!((st("pending_approval").await, st("queued").await), (0, 2));
+    let late: i64 = sqlx::query_scalar("SELECT count(*) FROM emails WHERE broadcast_id = $1 AND next_attempt_at > now() + interval '10 minutes'").bind(bid).fetch_one(&c.st.db).await.unwrap();
+    assert_eq!(
+        late, 1,
+        "the second row keeps its slot (50/day = 28.8 min apart)"
+    );
+}

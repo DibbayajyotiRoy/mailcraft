@@ -6,4 +6,5 @@ import { fileURLToPath } from "node:url";
 const root = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
-export default { output: "standalone", outputFileTracingRoot: root, turbopack: { root } };
+// A broadcast of up to 5000 recipients travels through one server action call.
+export default { output: "standalone", outputFileTracingRoot: root, turbopack: { root }, experimental: { serverActions: { bodySizeLimit: "10mb" } } };
