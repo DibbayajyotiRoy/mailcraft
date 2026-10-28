@@ -109,8 +109,8 @@ mod tests {
             [
                 "first_name",
                 "last_name",
-                "properties.plan",
-                "properties.new"
+                "properties.new",
+                "properties.plan"
             ]
         );
         assert_eq!(d[0]["old"], "Ana");
