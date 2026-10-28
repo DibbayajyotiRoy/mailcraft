@@ -52,6 +52,18 @@ EOF
     )
     chown root:mailcraft $env; chmod 640 $env
   fi
+  # The dashboard gets its own small env file. It must not read $env: that holds DATABASE_URL and MAILCRAFT_SECRET_KEY,
+  # which the Next.js process has no business seeing. Created once, never rewritten (it holds the assistant's key).
+  denv=/etc/mailcraft/dashboard.env
+  if [ ! -f $denv ]; then
+    ( umask 077; cat > $denv <<DENV
+# Read by mailcraft-dashboard only (then: systemctl restart mailcraft-dashboard). The AI assistant is off until this is set.
+# OPENROUTER_API_KEY=          a free OpenRouter key is enough; only free, open-weight models are ever used
+# MAILCRAFT_ASSISTANT_MODEL=   optional: pin one free model (anything not free is refused)
+DENV
+    )
+    chown root:mailcraft $denv; chmod 640 $denv
+  fi
   # the env file is authoritative once it exists (it is never rewritten), so a redeploy with other port args cannot split api and dashboard
   p=$(sed -n 's/^MAILCRAFT_BIND=.*:\([0-9][0-9]*\)$/\1/p' $env); api=${p:-$api}
 
@@ -95,6 +107,7 @@ After=mailcraft-api.service
 PartOf=mailcraft.target
 
 [Service]
+EnvironmentFile=-$denv
 Environment=NODE_ENV=production PORT=$dash HOSTNAME=0.0.0.0 MAILCRAFT_API_URL=http://127.0.0.1:$api NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=384
 WorkingDirectory=$opt/current/dashboard
 ExecStart=$node $opt/current/dashboard/server.js

@@ -62,7 +62,7 @@ browser panel ──POST /api/assistant──▶ dashboard server ──▶ Open
 
 If `MAILCRAFT_ASSISTANT_MODEL` is unset, `MAILCRAFT_LLM_MODEL` is used as the pin when it is present in the dashboard's environment and qualifies (compose does not pass it to the dashboard).
 
-Set them in `.env` and `docker compose up -d dashboard` (compose passes all three through, see [`.env.example`](../.env.example)). On the [VM deploy](DEPLOY-VM.md) the dashboard unit does not read `/etc/mailcraft/mailcraft.env`; add them with `systemctl edit mailcraft-dashboard` (`[Service]` `Environment=...`) and restart `mailcraft-dashboard`. The container or host needs outbound HTTPS to `openrouter.ai`.
+Set them in `.env` and `docker compose up -d dashboard` (compose passes all three through, see [`.env.example`](../.env.example)). On the [VM deploy](DEPLOY-VM.md) put them in `/etc/mailcraft/dashboard.env` (created by `deploy-vm.sh`, 0640 root:mailcraft, read only by `mailcraft-dashboard`) and `sudo systemctl restart mailcraft-dashboard`. The dashboard deliberately does not read `mailcraft.env`: that file holds the database URL and the master secret key. If the API also writes emails with an LLM, put the same `OPENROUTER_API_KEY` in `mailcraft.env` too. The container or host needs outbound HTTPS to `openrouter.ai`.
 
 ## Free, open-source models only
 
