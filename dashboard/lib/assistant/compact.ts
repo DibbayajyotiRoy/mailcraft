@@ -17,7 +17,7 @@ const ROW: Record<string, (r: any) => Record<string, unknown>> = {
   contact: (r) => prune({ id: r.id, email: r.email, name: [r.first_name, r.last_name].filter(Boolean).join(" ") || undefined, suppressed: r.suppressed || undefined }),
   list: (r) => prune({ id: r.id, name: r.name, members: r.member_count, rule: r.filter ? true : undefined }),
   domain: (r) => prune({ id: r.id, name: r.name, status: r.status, stream: r.stream, records: tally(r.records) }),
-  sender: (r) => prune({ id: r.id, kind: r.kind, name: r.name, status: r.status, default: r.is_default || undefined }),
+  sender: (r) => prune({ address: r.address, name: r.display_name ?? r.name, transport: r.transport, transport_id: r.transport_id, status: r.status, default: r.is_default || undefined }),
   approval: (r) => prune({ id: r.id, kind: r.kind, status: r.status, subject: clip(r.payload?.preview?.subject, 80) }),
   event: (r) => prune({ name: r.name, count: r.count }),
 };

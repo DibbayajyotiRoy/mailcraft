@@ -256,3 +256,32 @@ test("history is bounded: old turns collapse into a short summary, the latest me
   expect(ms[1].content.length).toBeLessThan(800);
   expect(estTokens(ms)).toBeLessThan(5000);
 });
+
+const SENDERS = [
+  { address: "hello@acme.test", display_name: "Acme", kind: "login", transport_id: "tr1", transport: "postmark", is_default: true, status: "ready" },
+  { address: "news@other.test", display_name: null, kind: "domain", transport_id: null, transport: null, is_default: false, status: "needs_domain" },
+];
+
+test("senders are read through the MCP sender_list route, compacted to what a From picker needs", async () => {
+  const w = fakeWorld([calls(["list", { kind: "sender" }]), text("ok")], { "GET /v1/senders": () => SENDERS });
+  await turn(user("which senders do I have?"));
+  expect(w.rec.map((r) => r.url)).toEqual(["/v1/senders?limit=100"]);
+  expect(un(w.orBodies[1].messages.at(-1).content).rows[0]).toEqual({ address: "hello@acme.test", name: "Acme", transport: "postmark", transport_id: "tr1", status: "ready", default: true });
+});
+
+test("a send from an address that is not ready is flagged on the card, and transport_id reaches the stored call", async () => {
+  const w = fakeWorld([calls(["propose_email", { to: ["a@example.com"], from: "Newsletter <news@other.test>", transport_id: "tr9", subject: "Hi", text: "Hello" }]), text("ok")],
+    { "GET /v1/senders": () => SENDERS, "POST /v1/emails": (b: any) => (b.dry_run ? { subject: "Hi", html: "<p>Hello</p>", lint: [] } : { id: "e1", status: "queued" }) });
+  const p = ((await turn(user("email a@example.com from the newsletter address"))).find((e) => e.type === "proposal") as any).proposal;
+  expect(p.warnings.join(" ")).toMatch(/needs domain.*verify its domain/);
+  expect(w.rec.filter(MUTATING)).toEqual([]);
+  await applyProposal("sid-1", p.id, { base: API, key: "k" }, false);
+  expect(w.rec.filter(MUTATING)[0].body).toMatchObject({ from: "Newsletter <news@other.test>", transport_id: "tr9", to: ["a@example.com"] });
+});
+
+test("a ready sender adds no warning", async () => {
+  fakeWorld([calls(["propose_email", { to: ["a@example.com"], from: "hello@acme.test", subject: "Hi", text: "Hello" }]), text("ok")],
+    { "GET /v1/senders": () => SENDERS, "POST /v1/emails": () => ({ subject: "Hi", html: "<p>Hello</p>" }) });
+  const p = ((await turn(user("email a@example.com"))).find((e) => e.type === "proposal") as any).proposal;
+  expect(p.warnings.join(" ")).not.toMatch(/Sender/);
+});

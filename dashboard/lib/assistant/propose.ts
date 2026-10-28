@@ -132,6 +132,14 @@ const proposeAutomationState: Builder = async (a, ctx) => {
   });
 };
 
+/** A From address that is not "ready" (needs_domain, transport_missing) will fail or bounce: say so on the card. Unknown addresses pass (a verified domain can send as any address). */
+async function senderWarning(ctx: Ctx, from: string): Promise<string[]> {
+  const addr = (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
+  const r = await read(ctx, "GET", "/v1/senders");
+  const row = Array.isArray(r.data) ? r.data.find((x: any) => String(x.address).toLowerCase() === addr) : undefined;
+  return row && row.status && row.status !== "ready" ? [`Sender ${addr} is "${String(row.status).replace(/_/g, " ")}": ${row.status === "needs_domain" ? "verify its domain first" : "connect a transport for it"} or the send will fail.`] : [];
+}
+
 // ---- broadcasts and single emails ----------------------------------------------------------------------------------
 const skippedTally = (skipped: any[] = []) => Object.entries(skipped.reduce((m: any, s) => ((m[s.reason] = (m[s.reason] ?? 0) + 1), m), {})).map(([reason, n]) => ({ reason, n: n as number }));
 const proposeBroadcast: Builder = async (a, ctx) => {
@@ -145,7 +153,7 @@ const proposeBroadcast: Builder = async (a, ctx) => {
   let from = isStr(a.from) ? a.from.trim() : undefined;
   if (!from) { const s = await read(ctx, "GET", "/v1/settings"); from = s.data?.default_from || undefined; }
   if (!from) return fail("missing_sender", "No from address given and no default sender is set.", "Ask the user which sender to use.");
-  const base = { template_id: t.data.id ?? a.template, from, stream: "marketing", ...(isStr(a.subject) && { subject: a.subject }), ...(a.max_per_day > 0 && { max_per_day: Math.floor(a.max_per_day) }) };
+  const base = { template_id: t.data.id ?? a.template, from, stream: "marketing", ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.max_per_day > 0 && { max_per_day: Math.floor(a.max_per_day) }) };
   const body = { ...base, ...(list ? { list_id: list } : { recipients: emails.map((email) => ({ email })) }) };
   const dry = await read(ctx, "POST", "/v1/broadcasts", { ...body, dry_run: true }, 0);
   if (dry.error) return apiErr(dry.error);
@@ -156,7 +164,7 @@ const proposeBroadcast: Builder = async (a, ctx) => {
   if (!recipient) { recipient = { email: "preview@example.com", first_name: "Alex" }; sample = true; }
   const pv = await read(ctx, "POST", "/v1/broadcasts/preview", { template_id: base.template_id, ...(base.subject && { subject: base.subject }), stream: "marketing", recipient });
   const sch = dry.data.schedule, when = sch?.first_at ? `${String(sch.first_at).slice(0, 16).replace("T", " ")} to ${String(sch.last_at).slice(0, 16).replace("T", " ")}` : "";
-  const warnings = [...(pv.error ? [`Preview failed: ${pv.error.message}`] : []), ...(sample ? ["Preview uses a sample recipient."] : []), ...sandbox(ctx),
+  const warnings = [...(await senderWarning(ctx, from)), ...(pv.error ? [`Preview failed: ${pv.error.message}`] : []), ...(sample ? ["Preview uses a sample recipient."] : []), ...sandbox(ctx),
     ...(sch?.daily_cap ? [`Paced at ${sch.daily_cap} per day.`] : [])];
   return propose(ctx, {
     kind: "broadcast", risk: "sends", warnings, link: undefined, linkKind: "broadcasts",
@@ -173,13 +181,13 @@ const proposeEmail: Builder = async (a, ctx) => {
   const to: string[] = Array.isArray(a?.to) ? a.to.map(String) : [];
   if (!to.length || to.length > 5 || to.some((e) => !EMAIL.test(e))) return fail("invalid_request", "to must be 1-5 valid addresses (use propose_broadcast for more).");
   if (!a.template && !a.html && !a.text) return fail("invalid_request", "Give template, html or text.");
-  const body: Record<string, unknown> = { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.template && { template: a.template }), ...(isStr(a.html) && { html: a.html }), ...(isStr(a.text) && { text: a.text }) };
+  const body: Record<string, unknown> = { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.template && { template: a.template }), ...(isStr(a.html) && { html: a.html }), ...(isStr(a.text) && { text: a.text }) };
   const dry = await read(ctx, "POST", "/v1/emails", { ...body, dry_run: true }, 0);
   if (dry.error) return apiErr(dry.error);
   const d = dry.data ?? {}, html = d.html ?? d.rendered?.html ?? d.preview?.html ?? (isStr(a.html) ? a.html : ""), subject = d.subject ?? d.rendered?.subject ?? a.subject ?? "";
   const lint = (d.lint ?? d.rendered?.lint ?? []).map((l: any) => ({ sev: l.severity, msg: `${l.rule}: ${l.message}` }));
   return propose(ctx, {
-    kind: "email", risk: "sends", lint, warnings: sandbox(ctx), link: undefined,
+    kind: "email", risk: "sends", lint, warnings: [...(isStr(a.from) ? await senderWarning(ctx, a.from) : []), ...sandbox(ctx)], link: undefined,
     confirm: liveConfirm(ctx, `This will email ${to.length === 1 ? "1 real person" : `${to.length} real people`}.`),
     calls: [{ method: "POST", path: "/v1/emails", body, label: "Send email" }],
     title: `Send "${clip(subject || "(template subject)", 50)}" to ${to[0]}${to.length > 1 ? ` and ${to.length - 1} more` : ""}`,
@@ -245,8 +253,8 @@ export const PROPOSE_SCHEMAS = {
   propose_automation: T("propose_automation", "Propose creating/updating an automation (draft, not activated). Send the full definition; trigger is an event name.",
     o({ definition: o({ name: s("string"), trigger: s("string"), entry_rule: s("string"), goal: s("object"), approval: s("string"), steps: s("array", { items: o({ key: s("string"), type: s("string"), config: s("object"), next: {} }, ["key", "type"]) }) }, ["name", "steps"]) }, ["definition"])),
   propose_automation_state: T("propose_automation_state", "Propose activating, pausing or resuming an automation.", o({ id: s("string"), action: s("string", { enum: ["activate", "pause", "resume"] }), backfill_suppress: s("boolean") }, ["id", "action"])),
-  propose_broadcast: T("propose_broadcast", "Propose sending a published template to a list or emails (dry run shown first).", o({ template: s("string"), from: s("string"), subject: s("string"), list: s("string"), emails: strs, max_per_day: s("integer") }, ["template"])),
-  propose_email: T("propose_email", "Propose sending one email to 1-5 addresses.", o({ to: strs, from: s("string"), subject: s("string"), template: o({ id: s("string"), variables: s("object") }), html: s("string"), text: s("string") }, ["to"])),
+  propose_broadcast: T("propose_broadcast", "Propose sending a published template to a list or emails (dry run shown first). from: an address from list kind=sender.", o({ template: s("string"), from: s("string"), transport_id: s("string"), subject: s("string"), list: s("string"), emails: strs, max_per_day: s("integer") }, ["template"])),
+  propose_email: T("propose_email", "Propose sending one email to 1-5 addresses. from: an address from list kind=sender.", o({ to: strs, from: s("string"), transport_id: s("string"), subject: s("string"), template: o({ id: s("string"), variables: s("object") }), html: s("string"), text: s("string") }, ["to"])),
   propose_list: T("propose_list", "Propose creating/updating a contact list or rule segment, optionally adding emails.", o({ id: s("string"), name: s("string"), filter: s("object"), emails: strs })),
   propose_contacts: T("propose_contacts", "Propose creating/updating up to 50 contacts by email.", o({ contacts: s("array", { items: o({ email: s("string"), first_name: s("string"), last_name: s("string"), timezone: s("string"), properties: s("object") }, ["email"]) }) }, ["contacts"])),
 };

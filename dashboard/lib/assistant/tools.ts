@@ -16,7 +16,8 @@ const LIST: Record<string, { tool?: string; path: string; q?: boolean }> = {
   template: { tool: "template_list", path: "/v1/templates" }, automation: { tool: "automation_list", path: "/v1/automations" },
   email: { tool: "email_list", path: "/v1/emails", q: true }, contact: { tool: "contact_list", path: "/v1/contacts", q: true }, approval: { tool: "approval_list", path: "/v1/approvals" },
   broadcast: { tool: "broadcast_list", path: "/v1/broadcasts" }, list: { tool: "segment_list", path: "/v1/segments" }, event: { tool: "event_names", path: "/v1/events/names" },
-  domain: { path: "/v1/domains" }, sender: { path: "/v1/transports" }, // not in the MCP server (a human adds domains and relays)
+  sender: { tool: "sender_list", path: "/v1/senders" },
+  domain: { path: "/v1/domains" }, // not in the MCP server (a human adds domains)
 };
 const GET: Record<string, { tool?: string; path: string }> = {
   template: { tool: "template_get", path: "/v1/templates/{id}" }, automation: { tool: "automation_get", path: "/v1/automations/{id}" }, email: { tool: "email_get", path: "/v1/emails/{id}" },
@@ -25,7 +26,7 @@ const GET: Record<string, { tool?: string; path: string }> = {
 };
 const route = (m: { tool?: string; path: string }) => (m.tool ? CAT.get(m.tool)! : { method: "GET", path: m.path });
 const KINDS_LIST = Object.keys(LIST), KINDS_GET = Object.keys(GET);
-const hay = (r: any) => [r.name, r.alias, r.subject, r.email, r.to_addr, r.template_name, r.trigger].filter(Boolean).join(" ").toLowerCase();
+const hay = (r: any) => [r.name, r.alias, r.subject, r.email, r.to_addr, r.template_name, r.trigger, r.address, r.display_name].filter(Boolean).join(" ").toLowerCase();
 
 async function list(a: any, ctx: Ctx): Promise<Out> {
   const m = LIST[a?.kind];

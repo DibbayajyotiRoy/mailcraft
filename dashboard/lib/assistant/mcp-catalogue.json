@@ -12,8 +12,20 @@
   }
  },
  {
+  "name": "sender_list",
+  "description": "The From addresses you can pick: address, display_name, transport (where a send from it goes), is_default, status ready|needs_domain|transport_missing. Read-only; a human adds addresses and transports. Use an address as email_send `from`.",
+  "method": "GET",
+  "path": "/v1/senders",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
   "name": "email_send",
-  "description": "Send (queue) one email. Result status is queued or pending_approval (poll approval_get with approval_id, never decide); a blocked policy is an error with code blocked_by_policy. Test keys sandbox mail; use delivered@test.mailcraft.local. Use dry_run to render and lint without sending. Pass idempotency_key to make retries safe.",
+  "description": "Send (queue) one email. `from` is one of sender_list's addresses (or an address on a verified domain); the transport is chosen by `from` unless you pass transport_id. Result status is queued or pending_approval (poll approval_get with approval_id, never decide); a blocked policy is an error with code blocked_by_policy. Test keys sandbox mail; use delivered@test.mailcraft.local. Use dry_run to render and lint without sending. Pass idempotency_key to make retries safe.",
   "method": "POST",
   "path": "/v1/emails",
   "mutating": true,
@@ -22,6 +34,10 @@
    "type": "object",
    "properties": {
     "from": {
+     "type": "string"
+    },
+    "transport_id": {
+     "description": "force this transport (UUID from sender_list); omit to route by `from`",
      "type": "string"
     },
     "to": {
@@ -240,6 +256,11 @@
      "description": "template id or alias"
     },
     "from": {
+     "type": "string",
+     "description": "one of sender_list's addresses, or an address on a verified domain"
+    },
+    "transport_id": {
+     "description": "force this transport (UUID from sender_list); omit to route by `from`",
      "type": "string"
     },
     "recipients": {
