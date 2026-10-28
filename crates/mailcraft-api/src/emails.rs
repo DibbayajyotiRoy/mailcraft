@@ -26,6 +26,7 @@ use crate::{
     caps::{self, Reservation},
     error::{envelope, envelope_list, err, invalid, not_found, ApiError, ApiJson, ApiResult},
     idem::{Begin, Guard},
+    senders,
     state::AppState,
     webhooks,
 };
@@ -68,6 +69,9 @@ pub struct SendEmail {
     pub headers: Option<BTreeMap<String, String>>,
     #[serde(default)]
     pub scheduled_at: Option<DateTime<Utc>>,
+    /// Send through this transport instead of the one the `from` address routes to.
+    #[serde(default)]
+    pub transport_id: Option<Uuid>,
     #[serde(default)]
     pub dry_run: bool,
 }
@@ -86,6 +90,7 @@ pub(crate) struct Prepared {
     pub(crate) tags: Value,
     pub(crate) headers: Value,
     pub(crate) scheduled_at: Option<DateTime<Utc>>,
+    pub(crate) transport_id: Option<Uuid>,
 }
 
 pub(crate) fn stream_str(s: Stream) -> &'static str {
@@ -123,8 +128,14 @@ pub(crate) async fn prepare(st: &AppState, key: &ApiKey, r: &SendEmail) -> ApiRe
                 .hint_in("use an address on a verified domain"))
         }
     };
-    let (_, from_addr) = address::parse_mailbox(&from_raw)
+    let (from_name, from_addr) = address::parse_mailbox(&from_raw)
         .ok_or_else(|| invalid("`from` is not a valid mailbox").field("from"))?;
+    // A bare address that is a connected mailbox goes out under its display name.
+    let from_raw = if from_name.is_none() {
+        senders::labelled(&senders::relays(st, key.workspace_id).await?, &from_addr)
+    } else {
+        from_raw
+    };
     let reply_to = match &r.reply_to {
         Some(rt) => Some(
             address::parse_mailbox(rt)
@@ -202,6 +213,7 @@ pub(crate) async fn prepare(st: &AppState, key: &ApiKey, r: &SendEmail) -> ApiRe
         tags: Value::Array(r.tags.clone().unwrap_or_default()),
         headers: Value::Object(headers),
         scheduled_at: r.scheduled_at,
+        transport_id: r.transport_id,
     })
 }
 
@@ -209,6 +221,8 @@ pub(crate) struct Plan {
     pub(crate) policy: Policy,
     pub(crate) decisions: Vec<Value>,
     pub(crate) domain_id: Option<Uuid>,
+    /// Pinned on `emails.transport_id`; `None` for sandbox sends (they never reach a transport).
+    pub(crate) transport: Option<(Uuid, String)>,
 }
 
 async fn blocked(st: &AppState, key: &ApiKey, rule: &str, e: Error, record: bool) -> ApiError {
@@ -231,23 +245,6 @@ async fn blocked(st: &AppState, key: &ApiKey, rule: &str, e: Error, record: bool
         .await;
     }
     ApiError(e)
-}
-
-/// The login address of the workspace's default transport when it is an smtp-relay in
-/// `mailbox_sender` mode.
-pub(crate) async fn mailbox_relay_sender(st: &AppState, ws: Uuid) -> ApiResult<Option<String>> {
-    let row: Option<(Uuid, Vec<u8>)> = sqlx::query_as(
-        "SELECT id, config_enc FROM transports WHERE workspace_id = $1 AND kind = 'smtp-relay' \
-         ORDER BY is_default DESC, created_at LIMIT 1",
-    )
-    .bind(ws)
-    .fetch_optional(&st.db)
-    .await?;
-    Ok(row.and_then(|(id, enc)| {
-        let c: Value = serde_json::from_slice(&st.secrets.open(&enc, id.as_bytes()).ok()?).ok()?;
-        c["mailbox_sender"].as_bool().filter(|b| *b)?;
-        c["username"].as_str().map(String::from)
-    }))
 }
 
 pub(crate) async fn plan(
@@ -282,34 +279,30 @@ pub(crate) async fn plan(
     }
     let mut decisions = vec![json!({"rule": "kill_switch", "decision": "pass"})];
     let mut domain_id = None;
+    let mut transport = None;
     match key.env {
         KeyEnv::Live => {
             if !live {
                 return Err(blocked(st, key, "go_live", Error::new("blocked_by_policy", 403, "this workspace is not approved for live sending")
                     .hint("request go-live (POST /v1/go-live-requests); a human approves it. Use a mc_test_ key meanwhile"), record).await);
             }
-            let dom: Option<Uuid> = sqlx::query_scalar(
-                "SELECT id FROM domains WHERE workspace_id = $1 AND name = $2 AND status = 'verified'",
-            )
-            .bind(key.workspace_id)
-            .bind(&p.from_domain)
-            .fetch_optional(&st.db)
-            .await?;
-            // A mailbox relay (Zoho, Workspace, Outlook) only sends as the address it logged in
-            // with and signs with the provider's own SPF/DKIM, so that login is the proof of
-            // ownership: mailcraft's own domain records add nothing there.
-            let mailbox_ok = dom.is_none()
-                && mailbox_relay_sender(st, key.workspace_id)
-                    .await?
-                    .is_some_and(|m| {
-                        address::parse_mailbox(&p.from)
-                            .is_some_and(|(_, a)| a.eq_ignore_ascii_case(&m))
-                    });
-            let Some(dom) = dom.or(mailbox_ok.then(Uuid::nil)) else {
+            // A mailbox relay (Zoho, Workspace, Outlook) only sends as the addresses it is signed in
+            // with (login + "send as" aliases) and signs with the provider's own SPF/DKIM, so that is
+            // the proof of ownership: mailcraft's own domain records add nothing there.
+            let rt = senders::Routing::load(st, key.workspace_id).await?;
+            if p.transport_id.is_some_and(|t| !rt.has_transport(t)) {
+                return Err(err("not_found", 404, "transport not found")
+                    .field("transport_id")
+                    .hint_in("list them with GET /v1/transports"));
+            }
+            let from_addr = address::parse_mailbox(&p.from).map_or_else(String::new, |m| m.1);
+            let route = rt.route(&from_addr, p.transport_id);
+            if !route.allowed() {
                 return Err(err("domain_not_verified", 422, format!("cannot send from {}: domain is not verified", p.from_domain))
                     .field("from")
                     .hint_in("add it with POST /v1/domains and publish the returned DNS records, then verify"));
-            };
+            }
+            let dom = route.domain_id.unwrap_or_else(Uuid::nil);
             if key.domain_id.is_some_and(|d| d != dom) {
                 return Err(blocked(
                     st,
@@ -351,7 +344,12 @@ pub(crate) async fn plan(
                     .await);
                 }
             }
-            decisions.push(json!({"rule": "routing", "decision": "transport"}));
+            decisions.push(json!({
+                "rule": "routing", "decision": "transport", "why": route.why,
+                "transport": route.transport.as_ref().map(|t| &t.1),
+                "transport_id": route.transport.as_ref().map(|t| t.0),
+            }));
+            transport = route.transport;
         }
         KeyEnv::Test => {
             let al = key.allowlist.as_deref().unwrap_or(&[]);
@@ -420,6 +418,7 @@ pub(crate) async fn plan(
         policy: pol,
         decisions,
         domain_id,
+        transport,
     })
 }
 
@@ -447,8 +446,8 @@ pub(crate) async fn insert_email(
     sqlx::query(
         "INSERT INTO emails (id, workspace_id, api_key_id, domain_id, stream, env, source, from_addr, to_addr, reply_to, \
             subject, template_id, template_vars, headers, tags, idempotency_key, status, policy_decisions, \
-            scheduled_at, next_attempt_at, max_age_at, broadcast_id, contact_id) \
-         VALUES ($1,$2,$3,$4,$5,$6,$20,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,COALESCE($18, now()),$19,$21,$22)",
+            scheduled_at, next_attempt_at, max_age_at, broadcast_id, contact_id, transport_id) \
+         VALUES ($1,$2,$3,$4,$5,$6,$20,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,COALESCE($18, now()),$19,$21,$22,$23)",
     )
     .bind(r.id)
     .bind(key.workspace_id)
@@ -472,6 +471,7 @@ pub(crate) async fn insert_email(
     .bind(if r.broadcast.is_some() { "broadcast" } else { "api" })
     .bind(r.broadcast.map(|b| b.0))
     .bind(r.broadcast.and_then(|b| b.1))
+    .bind(pl.transport.as_ref().map(|t| t.0))
     .execute(tx)
     .await?;
     Ok(())
@@ -588,7 +588,8 @@ fn dry_run_preview(key: &ApiKey, p: &Prepared, pl: &Plan) -> Value {
         "rendered": {"subject": p.subject, "html": p.html, "text": p.text,
             "headers": {"From": p.from, "To": p.to.join(", "), "Subject": p.subject}},
         "lint": lint,
-        "would_send_via": if key.env == KeyEnv::Test { "sandbox" } else { "default_transport" },
+        "would_send_via": if key.env == KeyEnv::Test { "sandbox" } else { "transport" },
+        "transport": pl.transport.as_ref().map(|t| &t.1),
     })
 }
 

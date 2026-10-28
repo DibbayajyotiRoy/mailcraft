@@ -27,6 +27,7 @@ pub mod ops;
 pub mod page;
 pub mod public;
 pub mod resolver;
+pub mod senders;
 pub mod services;
 pub mod smtp_in;
 pub mod ssrf;
@@ -134,7 +135,10 @@ pub fn router(st: AppState) -> Router {
             "/v1/transports/gmail/oauth/complete",
             post(transports::oauth_complete),
         )
-        .route("/v1/transports/{id}", delete(transports::delete))
+        .route(
+            "/v1/transports/{id}",
+            delete(transports::delete).patch(transports::patch),
+        )
         .route("/v1/transports/{id}/test", post(transports::test))
         // templates
         .route(
@@ -191,6 +195,7 @@ pub fn router(st: AppState) -> Router {
         .route("/v1/emails/{id}", get(emails::get))
         .route("/v1/emails/{id}/cancel", post(emails::cancel))
         .route("/v1/emails/{id}/events", get(emails::events))
+        .route("/v1/senders", get(senders::list))
         // keys
         .route("/v1/keys", post(keys::create).get(keys::list))
         .route(
@@ -204,7 +209,9 @@ pub fn router(st: AppState) -> Router {
         )
         .route(
             "/v1/domains/{id}",
-            get(integrations::domains_get).delete(integrations::domains_delete),
+            get(integrations::domains_get)
+                .patch(integrations::domains_patch)
+                .delete(integrations::domains_delete),
         )
         .route(
             "/v1/domains/{id}/verify",

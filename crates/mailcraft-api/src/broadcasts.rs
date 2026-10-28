@@ -72,6 +72,9 @@ pub struct CreateBroadcast {
     /// Upper bound on sends per day (the lowest of this and the transport / key caps applies).
     #[serde(default)]
     pub max_per_day: Option<u32>,
+    /// Send through this transport instead of the one the `from` address routes to.
+    #[serde(default)]
+    pub transport_id: Option<Uuid>,
     /// Validate, screen and schedule without queueing anything.
     #[serde(default)]
     pub dry_run: bool,
@@ -386,6 +389,7 @@ async fn analyze(
             tags: None,
             headers: None,
             scheduled_at: None,
+            transport_id: req.transport_id,
             dry_run: false,
         },
     )

@@ -199,6 +199,18 @@ paths:
         "200": { description: broadcast, content: { application/json: { schema: { $ref: "#/components/schemas/BroadcastDetail" } } } }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/senders:
+    get:
+      operationId: sender_list
+      summary: The From addresses you can pick, derived from what is connected (scope read)
+      description: |
+        Every mailbox relay's login and aliases, plus the workspace `default_from` when it is not one of them.
+        Read-only: add or change addresses on the transport (`POST` / `PATCH /v1/transports`). `status`: `ready`
+        (the address's mailbox relay or verified domain covers it), `needs_domain` (add and verify its domain),
+        `transport_missing` (no transport to send through). `transport` is where a send from this address goes,
+        by the routing order in `POST /v1/emails`.
+      responses:
+        "200": { description: senders, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Sender" } } } } } } }
   /v1/keys:
     post:
       operationId: api_key_create
@@ -277,10 +289,23 @@ paths:
     get:
       operationId: domain_get
       summary: Get a domain with record status (scope read)
+      description: |
+        Besides the DNS records: `transport_id` (the transport sends from this domain use, `null` = the workspace
+        default) and, when a mailbox relay logs in or sends as an address on this domain, `relay_senders` (those
+        addresses; `relay_sender` is the first). Sends from those addresses need no domain records.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
         "200": { description: domain }
         "501": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: domain_patch
+      summary: Bind a domain to a transport (scope manage)
+      description: "`{transport_id}`: sends from this domain go through that transport; `null` unbinds it (the workspace default is used)."
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { transport_id: { type: [string, "null"], format: uuid } } } } } }
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: the domain }
+        "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: domain_delete
       summary: Delete a domain (scope manage)
@@ -812,11 +837,13 @@ paths:
       operationId: transport_create
       summary: Add an smtp-relay (with `preset`) or ses transport (scope manage). Secrets are write-only.
       description: |
-        `smtp-relay` config: `{host,port,tls?,username?,password,mailbox_sender?}` or, with `preset` (postmark, mailgun, resend, brevo, smtp2go, ses),
+        `smtp-relay` config: `{host,port,tls?,username?,password,mailbox_sender?,aliases?,display_names?}` or, with `preset` (postmark, mailgun, resend, brevo, smtp2go, ses),
         `{username?,password,region?}`. `ses` config: `{region,access_key_id,secret_access_key,session_token?}`.
         `mailbox_sender: true` (needs `username`) sends with the mailbox address as the envelope sender, for
         mailbox relays such as Zoho, Gmail/Workspace or Outlook that refuse any other MAIL FROM; bounces then go to
-        that mailbox. Gmail is connected with `/v1/transports/gmail/oauth/*`.
+        that mailbox. With it, `aliases` (plain addresses the mailbox may send as) and `display_names`
+        (`{address: name}`) make those addresses From options: see `GET /v1/senders`. Gmail is connected with
+        `/v1/transports/gmail/oauth/*`.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CreateTransport" } } } }
       responses:
@@ -828,6 +855,19 @@ paths:
       responses:
         "200": { description: transports }
   /v1/transports/{id}:
+    patch:
+      operationId: transport_patch
+      summary: Edit a mailbox relay's aliases and display names (scope manage)
+      description: |
+        `aliases`: the other addresses the mailbox sends as (the provider's "send mail as"); `display_names`:
+        `{address: name}` for the login and each alias. A field you send replaces the stored one.
+        400 unless the transport is an `smtp-relay` with `mailbox_sender`.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { aliases: { type: array, items: { type: string } }, display_names: { type: object, additionalProperties: { type: string } } } } } } }
+      responses:
+        "200": { description: the stored aliases and display names, content: { application/json: { schema: { type: object, properties: { id: { type: string }, aliases: { type: array, items: { type: string } }, display_names: { type: object } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: transport_delete
       summary: Delete a transport that has sent nothing (409 `transport_in_use` otherwise; scope manage)
@@ -977,7 +1017,7 @@ paths:
     post:
       operationId: automation_create
       summary: Install (validate and store) an automation as a new version (scope manage)
-      description: Body is a `Definition` (`steps[]` begins with a `trigger` step); a top-level `trigger` (event name or trigger config) is accepted and becomes that step. A `send_email` step's `config.template` is a published template's alias or id. A new name creates a `draft`. An existing name (names are the key, so this is also how you edit) stores version N+1 and leaves the status alone; if it is `active`, new entries run the new version at once while runs already in flight finish on their own version.
+      description: Body is a `Definition` (`steps[]` begins with a `trigger` step); a top-level `trigger` (event name or trigger config) is accepted and becomes that step. A `send_email` step's `config.template` is a published template's alias or id; its `config.from` routes like `POST /v1/emails` (a connected mailbox address goes through that mailbox, with its display name) and `config.transport_id` forces a transport. A new name creates a `draft`. An existing name (names are the key, so this is also how you edit) stores version N+1 and leaves the status alone; if it is `active`, new entries run the new version at once while runs already in flight finish on their own version.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AutomationDefinition" } } } }
       responses:
@@ -1135,7 +1175,7 @@ components:
       properties:
         llm_provider: { type: object, properties: { kind: { type: string, enum: [openrouter, openai, ollama] }, model: { type: [string, "null"] }, base_url: { type: [string, "null"] }, api_key_set: { type: boolean } } }
         delivery_path: { $ref: "#/components/schemas/DeliveryPath" }
-        default_from: { type: [string, "null"] }
+        default_from: { type: [string, "null"], description: "the default From address, picked from GET /v1/senders" }
         reply_to: { type: [string, "null"] }
         custom_instructions: { type: [string, "null"], maxLength: 2000, description: Workspace writing instructions for LLM emails }
     SettingsUpdate:
@@ -1286,12 +1326,23 @@ components:
         daily_send_cap: { type: integer, minimum: 1 }
         minute_send_cap: { type: integer, minimum: 1 }
         expires_at: { type: string, format: date-time }
+    Sender:
+      type: object
+      properties:
+        address: { type: string }
+        display_name: { type: [string, "null"] }
+        kind: { type: string, enum: [login, alias, domain] }
+        transport_id: { type: [string, "null"], format: uuid }
+        transport: { type: [string, "null"], description: transport name }
+        is_default: { type: boolean }
+        status: { type: string, enum: [ready, needs_domain, transport_missing] }
     SendEmail:
       type: object
       required: [to]
       additionalProperties: false
       properties:
-        from: { type: string, description: "required for live keys; must be on a verified domain" }
+        from: { type: string, description: "required for live keys; an address on a verified domain or a connected mailbox (login or alias). A bare connected address gets its display name." }
+        transport_id: { type: string, format: uuid, description: "send through this transport. Otherwise the transport is chosen by `from`: a mailbox relay with that login or alias, then the transport bound to the domain (`PATCH /v1/domains/{id}`), then the workspace default. The choice is recorded in `policy_decisions` (rule `routing`)." }
         to: { type: array, items: { type: string, format: email }, minItems: 1, maxItems: 50 }
         subject: { type: string }
         html: { type: string }
@@ -1332,6 +1383,7 @@ components:
         stream: { type: string, enum: [transactional, marketing], default: marketing }
         recipients: { type: array, minItems: 1, maxItems: 5000, items: { $ref: "#/components/schemas/BroadcastRecipient" } }
         max_per_day: { type: integer, minimum: 1, description: "upper bound on sends per day; the lowest of this and the transport / key caps applies" }
+        transport_id: { type: string, format: uuid, description: "send through this transport; see SendEmail" }
         dry_run: { type: boolean, default: false }
     BroadcastResult:
       type: object

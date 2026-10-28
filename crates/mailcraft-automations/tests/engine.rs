@@ -1355,3 +1355,77 @@ async fn test_run_starts_on_a_draft_and_follows_the_key_env() {
     f.engine.tick(t0()).await.unwrap();
     assert!(emails(&f.pool, "k@x.com").await.is_empty());
 }
+
+/// A `SendRouter` pins the transport and may rewrite From; without one a step's own `transport_id` is used.
+struct Pin(Uuid);
+#[async_trait::async_trait]
+impl SendRouter for Pin {
+    async fn route(
+        &self,
+        _ws: Uuid,
+        from: &str,
+        _explicit: Option<Uuid>,
+    ) -> Result<(String, Option<Uuid>)> {
+        Ok((format!("\"Acme\" <{from}>"), Some(self.0)))
+    }
+}
+
+#[tokio::test]
+async fn send_steps_pin_the_routed_transport_and_from() {
+    let f = fx!();
+    let tr = |name: &'static str| {
+        let pool = f.pool.clone();
+        let ws = f.ws;
+        async move {
+            sqlx::query_scalar::<_, Uuid>("INSERT INTO transports (workspace_id, kind, name, config_enc) VALUES ($1,'smtp-relay',$2,'\\x00') RETURNING id")
+                .bind(ws).bind(name).fetch_one(&pool).await.unwrap()
+        }
+    };
+    let (own, routed) = (tr("own").await, tr("routed").await);
+    let d = def(
+        "routing",
+        json!([
+        {"key":"t","type":"trigger","config":{"event":"go"},"next":"m"},
+        {"key":"m","type":"send_email","config":{"template":"plain","topic":"product","from":"a@tx.example.com","transport_id":own}}]),
+        json!({"entry_rule":"always"}),
+    );
+    install(&f.pool, f.ws, &d).await.unwrap();
+    let row = |email: &'static str| {
+        let pool = f.pool.clone();
+        async move {
+            sqlx::query_as::<_, (Option<Uuid>, String)>(
+                "SELECT transport_id, from_addr FROM emails WHERE to_addr = $1",
+            )
+            .bind(email)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    // no router: the step's own transport_id, From as written
+    f.engine
+        .ingest(f.ws, ev("go", "u1@example.com", json!({}), None), t0())
+        .await
+        .unwrap();
+    f.engine.tick(t0()).await.unwrap();
+    assert_eq!(
+        row("u1@example.com").await,
+        (Some(own), "a@tx.example.com".to_string())
+    );
+    // with a router: its choice wins
+    let routed_engine = Engine::new(
+        f.pool.clone(),
+        Arc::new(NoopPersonalizer),
+        EngineConfig::default(),
+    )
+    .router(Arc::new(Pin(routed)));
+    routed_engine
+        .ingest(f.ws, ev("go", "u2@example.com", json!({}), None), t0())
+        .await
+        .unwrap();
+    routed_engine.tick(t0()).await.unwrap();
+    assert_eq!(
+        row("u2@example.com").await,
+        (Some(routed), "\"Acme\" <a@tx.example.com>".to_string())
+    );
+}
