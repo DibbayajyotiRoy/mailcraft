@@ -137,6 +137,25 @@ describe("NewBroadcast", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/broadcasts/b9"));
   });
 
+  it("shows the queuing orb beside the Send button while the broadcast is being created", async () => {
+    const a = make();
+    let finish!: (v: unknown) => void;
+    a.create.mockImplementation((_d, _r, dry) => dry ? Promise.resolve({ data: plan }) : new Promise((res) => { finish = res; }));
+    await toContent();
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    await screen.findByText(/Paced at/, {}, { timeout: 2000 });
+    expect(screen.queryByText("Queuing 2 emails…")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send to 2 recipients" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Send to 2 recipients" }));
+    const busy = await screen.findByText("Queuing 2 emails…");
+    expect(busy.getAttribute("role")).toBe("status");
+    expect(busy.querySelector("canvas")!.getAttribute("data-orb")).toBe("working");
+    expect(busy.closest("button")).toBeNull(); // beside the button, not inside it
+    await act(async () => finish({ data: { id: "b9", status: "queued", queued: 2, skipped: [] } }));
+    await waitFor(() => expect(screen.queryByText("Queuing 2 emails…")).toBeNull());
+    expect(push).toHaveBeenCalledWith("/broadcasts/b9");
+  });
+
   it("shows the API error and does not leave the page when sending fails", async () => {
     const a = make();
     a.create.mockImplementation(async (_d, _r, dry) => (dry ? { data: plan } : { error: { code: "kill_switch_active", message: "the kill switch is engaged", hint: "a human must disengage it" } }));

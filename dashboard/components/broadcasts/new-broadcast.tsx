@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ChevronLeft, ChevronRight, Send } from "lucide-react";
 import { Personalization } from "@/components/Personalization";
+import { Busy } from "@/components/ui/busy";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { AlertDialog, AlertDialogContent } from "@/components/ui/dialog";
@@ -237,7 +238,10 @@ function Review({ draft, setDraft, recipients, templates, actions, back, done }:
           {sendErr && <ErrorState error={sendErr} />}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
             <Button variant="secondary" onClick={back}><ChevronLeft aria-hidden />Back</Button>
-            <Button onClick={() => setConfirm(true)} disabled={!n || !!plan.error || plan.loading} loading={busy}><Send aria-hidden />Send to {n} {n === 1 ? "recipient" : "recipients"}</Button>
+            <div className="flex items-center gap-3">
+              {busy && <Busy state="working" label={`Queuing ${n} ${n === 1 ? "email" : "emails"}…`} />}
+              <Button onClick={() => setConfirm(true)} disabled={!n || !!plan.error || plan.loading} loading={busy}><Send aria-hidden />Send to {n} {n === 1 ? "recipient" : "recipients"}</Button>
+            </div>
           </div>
         </CardBody>
       </Card>

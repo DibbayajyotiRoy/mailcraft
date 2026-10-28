@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const saveAutomation = vi.fn(async (_p: unknown, _d: FormData): Promise<{ error?: any }> => ({}));
@@ -149,6 +149,28 @@ describe("run views", () => {
     expect(screen.getByRole("link", { name: "view" }).getAttribute("href")).toBe("/emails/em_9");
     expect(screen.getByText(/Waiting for “activated”/)).toBeTruthy();
     expect(runDetail).toHaveBeenCalledTimes(1); // parked on a timer: no more polling
+  });
+
+  it("RunProgress shows the orb while it starts and while it polls, and not the Refresh spinner on an auto-poll", async () => {
+    const reply: ((v: unknown) => void)[] = [];
+    runDetail.mockImplementation(() => new Promise((res) => reply.push(res)));
+    const running = { ...detail, state: "running", next_wake_at: null };
+    render(<RunProgress automation="a1" run="r1" types={{}} />);
+    expect(screen.getByText("Starting the run…").querySelector("canvas")!.getAttribute("data-orb")).toBe("working");
+    await waitFor(() => expect(reply).toHaveLength(1));
+    await act(async () => reply[0]({ data: running, error: null }));
+    expect(screen.queryByText("Starting the run…")).toBeNull();
+    expect(screen.getByText("Updating…").getAttribute("role")).toBe("status");
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    await waitFor(() => expect(runDetail).toHaveBeenCalledTimes(2), { timeout: 3000 }); // the 1.5s auto-poll is in flight
+    expect(refresh.getAttribute("aria-busy")).toBeNull();
+    fireEvent.click(refresh);
+    expect(screen.getByRole("button", { name: "Refresh" }).getAttribute("aria-busy")).toBe("true"); // a manual refresh does show it
+    await act(async () => { reply[1]({ data: running, error: null }); reply[2]({ data: { ...running, state: "completed" }, error: null }); });
+    expect(screen.queryByText("Updating…")).toBeNull();
+    expect(screen.getByText("Finished.")).toBeTruthy();
+    expect(document.querySelector("canvas")).toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh" }).getAttribute("aria-busy")).toBeNull();
   });
 
   it("RunProgress surfaces an API error with a retry", async () => {
