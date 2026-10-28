@@ -1968,3 +1968,541 @@ async fn domain_verify_stamps_last_checked_and_records_diagnostics() {
         "{g}"
     );
 }
+
+// ----------------------------------------- contacts + segments managed from the dashboard
+
+#[tokio::test]
+async fn contact_edit_activity_import_and_suppression_roundtrip() {
+    let c = ctx!();
+    let (_, b) = c
+        .c("PUT", "/v1/contacts", Some(json!({"email": "ann@example.com", "first_name": "Ann", "last_name": "Lee", "timezone": "Europe/Berlin", "properties": {"plan": "free", "seats": 3, "old": true}})))
+        .await;
+    let id = b["data"]["id"].as_str().unwrap().to_string();
+
+    // PATCH: "" clears, null deletes a property key, omitted fields stay, bad timezone is rejected.
+    let (s, b) = c
+        .c("PATCH", "/v1/contacts/ann@example.com", Some(json!({"last_name": "", "timezone": "", "properties": {"plan": "pro", "old": null}})))
+        .await;
+    assert_eq!(s, 200, "{b}");
+    let d = &b["data"];
+    assert_eq!(
+        (
+            d["first_name"].as_str(),
+            d["last_name"].as_str(),
+            d["timezone"].as_str(),
+            d["properties"]["plan"].as_str(),
+            d["properties"]["seats"].as_i64(),
+            d["properties"].get("old").is_some(),
+            d["suppressed"].as_bool()
+        ),
+        (
+            Some("Ann"),
+            None,
+            None,
+            Some("pro"),
+            Some(3),
+            false,
+            Some(false)
+        ),
+        "{b}"
+    );
+    let (s, b) = c
+        .c(
+            "PATCH",
+            &format!("/v1/contacts/{id}"),
+            Some(json!({"timezone": "Mars/Base"})),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (422, "invalid_request"), "{b}");
+    assert_eq!(
+        c.c(
+            "PATCH",
+            &format!("/v1/contacts/{id}"),
+            Some(json!({"properties": [1]}))
+        )
+        .await
+        .0,
+        422
+    );
+    assert_eq!(
+        c.c(
+            "PATCH",
+            &format!("/v1/contacts/{id}"),
+            Some(json!({"email": "x@y.zz"}))
+        )
+        .await
+        .0,
+        400,
+        "email is not editable"
+    );
+    let audit = c.c("GET", "/v1/audit?limit=50", None).await.1.to_string();
+    assert!(
+        audit.contains("contact.update") && !audit.contains("Mars/Base"),
+        "audited by field name, never by value"
+    );
+
+    // Activity: events, emails (matched by address), runs, topics, segments.
+    c.c(
+        "POST",
+        "/v1/templates",
+        Some(json!({"name": "hello", "subject": "Hi", "html": "<p>Hi</p>"})),
+    )
+    .await;
+    c.c("POST", "/v1/templates/hello/publish", None).await;
+    let (s, b) = c
+        .c("POST", "/v1/automations", Some(json!({"name": "on-signup", "trigger": "signed_up", "steps": [{"key": "mail", "type": "send_email", "config": {"template": "hello"}}]})))
+        .await;
+    assert_eq!(s, 201, "{b}");
+    let aid = b["data"]["id"].as_str().unwrap().to_string();
+    c.c("POST", &format!("/v1/automations/{aid}/publish"), None)
+        .await;
+    let (s, b) = c
+        .c("POST", "/v1/events", Some(json!({"name": "signed_up", "contact": {"email": "ann@example.com"}, "properties": {"via": "ui"}})))
+        .await;
+    assert_eq!(s, 202, "{b}");
+    c.email(
+        "ann@example.com",
+        "me@acme.io",
+        "Welcome",
+        "transactional",
+        "live",
+        "2026-10-01T10:00:00Z",
+    )
+    .await;
+    c.email(
+        "joann@example.com",
+        "me@acme.io",
+        "Not Ann",
+        "transactional",
+        "live",
+        "2026-10-02T10:00:00Z",
+    )
+    .await;
+    c.email(
+        "a_n@example.com",
+        "me@acme.io",
+        "Underscore is not a wildcard",
+        "transactional",
+        "live",
+        "2026-10-03T10:00:00Z",
+    )
+    .await;
+    let (_, b) = c
+        .c("POST", "/v1/segments", Some(json!({"name": "manual"})))
+        .await;
+    let sid = b["data"]["id"].as_str().unwrap().to_string();
+    c.c(
+        "POST",
+        &format!("/v1/segments/{sid}/members"),
+        Some(json!({"emails": ["ann@example.com"]})),
+    )
+    .await;
+    sqlx::query("INSERT INTO topics (workspace_id, key, name) VALUES ($1,'digest','Digest')")
+        .bind(c.ws)
+        .execute(&c.st.db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO contact_topics (contact_id, topic_id, opted_in) SELECT $1, id, false FROM topics WHERE key = 'digest'")
+        .bind(id.parse::<Uuid>().unwrap())
+        .execute(&c.st.db)
+        .await
+        .unwrap();
+    let (s, b) = c
+        .c("GET", "/v1/contacts/ann@example.com/activity", None)
+        .await;
+    assert_eq!(s, 200, "{b}");
+    let a = &b["data"];
+    assert_eq!(
+        (
+            a["events"][0]["name"].as_str(),
+            a["events"][0]["properties"]["via"].as_str(),
+            a["emails"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|e| e["subject"].as_str())
+                .collect::<Vec<_>>(),
+            a["topics"][0]["key"].as_str(),
+            a["topics"][0]["opted_in"].as_bool(),
+            a["segments"][0]["name"].as_str()
+        ),
+        (
+            Some("signed_up"),
+            Some("ui"),
+            vec!["Welcome"],
+            Some("digest"),
+            Some(false),
+            Some("manual")
+        ),
+        "{b}"
+    );
+    assert_eq!(a["runs"][0]["automation"], "on-signup", "{b}");
+    assert_eq!(
+        c.c("GET", "/v1/contacts/ghost@example.com/activity", None)
+            .await
+            .0,
+        404
+    );
+
+    // Suppression shows up in list + get with its reason, and DELETE /v1/suppressions/{email} undoes it.
+    c.c(
+        "POST",
+        &format!("/v1/contacts/{id}/suppress"),
+        Some(json!({"reason": "complaint"})),
+    )
+    .await;
+    let (_, b) = c.c("GET", "/v1/contacts?q=ann@", None).await;
+    assert_eq!(
+        (
+            b["data"][0]["suppressed"].as_bool(),
+            b["data"][0]["suppression_reason"].as_str()
+        ),
+        (Some(true), Some("complaint")),
+        "{b}"
+    );
+    assert_eq!(
+        c.c("DELETE", "/v1/suppressions/ann%40example.com", None)
+            .await
+            .0,
+        200
+    );
+    let (_, b) = c.c("GET", &format!("/v1/contacts/{id}"), None).await;
+    assert_eq!(
+        (
+            b["data"]["suppressed"].as_bool(),
+            b["data"]["suppression_reason"].is_null()
+        ),
+        (Some(false), true),
+        "{b}"
+    );
+
+    // Import: bad rows are reported by index and skipped; the call is idempotent; limits are enforced.
+    let rows = json!({"contacts": [
+        {"email": "new1@example.com", "first_name": "N", "properties": {"plan": "pro"}},
+        {"email": "not-an-email"},
+        {"email": "new2@example.com", "timezone": "Nowhere/Land"},
+        {"email": "ann@example.com", "last_name": "Imported"},
+    ]});
+    let (s, b) = c.c("POST", "/v1/contacts/import", Some(rows)).await;
+    assert_eq!(s, 200, "{b}");
+    let failed: Vec<_> = b["data"]["failed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| (f["index"].as_i64().unwrap(), f["email"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        (b["data"]["imported"].as_i64(), failed),
+        (Some(2), vec![(1, "not-an-email"), (2, "new2@example.com")]),
+        "{b}"
+    );
+    let (_, b) = c.c("GET", "/v1/contacts/new1@example.com", None).await;
+    assert_eq!(b["data"]["properties"]["plan"], "pro");
+    assert_eq!(
+        c.c("POST", "/v1/contacts/import", Some(json!({"contacts": []})))
+            .await
+            .0,
+        400
+    );
+    let many: Vec<_> = (0..5001)
+        .map(|i| json!({"email": format!("m{i}@example.com")}))
+        .collect();
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/contacts/import",
+            Some(json!({"contacts": many})),
+        )
+        .await;
+    assert_eq!(
+        (s, b["error"]["field"].as_str()),
+        (400, Some("contacts")),
+        "{b}"
+    );
+    let few: Vec<_> = (0..300)
+        .map(|i| json!({"email": format!("b{i}@example.com")}))
+        .collect();
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/contacts/import",
+            Some(json!({"contacts": few})),
+        )
+        .await;
+    assert_eq!((s, b["data"]["imported"].as_i64()), (200, Some(300)), "{b}");
+    let ro = c.key(&[Scope::Read]).await;
+    assert_eq!(
+        call(
+            &c.app,
+            "POST",
+            "/v1/contacts/import",
+            Some(&ro),
+            Some(json!({"contacts": [{"email": "a@b.co"}]}))
+        )
+        .await
+        .0,
+        403
+    );
+}
+
+#[tokio::test]
+async fn segment_rules_preview_edit_and_delete() {
+    let c = ctx!();
+    for (e, plan, n) in [
+        ("a@example.com", "pro", 5),
+        ("b@example.com", "pro", 1),
+        ("c@example.com", "free", 9),
+    ] {
+        c.c(
+            "PUT",
+            "/v1/contacts",
+            Some(json!({"email": e, "properties": {"plan": plan, "seats": n}})),
+        )
+        .await;
+    }
+    // Rules: attribute compare, event_count, days_since (a). a tracked an event 10 days ago.
+    c.c(
+        "POST",
+        "/v1/events",
+        Some(json!({"name": "login", "contact": {"email": "a@example.com"}})),
+    )
+    .await;
+    sqlx::query("UPDATE track_events SET received_at = now() - interval '10 days 1 hour'")
+        .execute(&c.st.db)
+        .await
+        .unwrap();
+    let pro = json!({"and": [{"field": "properties.plan", "op": "eq", "value": "pro"}, {"field": "properties.seats", "op": "gte", "value": 2}]});
+    let (s, b) = c
+        .c("POST", "/v1/segments/preview", Some(json!({"filter": pro})))
+        .await;
+    assert_eq!(
+        (
+            s,
+            b["data"]["count"].as_i64(),
+            b["data"]["sample"][0]["email"].as_str()
+        ),
+        (200, Some(1), Some("a@example.com")),
+        "{b}"
+    );
+    for (rule, want) in [
+        (
+            json!({"field": "days_since:login", "op": "lte", "value": 14}),
+            1,
+        ),
+        (
+            json!({"field": "days_since:login", "op": "lte", "value": 5}),
+            0,
+        ),
+        (
+            json!({"or": [{"field": "days_since:login", "op": "exists", "value": false}, {"field": "days_since:login", "op": "gt", "value": 5}]}),
+            3,
+        ),
+        (
+            json!({"field": "event_count:login", "op": "gte", "value": 1}),
+            1,
+        ),
+        (
+            json!({"field": "email", "op": "contains", "value": "@example.com"}),
+            3,
+        ),
+        (
+            json!({"not": {"field": "properties.plan", "op": "eq", "value": "pro"}}),
+            1,
+        ),
+    ] {
+        let (s, b) = c
+            .c(
+                "POST",
+                "/v1/segments/preview",
+                Some(json!({"filter": rule})),
+            )
+            .await;
+        assert_eq!(
+            (s, b["data"]["count"].as_i64()),
+            (200, Some(want)),
+            "{rule}: {b}"
+        );
+    }
+    // Unsupported fields / shapes are rejected up front, on preview and on save (they would break the poll loop).
+    let bad = json!({"field": "contact.plan", "op": "eq", "value": "pro"});
+    let (s, b) = c
+        .c("POST", "/v1/segments/preview", Some(json!({"filter": bad})))
+        .await;
+    assert_eq!(
+        (s, code(&b), b["error"]["field"].as_str()),
+        (422, "invalid_request", Some("filter")),
+        "{b}"
+    );
+    assert_eq!(
+        c.c(
+            "POST",
+            "/v1/segments",
+            Some(json!({"name": "bad", "filter": bad}))
+        )
+        .await
+        .0,
+        422
+    );
+    assert_eq!(
+        c.c(
+            "POST",
+            "/v1/segments/preview",
+            Some(json!({"filter": {"nope": 1}}))
+        )
+        .await
+        .0,
+        400
+    );
+
+    // Create, list with a live member_count (no poll has run), edit, rename conflict, make manual.
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/segments",
+            Some(json!({"name": "pros", "filter": pro})),
+        )
+        .await;
+    assert_eq!(s, 201, "{b}");
+    let sid = b["data"]["id"].as_str().unwrap().to_string();
+    let (_, b) = c
+        .c("POST", "/v1/segments", Some(json!({"name": "other"})))
+        .await;
+    let other = b["data"]["id"].as_str().unwrap().to_string();
+    let (_, b) = c.c("GET", "/v1/segments", None).await;
+    let counts: Vec<_> = b["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["name"].as_str().unwrap(),
+                s["member_count"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(counts, vec![("other", 0), ("pros", 1)], "{b}");
+    let all_pro = json!({"field": "properties.plan", "op": "eq", "value": "pro"});
+    let (s, b) = c
+        .c(
+            "PUT",
+            &format!("/v1/segments/{sid}"),
+            Some(json!({"name": "  Pros  ", "filter": all_pro})),
+        )
+        .await;
+    assert_eq!((s, b["data"]["name"].as_str()), (200, Some("Pros")), "{b}");
+    let (s, b) = c
+        .c(
+            "PUT",
+            &format!("/v1/segments/{other}"),
+            Some(json!({"name": "Pros"})),
+        )
+        .await;
+    assert_eq!(
+        (s, code(&b), b["error"]["field"].as_str()),
+        (409, "invalid_state", Some("name")),
+        "{b}"
+    );
+    assert_eq!(
+        c.c(
+            "PUT",
+            &format!("/v1/segments/{}", Uuid::new_v4()),
+            Some(json!({"name": "x"}))
+        )
+        .await
+        .0,
+        404
+    );
+    assert_eq!(
+        c.c(
+            "PUT",
+            &format!("/v1/segments/{sid}"),
+            Some(json!({"name": " "}))
+        )
+        .await
+        .0,
+        400
+    );
+    assert_eq!(
+        c.c(
+            "PUT",
+            &format!("/v1/segments/{sid}"),
+            Some(json!({"name": "Pros", "filter": bad}))
+        )
+        .await
+        .0,
+        422
+    );
+    let (_, b) = c.c("GET", "/v1/segments", None).await;
+    assert_eq!(
+        b["data"][0]["member_count"], 2,
+        "ordered by name: Pros before other; {b}"
+    );
+    let (s, b) = c
+        .c(
+            "PUT",
+            &format!("/v1/segments/{sid}"),
+            Some(json!({"name": "Pros", "filter": null})),
+        )
+        .await;
+    assert_eq!((s, b["data"]["filter"].is_null()), (200, true), "{b}");
+    c.c(
+        "PUT",
+        &format!("/v1/segments/{sid}"),
+        Some(json!({"name": "Pros", "filter": all_pro})),
+    )
+    .await;
+
+    // Delete is refused while an automation names the segment, by name or by id; fine afterwards.
+    let (s, b) = c
+        .c("POST", "/v1/automations", Some(json!({"name": "joiner", "trigger": "signed_up", "steps": [{"key": "a", "type": "add_to_segment", "config": {"segment": "Pros"}}]})))
+        .await;
+    assert_eq!(s, 201, "{b}");
+    let aid = b["data"]["id"].as_str().unwrap().to_string();
+    let (s, b) = c.c("DELETE", &format!("/v1/segments/{sid}"), None).await;
+    assert_eq!((s, code(&b)), (409, "invalid_state"), "{b}");
+    assert!(
+        b["error"]["message"].as_str().unwrap().contains("joiner"),
+        "{b}"
+    );
+    assert_eq!(
+        c.c("DELETE", &format!("/v1/segments/{other}"), None)
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        c.c("DELETE", &format!("/v1/segments/{other}"), None)
+            .await
+            .0,
+        404
+    );
+    sqlx::query("DELETE FROM automations WHERE id = $1::uuid")
+        .bind(&aid)
+        .execute(&c.st.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        c.c("DELETE", &format!("/v1/segments/{sid}"), None).await.0,
+        200
+    );
+    let audit = c.c("GET", "/v1/audit?limit=50", None).await.1.to_string();
+    assert!(
+        ["segment.create", "segment.update", "segment.delete"]
+            .iter()
+            .all(|a| audit.contains(a)),
+        "{audit}"
+    );
+    let ro = c.key(&[Scope::Read]).await;
+    assert_eq!(
+        call(
+            &c.app,
+            "POST",
+            "/v1/segments/preview",
+            Some(&ro),
+            Some(json!({"filter": all_pro}))
+        )
+        .await
+        .0,
+        403
+    );
+}

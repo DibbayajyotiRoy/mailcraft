@@ -1,10 +1,10 @@
 import type { ComponentProps } from "react";
 import { cn } from "@/lib/cn";
 
-/** Semantic table. `stack` (default) collapses rows into labelled cards below 768px: give each TD a `label`. */
-export function Table({ className, stack = true, caption, children, ...p }: ComponentProps<"table"> & { stack?: boolean; caption?: string }) {
+/** Semantic table. `stack` (default) collapses rows into labelled cards below 768px: give each TD a `label`. `bare` drops the outer border (inside a Card). */
+export function Table({ className, stack = true, bare, caption, children, ...p }: ComponentProps<"table"> & { stack?: boolean; bare?: boolean; caption?: string }) {
   return (
-    <div className="w-full overflow-x-auto rounded-lg border border-border">
+    <div className={cn("w-full overflow-x-auto", !bare && "rounded-lg border border-border")}>
       <table data-stack={stack || undefined} className={cn("w-full border-collapse text-sm", className)} {...p}>
         {caption && <caption className="sr-only">{caption}</caption>}
         {children}

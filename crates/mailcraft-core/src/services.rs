@@ -71,7 +71,13 @@ pub struct Page {
 #[async_trait]
 pub trait ContactService: Send + Sync {
     async fn upsert(&self, workspace: Uuid, req: UpsertContact) -> Result<Value>;
+    /// Edit by id or email. `None` keeps a field, `""` clears a name / the timezone, and a `null`
+    /// property value deletes that key (`req.email` is ignored).
+    async fn update(&self, workspace: Uuid, id_or_email: &str, req: UpsertContact)
+        -> Result<Value>;
     async fn get(&self, workspace: Uuid, id_or_email: &str) -> Result<Value>;
+    /// Recent events, emails, automation runs and topic opt-outs of one contact.
+    async fn activity(&self, workspace: Uuid, id_or_email: &str) -> Result<Value>;
     /// `q`: case-insensitive substring of email / first / last name.
     async fn list(
         &self,
@@ -87,6 +93,18 @@ pub trait ContactService: Send + Sync {
 #[async_trait]
 pub trait SegmentService: Send + Sync {
     async fn create(&self, workspace: Uuid, name: &str, filter: Option<Value>) -> Result<Value>;
+    /// Replace a segment's name and filter (`None` = manual list).
+    async fn update(
+        &self,
+        workspace: Uuid,
+        id: Uuid,
+        name: &str,
+        filter: Option<Value>,
+    ) -> Result<Value>;
+    /// Refuses (409) while an automation still references the segment.
+    async fn delete(&self, workspace: Uuid, id: Uuid) -> Result<()>;
+    /// `{count, sample}`: who matches `filter` right now. Nothing is stored.
+    async fn preview(&self, workspace: Uuid, filter: Value) -> Result<Value>;
     async fn list(&self, workspace: Uuid) -> Result<Vec<Value>>;
     async fn add_members(
         &self,
@@ -156,7 +174,13 @@ impl ContactService for StubContactService {
     async fn upsert(&self, _: Uuid, _: UpsertContact) -> Result<Value> {
         stub!("contacts")
     }
+    async fn update(&self, _: Uuid, _: &str, _: UpsertContact) -> Result<Value> {
+        stub!("contacts")
+    }
     async fn get(&self, _: Uuid, _: &str) -> Result<Value> {
+        stub!("contacts")
+    }
+    async fn activity(&self, _: Uuid, _: &str) -> Result<Value> {
         stub!("contacts")
     }
     async fn list(&self, _: Uuid, _: u32, _: Option<String>, _: Option<String>) -> Result<Page> {
@@ -174,6 +198,15 @@ pub struct StubSegmentService;
 #[async_trait]
 impl SegmentService for StubSegmentService {
     async fn create(&self, _: Uuid, _: &str, _: Option<Value>) -> Result<Value> {
+        stub!("segments")
+    }
+    async fn update(&self, _: Uuid, _: Uuid, _: &str, _: Option<Value>) -> Result<Value> {
+        stub!("segments")
+    }
+    async fn delete(&self, _: Uuid, _: Uuid) -> Result<()> {
+        stub!("segments")
+    }
+    async fn preview(&self, _: Uuid, _: Value) -> Result<Value> {
         stub!("segments")
     }
     async fn list(&self, _: Uuid) -> Result<Vec<Value>> {

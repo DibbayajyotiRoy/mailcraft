@@ -292,6 +292,39 @@ pub struct Contacts {
     db: PgPool,
 }
 
+/// Suppression reason per (lowercased) address; both spellings are tried so the primary key serves it.
+async fn suppression_reasons(
+    pool: &PgPool,
+    ws: Uuid,
+    emails: &[String],
+) -> Result<std::collections::HashMap<String, String>> {
+    let lower: Vec<String> = emails.iter().map(|e| e.to_lowercase()).collect();
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT email, reason FROM suppressions WHERE workspace_id = $1 AND (email = ANY($2) OR email = ANY($3))",
+    )
+    .bind(ws)
+    .bind(emails)
+    .bind(&lower)
+    .fetch_all(pool)
+    .await
+    .map_err(db)?;
+    Ok(rows
+        .into_iter()
+        .map(|(e, r)| (e.to_lowercase(), r))
+        .collect())
+}
+
+fn with_suppression(
+    c: contacts::Contact,
+    reasons: &std::collections::HashMap<String, String>,
+) -> Value {
+    let reason = reasons.get(&c.email.to_lowercase());
+    let mut v = serde_json::to_value(c).unwrap_or_default();
+    v["suppressed"] = json!(reason.is_some());
+    v["suppression_reason"] = json!(reason);
+    v
+}
+
 #[async_trait]
 impl ContactService for Contacts {
     async fn upsert(&self, ws: Uuid, r: UpsertContact) -> Result<Value> {
@@ -313,20 +346,104 @@ impl ContactService for Contacts {
         Ok(serde_json::to_value(c).unwrap_or_default())
     }
 
+    async fn update(&self, ws: Uuid, id_or_email: &str, r: UpsertContact) -> Result<Value> {
+        let id = resolve(&self.db, ws, id_or_email).await?;
+        contacts::patch_contact(
+            &self.db,
+            ws,
+            id,
+            &ContactInput {
+                email: r.email,
+                first_name: r.first_name,
+                last_name: r.last_name,
+                timezone: r.timezone,
+                properties: r.properties,
+                consent: None,
+            },
+            Utc::now(),
+        )
+        .await
+        .map_err(ae)?;
+        self.get(ws, &id.to_string()).await
+    }
+
     async fn get(&self, ws: Uuid, id_or_email: &str) -> Result<Value> {
         let id = resolve(&self.db, ws, id_or_email).await?;
         let c = contacts::get_contact(&self.db, id).await.map_err(ae)?;
-        let suppressed: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM suppressions WHERE workspace_id = $1 AND email = $2)",
+        let reasons = suppression_reasons(&self.db, ws, std::slice::from_ref(&c.email)).await?;
+        Ok(with_suppression(c, &reasons))
+    }
+
+    async fn activity(&self, ws: Uuid, id_or_email: &str) -> Result<Value> {
+        let id = resolve(&self.db, ws, id_or_email).await?;
+        let c = contacts::get_contact(&self.db, id).await.map_err(ae)?;
+        let events: Vec<(Uuid, String, Value, chrono::DateTime<Utc>)> = sqlx::query_as(
+            "SELECT id, name, properties, received_at FROM track_events WHERE contact_id = $1 \
+             ORDER BY received_at DESC, id LIMIT 25",
         )
-        .bind(ws)
-        .bind(&c.email)
-        .fetch_one(&self.db)
+        .bind(id)
+        .fetch_all(&self.db)
         .await
         .map_err(db)?;
-        let mut v = serde_json::to_value(c).unwrap_or_default();
-        v["suppressed"] = json!(suppressed);
-        Ok(v)
+        // API sends carry no contact_id, so match the recipient address too (trigram-indexed ILIKE).
+        let emails: Vec<(Uuid, String, String, String, String, chrono::DateTime<Utc>)> = sqlx::query_as(
+            "SELECT id, subject, status, stream, source, created_at FROM emails WHERE workspace_id = $1 \
+             AND (contact_id = $2 OR to_addr ILIKE replace(replace(replace($3, '\\', '\\\\'), '%', '\\%'), '_', '\\_')) \
+             ORDER BY created_at DESC, id DESC LIMIT 25",
+        )
+        .bind(ws)
+        .bind(id)
+        .bind(&c.email)
+        .fetch_all(&self.db)
+        .await
+        .map_err(db)?;
+        let runs: Vec<(Uuid, Uuid, String, String, Option<String>, chrono::DateTime<Utc>, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
+            "SELECT r.id, r.automation_id, a.name, r.state, r.current_step, r.started_at, r.ended_at \
+             FROM automation_runs r JOIN automations a ON a.id = r.automation_id WHERE r.contact_id = $1 \
+             ORDER BY r.started_at DESC, r.id LIMIT 25",
+        )
+        .bind(id)
+        .fetch_all(&self.db)
+        .await
+        .map_err(db)?;
+        let topics: Vec<(String, String, bool)> = sqlx::query_as(
+            "SELECT t.key, t.name, ct.opted_in FROM contact_topics ct JOIN topics t ON t.id = ct.topic_id \
+             WHERE ct.contact_id = $1 ORDER BY t.key",
+        )
+        .bind(id)
+        .fetch_all(&self.db)
+        .await
+        .map_err(db)?;
+        // A manual list is its stored members; a rule-based segment is whoever matches now.
+        let all: Vec<(Uuid, String, Option<Value>, bool)> = sqlx::query_as(
+            "SELECT s.id, s.name, s.filter, EXISTS (SELECT 1 FROM segment_members m WHERE m.segment_id = s.id AND m.contact_id = $2) \
+             FROM segments s WHERE s.workspace_id = $1 ORDER BY s.name",
+        )
+        .bind(ws)
+        .bind(id)
+        .fetch_all(&self.db)
+        .await
+        .map_err(db)?;
+        let mut segments = Vec::new();
+        for (sid, name, filter, member) in all {
+            let rule = filter.and_then(|f| serde_json::from_value::<Rule>(f).ok());
+            let inside = match &rule {
+                Some(r) => contacts::contact_matches(&self.db, id, r)
+                    .await
+                    .map_err(ae)?,
+                None => member,
+            };
+            if inside {
+                segments.push((sid, name));
+            }
+        }
+        Ok(json!({
+            "events": events.into_iter().map(|(id, name, properties, received_at)| json!({"id": id, "name": name, "properties": properties, "received_at": received_at})).collect::<Vec<_>>(),
+            "emails": emails.into_iter().map(|(id, subject, status, stream, source, created_at)| json!({"id": id, "subject": subject, "status": status, "stream": stream, "source": source, "created_at": created_at})).collect::<Vec<_>>(),
+            "runs": runs.into_iter().map(|(id, automation_id, automation, state, current_step, started_at, ended_at)| json!({"id": id, "automation_id": automation_id, "automation": automation, "state": state, "current_step": current_step, "started_at": started_at, "ended_at": ended_at})).collect::<Vec<_>>(),
+            "topics": topics.into_iter().map(|(key, name, opted_in)| json!({"key": key, "name": name, "opted_in": opted_in})).collect::<Vec<_>>(),
+            "segments": segments.into_iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
+        }))
     }
 
     async fn list(
@@ -355,10 +472,12 @@ impl ContactService for Contacts {
         .map_err(db)?;
         let next_cursor = (rows.len() as i64 > lim)
             .then(|| page::encode(rows[lim as usize - 1].created_at, rows[lim as usize - 1].id));
+        let rows: Vec<_> = rows.into_iter().take(lim as usize).collect();
+        let emails: Vec<String> = rows.iter().map(|c| c.email.clone()).collect();
+        let reasons = suppression_reasons(&self.db, ws, &emails).await?;
         let items = rows
             .into_iter()
-            .take(lim as usize)
-            .map(|c| serde_json::to_value(c).unwrap_or_default())
+            .map(|c| with_suppression(c, &reasons))
             .collect();
         Ok(Page { items, next_cursor })
     }
@@ -416,20 +535,116 @@ pub struct Segments {
     db: PgPool,
 }
 
+/// Parses and validates a filter so a rule the SQL compiler cannot express never gets stored.
+fn parse_rule(filter: Option<&Value>) -> Result<Option<Rule>> {
+    let rule: Option<Rule> = filter
+        .filter(|f| !f.is_null())
+        .map(|f| serde_json::from_value(f.clone()))
+        .transpose()
+        .map_err(|e| Error::new("invalid_request", 400, format!("filter: {e}")).field("filter"))?;
+    if let Some(r) = &rule {
+        r.validate().map_err(|e| ae(e).field("filter"))?;
+    }
+    Ok(rule)
+}
+
 #[async_trait]
 impl SegmentService for Segments {
     async fn create(&self, ws: Uuid, name: &str, filter: Option<Value>) -> Result<Value> {
-        let rule: Option<Rule> = filter
-            .as_ref()
-            .map(|f| serde_json::from_value(f.clone()))
-            .transpose()
-            .map_err(|e| {
-                Error::new("invalid_request", 400, format!("filter: {e}")).field("filter")
-            })?;
+        let rule = parse_rule(filter.as_ref())?;
         let id = contacts::create_segment(&self.db, ws, name, rule.as_ref())
             .await
             .map_err(ae)?;
         Ok(json!({"id": id, "name": name, "filter": filter}))
+    }
+
+    async fn update(&self, ws: Uuid, id: Uuid, name: &str, filter: Option<Value>) -> Result<Value> {
+        let rule = parse_rule(filter.as_ref())?;
+        let taken: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM segments WHERE workspace_id = $1 AND name = $2 AND id <> $3)",
+        )
+        .bind(ws)
+        .bind(name)
+        .bind(id)
+        .fetch_one(&self.db)
+        .await
+        .map_err(db)?;
+        if taken {
+            return Err(Error::new(
+                "invalid_state",
+                409,
+                format!("a segment named `{name}` already exists"),
+            )
+            .field("name"));
+        }
+        let n = sqlx::query(
+            "UPDATE segments SET name = $3, filter = $4 WHERE id = $1 AND workspace_id = $2",
+        )
+        .bind(id)
+        .bind(ws)
+        .bind(name)
+        .bind(rule.as_ref().map(sqlx::types::Json))
+        .execute(&self.db)
+        .await
+        .map_err(db)?
+        .rows_affected();
+        if n == 0 {
+            return Err(not_found("segment"));
+        }
+        Ok(json!({"id": id, "name": name, "filter": rule}))
+    }
+
+    async fn delete(&self, ws: Uuid, id: Uuid) -> Result<()> {
+        let name: String =
+            sqlx::query_scalar("SELECT name FROM segments WHERE id = $1 AND workspace_id = $2")
+                .bind(id)
+                .bind(ws)
+                .fetch_optional(&self.db)
+                .await
+                .map_err(db)?
+                .ok_or_else(|| not_found("segment"))?;
+        // Triggers and `add_to_segment` steps name a segment by name or id; deleting it would
+        // make every later poll of that automation fail.
+        let users: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT a.name FROM automations a JOIN automation_versions v ON v.automation_id = a.id, \
+             jsonb_array_elements(v.steps) st WHERE a.workspace_id = $1 AND st->'config'->>'segment' IN ($2, $3) ORDER BY 1",
+        )
+        .bind(ws)
+        .bind(&name)
+        .bind(id.to_string())
+        .fetch_all(&self.db)
+        .await
+        .map_err(db)?;
+        if !users.is_empty() {
+            return Err(Error::new(
+                "invalid_state",
+                409,
+                format!("automation(s) still use this segment: {}", users.join(", ")),
+            )
+            .hint("change or delete those automations first"));
+        }
+        sqlx::query("DELETE FROM segments WHERE id = $1")
+            .bind(id)
+            .execute(&self.db)
+            .await
+            .map_err(db)?;
+        Ok(())
+    }
+
+    async fn preview(&self, ws: Uuid, filter: Value) -> Result<Value> {
+        let rule = parse_rule(Some(&filter))?.ok_or_else(|| {
+            Error::new("invalid_request", 400, "filter is required").field("filter")
+        })?;
+        let count = contacts::count_matching(&self.db, ws, &rule)
+            .await
+            .map_err(ae)?;
+        let sample = contacts::sample_matching(&self.db, ws, &rule, 5)
+            .await
+            .map_err(ae)?;
+        Ok(json!({
+            "count": count,
+            "sample": sample.into_iter().map(|(email, first_name, last_name)| json!({"email": email, "first_name": first_name, "last_name": last_name})).collect::<Vec<_>>(),
+        }))
     }
 
     async fn list(&self, ws: Uuid) -> Result<Vec<Value>> {
@@ -441,7 +656,20 @@ impl SegmentService for Segments {
         .fetch_all(&self.db)
         .await
         .map_err(db)?;
-        Ok(rows.into_iter().map(|(id, name, filter, members)| json!({"id": id, "name": name, "filter": filter, "members": members, "member_count": members})).collect())
+        let mut out = Vec::with_capacity(rows.len());
+        for (id, name, filter, stored) in rows {
+            // A rule-based segment is whoever matches now; its stored members are only the last poll's snapshot.
+            let live = match filter
+                .as_ref()
+                .and_then(|f| serde_json::from_value::<Rule>(f.clone()).ok())
+            {
+                Some(r) => contacts::count_matching(&self.db, ws, &r).await.ok(),
+                None => None,
+            };
+            let members = live.unwrap_or(stored);
+            out.push(json!({"id": id, "name": name, "filter": filter, "members": members, "member_count": members}));
+        }
+        Ok(out)
     }
 
     async fn add_members(&self, ws: Uuid, segment: Uuid, emails: Vec<String>) -> Result<Value> {

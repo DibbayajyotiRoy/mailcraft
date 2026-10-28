@@ -16,7 +16,7 @@ import { TemplatesView } from "@/app/(app)/templates/TemplatesView";
 import { templateVariables, lintSummary } from "@/app/(app)/templates/[id]/util";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ContactsView } from "@/app/(app)/contacts/ContactsView";
-import { matches, segmentRule } from "@/app/(app)/contacts/util";
+import { segmentRule } from "@/app/(app)/contacts/util";
 
 beforeEach(() => automationState.mockClear());
 
@@ -89,7 +89,7 @@ describe("rules in words", () => {
     expect(ruleWords({ and: [{ field: "contact.plan", op: "eq", value: "pro" }, { not: { field: "contact.x", op: "exists" } }] })).toBe("plan is “pro” AND NOT x exists");
     expect(ruleWords({ or: [{ field: "contact.n", op: "gt", value: 3 }, { field: "c", op: "in", value: ["a", "b"] }] })).toBe("n is greater than 3 OR c is one of “a”, “b”");
     expect(ruleWords(undefined)).toBeNull();
-    expect(segmentRule({ id: "s", name: "x" })).toMatch(/No filter/);
+    expect(segmentRule({ id: "s", name: "x" })).toMatch(/manual list/);
   });
 });
 
@@ -120,25 +120,31 @@ describe("templates", () => {
 
 describe("contacts", () => {
   const contacts = [
-    { id: "c1", email: "ana@example.com", first_name: "Ana", properties: { plan: "pro" }, topics: [{ name: "news", subscribed: false }] },
-    { id: "c2", email: "bad@example.com", suppressed: true, suppression_reason: "hard bounce" },
+    { id: "c1", email: "ana@example.com", first_name: "Ana", properties: { plan: "pro" } },
+    { id: "c2", email: "bad@example.com", suppressed: true, suppression_reason: "hard_bounce" },
   ];
-  it("search is a server-side GET form and the drawer shows properties, topics and suppression", async () => {
+  it("search is a server-side GET form and each row opens the contact page", () => {
     render(<TooltipProvider><ContactsView contacts={contacts} segments={[]} contactsError={null} segmentsError={null} tab="contacts" search="ana" /></TooltipProvider>);
     const box = screen.getByLabelText("Search contacts") as HTMLInputElement;
     expect([box.name, box.value, box.form?.method, box.form?.getAttribute("action")]).toEqual(["q", "ana", "get", "/contacts"]);
-    fireEvent.click(screen.getByRole("button", { name: "ana@example.com" }));
-    expect(await screen.findByText("plan")).toBeTruthy();
-    expect(screen.getByText("news: unsubscribed")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "ana@example.com" }).getAttribute("href")).toBe("/contacts/c1");
   });
-  it("marks suppressed contacts and matches names", () => {
+  it("marks suppressed contacts", () => {
     render(<TooltipProvider><ContactsView contacts={contacts} segments={[]} contactsError={null} segmentsError={null} tab="contacts" /></TooltipProvider>);
     expect(screen.getByText("suppressed")).toBeTruthy();
-    expect(matches({ email: "x@y.z", first_name: "Zed" }, "zed")).toBe(true);
   });
-  it("segments tab shows counts and rule words", () => {
-    render(<TooltipProvider><ContactsView contacts={[]} segments={[{ id: "s", name: "Pro", member_count: 1284, filter: { field: "contact.plan", op: "eq", value: "pro" } }]} contactsError={null} segmentsError={null} tab="segments" /></TooltipProvider>);
+  it("segments tab shows counts and rule words, and offers edit and delete", () => {
+    render(<TooltipProvider><ContactsView contacts={[]} segments={[{ id: "s", name: "Pro", member_count: 1284, filter: { field: "properties.plan", op: "eq", value: "pro" } }, { id: "m", name: "VIPs" }]} contactsError={null} segmentsError={null} tab="segments" /></TooltipProvider>);
     expect(screen.getByText("1,284")).toBeTruthy();
     expect(screen.getByText("plan is “pro”")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit Pro" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete VIPs" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add contacts to Pro" })).toBeNull(); // rule-based: members come from the rules
+    expect(screen.getByRole("button", { name: "Add contacts to VIPs" })).toBeTruthy();
+  });
+  it("empty states point at the UI, not curl", () => {
+    render(<TooltipProvider><ContactsView contacts={[]} segments={[]} contactsError={null} segmentsError={null} tab="contacts" /></TooltipProvider>);
+    expect(screen.getByRole("button", { name: /Add your first contact/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Import CSV/ })).toBeTruthy();
   });
 });

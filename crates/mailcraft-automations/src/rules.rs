@@ -114,10 +114,17 @@ impl Rule {
         }
     }
 
+    /// Rejects a rule the SQL compiler cannot express (unknown field, bad operand) before it is stored.
+    pub fn validate(&self) -> Result<()> {
+        self.push_sql(&mut QueryBuilder::new(""))
+    }
+
     /// Append `(<predicate over contacts alias c>)` to `qb`.
     ///
     /// Fields: `email`, `first_name`, `last_name`, `timezone`, `created_at`, `properties.<path>`,
-    /// `topic:<key>` (effective opt-in) and `event_count:<name>`.
+    /// `topic:<key>` (effective opt-in), `event_count:<name>` and `days_since:<name>` (whole days
+    /// since the contact last tracked that event; missing when it never did). The last one is
+    /// segments-only: automation conditions are evaluated in Rust against prefetched fields.
     pub fn push_sql(&self, qb: &mut QueryBuilder<'_, Postgres>) -> Result<()> {
         match self {
             Rule::And { and: rs } | Rule::Or { or: rs } => {
@@ -177,9 +184,13 @@ fn push_field(qb: &mut QueryBuilder<'_, Postgres>, field: &str) -> Result<()> {
         )
         .push_bind(name.to_owned())
         .push("))");
+    } else if let Some(name) = field.strip_prefix("days_since:") {
+        qb.push("to_jsonb((SELECT floor(extract(epoch FROM now() - max(e.received_at)) / 86400)::int FROM track_events e WHERE e.contact_id = c.id AND e.name = ")
+            .push_bind(name.to_owned())
+            .push("))");
     } else {
         return Err(AutomationError::invalid(format!(
-            "segment filter field `{field}` is not supported (use email, first_name, last_name, timezone, created_at, properties.*, topic:*, event_count:*)"
+            "segment filter field `{field}` is not supported (use email, first_name, last_name, timezone, created_at, properties.*, topic:*, event_count:*, days_since:*)"
         )));
     }
     Ok(())

@@ -80,15 +80,30 @@ const RUNS = [
 ];
 
 const CONTACTS = [
-  { id: "c1", email: "ana@example.com", first_name: "Ana", last_name: "Silva", timezone: "Europe/Berlin", created_at: ago(500), properties: { plan: "pro", seats: 4 }, topics: [{ name: "product", subscribed: true }, { name: "newsletter", subscribed: false }] },
-  { id: "c2", email: "ben@example.com", first_name: "Ben", created_at: ago(60 * 24), properties: { plan: "free" } },
-  { id: "c3", email: "bounce@example.com", status: "suppressed", suppressed: true, suppression_reason: "hard bounce", created_at: ago(60 * 24 * 9), properties: {} },
-  { id: "c4", email: "cy@example.com", first_name: "Cy", last_name: "Okafor", created_at: ago(60 * 24 * 20), properties: { plan: "pro" } },
+  { id: "c1", email: "ana@example.com", first_name: "Ana", last_name: "Silva", timezone: "Europe/Berlin", created_at: ago(500), properties: { plan: "pro", seats: 4, beta: true, tags: ["vip", "eu"] }, suppressed: false, suppression_reason: null },
+  { id: "c2", email: "ben@example.com", first_name: "Ben", created_at: ago(60 * 24), properties: { plan: "free" }, suppressed: false, suppression_reason: null },
+  { id: "c3", email: "bounce@example.com", suppressed: true, suppression_reason: "hard_bounce", created_at: ago(60 * 24 * 9), properties: {} },
+  { id: "c4", email: "cy@example.com", first_name: "Cy", last_name: "Okafor", created_at: ago(60 * 24 * 20), properties: { plan: "pro" }, suppressed: false, suppression_reason: null },
 ];
+const ACTIVITY = {
+  events: [
+    { id: "ev1", name: "upgraded", properties: { plan: "pro", seats: 4 }, received_at: ago(480) },
+    { id: "ev2", name: "login", properties: {}, received_at: ago(60 * 26) },
+    { id: "ev3", name: "signed_up", properties: { source: "landing", utm_campaign: "autumn-launch-with-a-long-name" }, received_at: ago(60 * 24 * 3) },
+  ],
+  emails: [
+    { id: "em_00", subject: "Welcome aboard", status: "delivered", stream: "transactional", source: "automation", created_at: ago(60 * 24 * 3) },
+    { id: "em_01", subject: "Your receipt", status: "bounced", stream: "transactional", source: "api", created_at: ago(60 * 30) },
+  ],
+  runs: [{ id: "run_1", automation_id: "a1", automation: "welcome", state: "completed", current_step: "end", started_at: ago(60 * 24 * 3), ended_at: ago(60 * 24 * 3 - 5) }],
+  topics: [{ key: "digest", name: "Digest", opted_in: false }],
+  segments: [{ id: "s1", name: "Pro customers" }],
+};
+const NO_ACTIVITY = { events: [], emails: [], runs: [], topics: [], segments: [] };
 const SEGMENTS = [
-  { id: "s1", name: "Pro customers", member_count: 1284, filter: { and: [{ field: "contact.plan", op: "eq", value: "pro" }, { field: "contact.signed_up_days", op: "lte", value: 30 }] } },
+  { id: "s1", name: "Pro customers", member_count: 1284, filter: { and: [{ field: "properties.plan", op: "eq", value: "pro" }, { field: "days_since:login", op: "lte", value: 30 }] } },
   { id: "s2", name: "Nudged", member_count: 42 },
-  { id: "s3", name: "EU or UK", filter: { or: [{ field: "contact.country", op: "in", value: ["DE", "FR"] }, { field: "contact.country", op: "eq", value: "GB" }] } },
+  { id: "s3", name: "EU or UK", member_count: 310, filter: { or: [{ field: "properties.country", op: "in", value: ["DE", "FR"] }, { field: "properties.country", op: "eq", value: "GB" }] } },
 ];
 
 const status = { env: "test", name: "Acme", key_prefix: "mc_test_8f3a", scopes: ["read", "send", "manage", "admin"], kill_switch: false, pending_approvals: APPROVALS.length, verified: true };
@@ -107,6 +122,15 @@ createServer((req, res) => {
   res.setHeader("content-type", "application/json");
   if (process.env.FAIL) return fail(res, { code: "unreachable", message: "Cannot reach the database", hint: "Check the server" }, 503);
   if (req.method !== "GET") {
+    if (p === "/v1/contacts/import" || p === "/v1/segments/preview") {
+      let raw = ""; req.on("data", (c) => (raw += c));
+      return req.on("end", () => {
+        if (p === "/v1/segments/preview") return body(res, { count: 12, sample: CONTACTS.slice(0, 3).map(({ email, first_name, last_name }) => ({ email, first_name, last_name })) });
+        const rows = JSON.parse(raw || "{}").contacts ?? [];
+        body(res, { imported: rows.filter((r) => !/^bad@/.test(r.email)).length, failed: rows.flatMap((r, index) => (/^bad@/.test(r.email) ? [{ index, email: r.email, error: { code: "invalid_request", message: "Rejected by the mock" } }] : [])) });
+      });
+    }
+    if (p === "/v1/events") return body(res, { event_id: "ev9", duplicate: false, triggered_automations: [{ id: "a1", run_id: "run_9" }] }, {}, 202);
     if ((m = p.match(/^\/v1\/templates\/([^/]+)\/preview$/))) {
       const t = TEMPLATES.find((x) => x.id === m[1] || x.alias === m[1]);
       return body(res, { subject: t?.subject, html: html(t?.name ?? "Template"), text: "", lint: t?.id === "t1" ? [] : [{ rule: "missing-alt", severity: "warning", message: "Image has no alt text", path: "blocks[2]" }, { rule: "no-unsubscribe", severity: "error", message: "Marketing email needs an unsubscribe link", path: "footer" }] });
@@ -129,6 +153,9 @@ createServer((req, res) => {
     return body(res, out, { next_cursor: start + lim < rows.length ? String(start + lim) : null });
   }
   if (p === "/v1/approvals") return body(res, APPROVALS);
+  if (p === "/v1/event-definitions") return body(res, process.env.EMPTY ? [] : [{ name: "signed_up" }, { name: "upgraded" }, { name: "login" }]);
+  if ((m = p.match(/^\/v1\/contacts\/([^/]+)\/activity$/))) { const c = CONTACTS.find((x) => x.id === m[1] || x.email === decodeURIComponent(m[1])); return c ? body(res, c.id === "c1" ? ACTIVITY : NO_ACTIVITY) : notFound(res, "contact"); }
+  if ((m = p.match(/^\/v1\/contacts\/([^/]+)$/))) { const c = CONTACTS.find((x) => x.id === m[1] || x.email === decodeURIComponent(m[1])); return c ? body(res, c) : notFound(res, "contact"); }
   if (LISTS[p]) return body(res, LISTS[p]);
   if ((m = p.match(/^\/v1\/emails\/([^/]+)\/events$/))) { const e = EMAILS.find((x) => x.id === m[1]); return e ? body(res, eventsFor(e)) : notFound(res, "email"); }
   if ((m = p.match(/^\/v1\/emails\/([^/]+)$/))) { const e = EMAILS.find((x) => x.id === m[1]); return e ? body(res, e) : notFound(res, "email"); }

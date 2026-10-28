@@ -218,8 +218,18 @@ pub fn router(st: AppState) -> Router {
             post(integrations::contacts_suppress),
         )
         .route(
+            "/v1/contacts/{id}/activity",
+            get(integrations::contacts_activity),
+        )
+        .route("/v1/contacts/import", post(integrations::contacts_import))
+        .route(
             "/v1/segments",
             post(integrations::segments_create).get(integrations::segments_list),
+        )
+        .route("/v1/segments/preview", post(integrations::segments_preview))
+        .route(
+            "/v1/segments/{id}",
+            put(integrations::segments_update).delete(integrations::segments_delete),
         )
         .route(
             "/v1/segments/{id}/members",
