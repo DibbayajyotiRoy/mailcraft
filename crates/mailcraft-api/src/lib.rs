@@ -14,6 +14,7 @@ pub mod admin;
 pub mod audit;
 pub mod auth;
 pub mod automations;
+pub mod broadcasts;
 pub mod caps;
 pub mod emails;
 pub mod error;
@@ -172,6 +173,13 @@ pub fn router(st: AppState) -> Router {
         .route("/v1/automations/{id}/runs", get(automations::runs))
         .route("/v1/automations/{id}/runs/{run}", get(automations::run_get))
         .route("/v1/events/names", get(automations::event_names))
+        // broadcasts
+        .route(
+            "/v1/broadcasts",
+            post(broadcasts::create).get(broadcasts::list),
+        )
+        .route("/v1/broadcasts/preview", post(broadcasts::preview))
+        .route("/v1/broadcasts/{id}", get(broadcasts::get))
         // emails
         .route("/v1/emails", post(emails::send).get(emails::list))
         .route("/v1/emails/batch", post(emails::batch))

@@ -72,37 +72,37 @@ pub struct SendEmail {
     pub dry_run: bool,
 }
 
-struct Prepared {
-    from: String,
-    from_domain: String,
-    to: Vec<String>,
-    subject: String,
-    html: Option<String>,
-    text: Option<String>,
-    reply_to: Option<String>,
-    template_id: Option<Uuid>,
-    vars: Option<Value>,
-    stream: Stream,
-    tags: Value,
-    headers: Value,
-    scheduled_at: Option<DateTime<Utc>>,
+pub(crate) struct Prepared {
+    pub(crate) from: String,
+    pub(crate) from_domain: String,
+    pub(crate) to: Vec<String>,
+    pub(crate) subject: String,
+    pub(crate) html: Option<String>,
+    pub(crate) text: Option<String>,
+    pub(crate) reply_to: Option<String>,
+    pub(crate) template_id: Option<Uuid>,
+    pub(crate) vars: Option<Value>,
+    pub(crate) stream: Stream,
+    pub(crate) tags: Value,
+    pub(crate) headers: Value,
+    pub(crate) scheduled_at: Option<DateTime<Utc>>,
 }
 
-fn stream_str(s: Stream) -> &'static str {
+pub(crate) fn stream_str(s: Stream) -> &'static str {
     match s {
         Stream::Transactional => "transactional",
         Stream::Marketing => "marketing",
     }
 }
 
-fn no_ctl(v: &str, field: &'static str) -> ApiResult<()> {
+pub(crate) fn no_ctl(v: &str, field: &'static str) -> ApiResult<()> {
     if v.chars().any(|c| c.is_control() && c != '\t') {
         return Err(invalid("control characters are not allowed in header values").field(field));
     }
     Ok(())
 }
 
-async fn prepare(st: &AppState, key: &ApiKey, r: &SendEmail) -> ApiResult<Prepared> {
+pub(crate) async fn prepare(st: &AppState, key: &ApiKey, r: &SendEmail) -> ApiResult<Prepared> {
     if r.to.is_empty() || r.to.len() > MAX_RECIPIENTS {
         return Err(invalid(format!("`to` needs 1-{MAX_RECIPIENTS} recipients")).field("to"));
     }
@@ -205,10 +205,10 @@ async fn prepare(st: &AppState, key: &ApiKey, r: &SendEmail) -> ApiResult<Prepar
     })
 }
 
-struct Plan {
-    policy: Policy,
-    decisions: Vec<Value>,
-    domain_id: Option<Uuid>,
+pub(crate) struct Plan {
+    pub(crate) policy: Policy,
+    pub(crate) decisions: Vec<Value>,
+    pub(crate) domain_id: Option<Uuid>,
 }
 
 async fn blocked(st: &AppState, key: &ApiKey, rule: &str, e: Error, record: bool) -> ApiError {
@@ -250,7 +250,12 @@ pub(crate) async fn mailbox_relay_sender(st: &AppState, ws: Uuid) -> ApiResult<O
     }))
 }
 
-async fn plan(st: &AppState, key: &ApiKey, p: &Prepared, record: bool) -> ApiResult<Plan> {
+pub(crate) async fn plan(
+    st: &AppState,
+    key: &ApiKey,
+    p: &Prepared,
+    record: bool,
+) -> ApiResult<Plan> {
     let (kill, live, legal, postal): (bool, bool, Option<String>, Option<String>) = sqlx::query_as(
         "SELECT kill_switch, live_enabled, legal_name, postal_address FROM workspaces WHERE id = $1",
     )
@@ -418,6 +423,60 @@ async fn plan(st: &AppState, key: &ApiKey, p: &Prepared, record: bool) -> ApiRes
     })
 }
 
+/// One `emails` row. Shared by single sends and broadcasts so both go through the same queue.
+pub(crate) struct Row<'a> {
+    pub id: Uuid,
+    pub to: &'a str,
+    pub subject: &'a str,
+    pub vars: &'a Option<Value>,
+    pub idem: Option<String>,
+    pub status: &'a str,
+    pub scheduled_at: Option<DateTime<Utc>>,
+    pub max_age: DateTime<Utc>,
+    /// `(broadcast id, contact id)` for broadcast rows (`source = 'broadcast'`).
+    pub broadcast: Option<(Uuid, Option<Uuid>)>,
+}
+
+pub(crate) async fn insert_email(
+    tx: &mut sqlx::PgConnection,
+    key: &ApiKey,
+    p: &Prepared,
+    pl: &Plan,
+    r: &Row<'_>,
+) -> ApiResult<()> {
+    sqlx::query(
+        "INSERT INTO emails (id, workspace_id, api_key_id, domain_id, stream, env, source, from_addr, to_addr, reply_to, \
+            subject, template_id, template_vars, headers, tags, idempotency_key, status, policy_decisions, \
+            scheduled_at, next_attempt_at, max_age_at, broadcast_id, contact_id) \
+         VALUES ($1,$2,$3,$4,$5,$6,$20,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,COALESCE($18, now()),$19,$21,$22)",
+    )
+    .bind(r.id)
+    .bind(key.workspace_id)
+    .bind(key.id)
+    .bind(pl.domain_id)
+    .bind(stream_str(p.stream))
+    .bind(key.env.as_str())
+    .bind(&p.from)
+    .bind(r.to)
+    .bind(&p.reply_to)
+    .bind(r.subject)
+    .bind(p.template_id)
+    .bind(r.vars)
+    .bind(&p.headers)
+    .bind(&p.tags)
+    .bind(&r.idem)
+    .bind(r.status)
+    .bind(Value::Array(pl.decisions.clone()))
+    .bind(r.scheduled_at)
+    .bind(r.max_age)
+    .bind(if r.broadcast.is_some() { "broadcast" } else { "api" })
+    .bind(r.broadcast.map(|b| b.0))
+    .bind(r.broadcast.and_then(|b| b.1))
+    .execute(tx)
+    .await?;
+    Ok(())
+}
+
 /// Inserts one row per recipient (+ approval row when required). Returns the response data.
 async fn enqueue(
     st: &AppState,
@@ -438,32 +497,23 @@ async fn enqueue(
     for (i, to) in p.to.iter().enumerate() {
         let id = Uuid::now_v7();
         let idem = g.row_key(item, i);
-        sqlx::query(
-            "INSERT INTO emails (id, workspace_id, api_key_id, domain_id, stream, env, source, from_addr, to_addr, reply_to, \
-                subject, template_id, template_vars, headers, tags, idempotency_key, status, policy_decisions, \
-                scheduled_at, next_attempt_at, max_age_at) \
-             VALUES ($1,$2,$3,$4,$5,$6,'api',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,COALESCE($18, now()),$19)",
+        insert_email(
+            &mut g.tx,
+            key,
+            p,
+            pl,
+            &Row {
+                id,
+                to,
+                subject: &p.subject,
+                vars: &p.vars,
+                idem,
+                status,
+                scheduled_at: p.scheduled_at,
+                max_age,
+                broadcast: None,
+            },
         )
-        .bind(id)
-        .bind(key.workspace_id)
-        .bind(key.id)
-        .bind(pl.domain_id)
-        .bind(stream_str(p.stream))
-        .bind(key.env.as_str())
-        .bind(&p.from)
-        .bind(to)
-        .bind(&p.reply_to)
-        .bind(&p.subject)
-        .bind(p.template_id)
-        .bind(&p.vars)
-        .bind(&p.headers)
-        .bind(&p.tags)
-        .bind(idem)
-        .bind(status)
-        .bind(Value::Array(pl.decisions.clone()))
-        .bind(p.scheduled_at)
-        .bind(max_age)
-        .execute(&mut *g.tx)
         .await?;
         if p.html.is_some() || p.text.is_some() {
             sqlx::query("INSERT INTO email_bodies (email_id, html, text) VALUES ($1,$2,$3)")

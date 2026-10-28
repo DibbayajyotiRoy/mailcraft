@@ -407,3 +407,97 @@ async fn sandbox_and_live_through_the_wired_server() {
     assert_eq!(e["data"]["status"], "sent");
     let _ = stop.send(true);
 }
+
+/// A broadcast row goes through the same worker as any email: the per-recipient variables render
+/// ("Hi Ada" / the `default` fallback), the unsubscribe footer is injected, outcomes feed the counts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn broadcast_rows_render_per_recipient_in_the_worker() {
+    let Some(db) = fresh_db().await else { return };
+    let mut cfg = Config::from_env();
+    cfg.rate_limit_per_min = 6000;
+    cfg.unsub_secret = b"e2e-unsub-secret".to_vec();
+    let (st, engine) = wiring::assemble(db.clone(), None, "e2e-test-secret-key-0123456789", cfg)
+        .await
+        .unwrap();
+    let app = mailcraft_api::router(st.clone());
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(engine.run(rx));
+    let (_, setup) = call(&app, "POST", "/v1/setup", None, Some(json!({}))).await;
+    let (admin, test) = (
+        setup["data"]["admin_key"].as_str().unwrap().to_string(),
+        setup["data"]["test_key"].as_str().unwrap().to_string(),
+    );
+    sqlx::query("UPDATE workspaces SET postal_address = '1 Main St'")
+        .execute(&db)
+        .await
+        .unwrap();
+    let tpl = json!({"name": "news", "stream": "marketing", "content": {"version": 1,
+        "subject": "News for {{ first_name | default(\"you\") }}",
+        "blocks": [{"type": "paragraph", "text": "Hi {{ first_name | default(\"there\") }} at {{ data.company | default('your team') }}"}]}});
+    assert_eq!(
+        call(&app, "POST", "/v1/templates", Some(&admin), Some(tpl))
+            .await
+            .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/v1/templates/news/publish",
+            Some(&admin),
+            None
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let (s, b) = call(&app, "POST", "/v1/broadcasts", Some(&test), Some(json!({
+        "template_id": "news", "from": "dev@acme.io",
+        "recipients": [
+            {"email": "delivered@test.mailcraft.local", "first_name": "Ada", "data": {"company": "Acme"}},
+            {"email": "bounced@test.mailcraft.local"}]}))).await;
+    assert_eq!(s, StatusCode::ACCEPTED, "{b}");
+    let bid: Uuid = b["data"]["id"].as_str().unwrap().parse().unwrap();
+    wait("both rows reach an outcome", || async {
+        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM emails WHERE broadcast_id = $1 AND status IN ('delivered','bounced')")
+            .bind(bid)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        n == 2
+    })
+    .await;
+    type Sent = (String, String, String);
+    let rows: Vec<Sent> = sqlx::query_as(
+        "SELECT e.to_addr, e.subject, b.html FROM emails e JOIN email_bodies b ON b.email_id = e.id \
+         WHERE e.broadcast_id = $1 ORDER BY e.to_addr",
+    )
+    .bind(bid)
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert!(
+        rows[0].1 == "News for you" && rows[0].2.contains("Hi there at your team"),
+        "{rows:?}"
+    );
+    assert!(
+        rows[1].1 == "News for Ada" && rows[1].2.contains("Hi Ada at Acme"),
+        "{rows:?}"
+    );
+    assert!(rows
+        .iter()
+        .all(|r| r.2.contains("Unsubscribe") && r.2.contains("/u/")));
+    let (_, d) = call(
+        &app,
+        "GET",
+        &format!("/v1/broadcasts/{bid}"),
+        Some(&test),
+        None,
+    )
+    .await;
+    assert_eq!(d["data"]["counts"]["delivered"], 1, "{d}");
+    assert_eq!(d["data"]["counts"]["bounced"], 1, "{d}");
+    assert_eq!(d["data"]["status"], "done");
+    let _ = stop.send(true);
+}

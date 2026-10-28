@@ -505,7 +505,11 @@ pub struct PreviewBody {
     pub version: Option<i32>,
 }
 
-async fn options(st: &AppState, ws: Uuid, stream: Stream) -> ApiResult<mt::RenderOptions> {
+pub(crate) async fn options(
+    st: &AppState,
+    ws: Uuid,
+    stream: Stream,
+) -> ApiResult<mt::RenderOptions> {
     let (name, addr): (String, Option<String>) =
         sqlx::query_as("SELECT name, postal_address FROM workspaces WHERE id = $1")
             .bind(ws)

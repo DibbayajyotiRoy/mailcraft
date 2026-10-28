@@ -54,7 +54,9 @@ fn custom_columns_live_under_data() {
     let o = RenderOptions::default();
     let t = para("At {{ data.company }}?");
     let v = json!({"data": {"company": "Analytical Engines"}});
-    assert!(text_of(&t, &v, &o).unwrap().contains("At Analytical Engines?"));
+    assert!(text_of(&t, &v, &o)
+        .unwrap()
+        .contains("At Analytical Engines?"));
     // missing column: error, unless the template gives a fallback
     assert!(text_of(&t, &json!({"data": {}}), &o).is_err());
     let t = para("At {{ data.company | default('your company') }}?");

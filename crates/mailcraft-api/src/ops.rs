@@ -162,21 +162,25 @@ pub async fn approvals_decide(
     if kind == "automation_first_send" {
         gated.extend(subject.map(|s| s.to_string()));
     }
+    // A broadcast approval gates every row of its broadcast (`subject_id`), however many there are.
+    let broadcast = subject.filter(|_| kind == "broadcast");
     match (kind.as_str(), approve) {
-        ("email" | "automation_first_send", true) => {
+        ("email" | "automation_first_send" | "broadcast", true) => {
             sqlx::query(
                 "UPDATE emails SET status = 'queued', next_attempt_at = COALESCE(scheduled_at, now()) \
-                 WHERE workspace_id = $1 AND status = 'pending_approval' AND id::text = ANY($2)",
+                 WHERE workspace_id = $1 AND status = 'pending_approval' AND (id::text = ANY($2) OR broadcast_id = $3)",
             )
             .bind(auth.0.workspace_id)
             .bind(&gated)
+            .bind(broadcast)
             .execute(&mut *tx)
             .await?;
         }
-        ("email" | "automation_first_send", false) => {
-            sqlx::query("UPDATE emails SET status = 'cancelled' WHERE workspace_id = $1 AND status = 'pending_approval' AND id::text = ANY($2)")
+        ("email" | "automation_first_send" | "broadcast", false) => {
+            sqlx::query("UPDATE emails SET status = 'cancelled' WHERE workspace_id = $1 AND status = 'pending_approval' AND (id::text = ANY($2) OR broadcast_id = $3)")
                 .bind(auth.0.workspace_id)
                 .bind(&gated)
+                .bind(broadcast)
                 .execute(&mut *tx)
                 .await?;
         }
