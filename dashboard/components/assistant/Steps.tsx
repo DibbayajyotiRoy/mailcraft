@@ -3,7 +3,7 @@
 // MIT License, Copyright (c) 2026 Turbo. Restyled to mailcraft's tokens; the expand/collapse is a CSS grid-rows
 // transition (no motion dependency). The thinking orb is this row's single animated element.
 import { Check, ChevronDown, Loader2, X } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { OrbState } from "thinking-orbs";
 import { Busy } from "@/components/ui/busy";
 import { cn } from "@/lib/cn";
@@ -13,22 +13,39 @@ import type { Step } from "./useAssistant";
 const ORB: Record<Phase, OrbState> = { thinking: "working", reading: "searching", writing: "composing" };
 const grid = "grid transition-[grid-template-rows,opacity] duration-[var(--dur-slow)] ease-[var(--ease-out)]";
 
-/** While the turn runs: orb + the real phase label ("Reading templates…"). Afterwards: "Used 3 tools", expandable to the steps. */
+const secs = (ms: number) => `${Math.max(1, Math.round(ms / 1000))}s`;
+
+/** While the turn runs: orb + the real phase label and a live timer ("Reading templates… 4s"). Afterwards:
+ *  "Thought for 6s · 2 steps", expandable to the steps (the timer is per mount, so restored history shows steps only). */
 export function Steps({ steps, running, phase }: { steps: Step[]; running: boolean; phase: { phase: Phase; label: string } | null }) {
   const [manual, setManual] = useState<boolean | null>(null);
   const [row, setRow] = useState<string | null>(null);
   const id = useId();
-  if (!running && !steps.length) return null;
+  const start = useRef<number | null>(null);
+  const [now, setNow] = useState(0);
+  const [took, setTook] = useState<number | null>(null);
+  useEffect(() => {
+    if (running) {
+      start.current ??= Date.now();
+      setNow(Date.now());
+      const t = setInterval(() => setNow(Date.now()), 1000);
+      return () => clearInterval(t);
+    }
+    if (start.current !== null) setTook((v) => v ?? Date.now() - start.current!);
+  }, [running]);
+  if (!running && !steps.length && took === null) return null;
   const expanded = manual ?? (running && steps.length > 0);
   const failed = steps.filter((s) => s.status === "error").length;
   return (
     <div className="text-sm">
       <div className="flex min-h-7 items-center gap-1">
         {running && <Busy state={ORB[phase?.phase ?? "thinking"]} label={phase?.label ?? "Thinking…"} />}
+        {running && <span aria-hidden className="text-subtle tabular-nums">{secs(Math.max(0, now - (start.current ?? now)))}</span>}
+        {!running && !steps.length && took !== null && <span className="text-muted tabular-nums">Thought for {secs(took)}</span>}
         {steps.length > 0 && (
           <button type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setManual(!expanded)}
             className="-mx-1 inline-flex h-7 items-center gap-1 rounded-sm px-1.5 text-muted transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 hover:text-fg pointer-coarse:h-11">
-            {!running && <span className="tabular-nums">Used {steps.length} tool{steps.length === 1 ? "" : "s"}{failed ? `, ${failed} failed` : ""}</span>}
+            {!running && <span className="tabular-nums">{took !== null ? `Thought for ${secs(took)} · ` : ""}{steps.length} step{steps.length === 1 ? "" : "s"}{failed ? `, ${failed} failed` : ""}</span>}
             <ChevronDown aria-hidden className={cn("size-3.5 transition-transform duration-[var(--dur-base)]", expanded && "rotate-180")} />
             <span className="sr-only">{expanded ? "Hide" : "Show"} steps</span>
           </button>
@@ -45,7 +62,6 @@ export function Steps({ steps, running, phase }: { steps: Step[]; running: boole
                     {s.status === "running" ? <Loader2 className="size-3.5 animate-spin text-muted" /> : s.status === "error" ? <X className="size-3.5 text-bad" /> : <Check className="size-3.5 text-subtle" />}
                   </span>
                   <span className={cn("min-w-0 truncate", s.status === "error" ? "text-bad" : "text-fg")}>{s.label}</span>
-                  <code className="ml-auto hidden shrink-0 rounded-sm bg-surface-2 px-1.5 text-xs text-muted sm:inline">{s.name}</code>
                 </>
               );
               return (

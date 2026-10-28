@@ -87,7 +87,7 @@ test("a turn streams: live phase with the orb, beam active, then text, collapsed
   await act(async () => { chat = () => ndjson([]); });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
   expect(screen.getByText("three").tagName).toBe("STRONG");
-  expect(screen.getByText("Used 1 tool")).toBeTruthy();
+  expect(screen.getByText(/1 step/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Fix the lint errors" })).toBeTruthy(); // NEXT line became a chip, not text
   expect(screen.queryByText(/NEXT:/)).toBeNull();
   expect(document.querySelector("[data-beam=line]")!.getAttribute("data-active")).toBe("false");

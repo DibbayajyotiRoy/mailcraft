@@ -572,7 +572,7 @@ describe("Steps", () => {
     expect(screen.queryByRole("button")).toBeNull();
     rerender(<Steps steps={[step("a")]} running={false} phase={null} />);
     expect(container.querySelector("canvas")).toBeNull();
-    expect(screen.getByRole("button", { name: /Used 1 tool/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /1 step/ })).toBeTruthy();
   });
 
   it("while running with steps the list is open and the toggle shows no 'Used' text", () => {
@@ -583,10 +583,10 @@ describe("Steps", () => {
     expect(screen.getByText("Read a")).toBeTruthy();
   });
 
-  it("after the turn it collapses to 'Used N tools' and expands on click", () => {
+  it("after the turn it collapses to 'N steps' and expands on click", () => {
     const { container } = render(<Steps steps={[step("a"), step("b"), step("c")]} running={false} phase={null} />);
-    const t = screen.getByRole("button", { name: /Used 3 tools/ });
-    expect(t.textContent).toContain("Used 3 tools");
+    const t = screen.getByRole("button", { name: /3 steps/ });
+    expect(t.textContent).toContain("3 steps");
     expect(t.getAttribute("aria-expanded")).toBe("false");
     const panel = document.getElementById(t.getAttribute("aria-controls")!)!;
     expect(panel.getAttribute("aria-hidden")).toBe("true");
@@ -605,7 +605,7 @@ describe("Steps", () => {
     const { rerender } = render(<Steps steps={steps} running phase={phase("reading")} />);
     expect(screen.getByRole("button", { name: /Hide steps/ }).getAttribute("aria-expanded")).toBe("true");
     rerender(<Steps steps={steps} running={false} phase={null} />);
-    const t = screen.getByRole("button", { name: /Used 2 tools/ });
+    const t = screen.getByRole("button", { name: /2 steps/ });
     expect(t.getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -615,25 +615,25 @@ describe("Steps", () => {
     expect(screen.getByRole("button", { name: /Show steps/ }).getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("uses singular 'tool' for one and counts failures", () => {
+  it("uses singular 'step' for one and counts failures", () => {
     const { rerender } = render(<Steps steps={[step("a")]} running={false} phase={null} />);
-    expect(screen.getByRole("button").textContent).toContain("Used 1 tool");
-    expect(screen.getByRole("button").textContent).not.toContain("tools");
+    expect(screen.getByRole("button").textContent).toContain("1 step");
+    expect(screen.getByRole("button").textContent).not.toMatch(/\b1 steps/);
     rerender(<Steps steps={[step("a"), step("b", { status: "error" }), step("c", { status: "error" })]} running={false} phase={null} />);
-    expect(screen.getByRole("button").textContent).toContain("Used 3 tools, 2 failed");
+    expect(screen.getByRole("button").textContent).toContain("3 steps, 2 failed");
   });
 
-  it("shows each step's label and tool name, and a failed step in the error colour", () => {
+  it("shows each step's label (never the internal tool name), and a failed step in the error colour", () => {
     render(<Steps steps={[step("a", { name: "get_list", label: "Read the VIP list" }), step("b", { status: "error", label: "Could not read lists" })]} running={false} phase={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /Used 2 tools/ }));
-    expect(screen.getByText("get_list")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /2 steps/ }));
+    expect(screen.queryByText("get_list")).toBeNull();
     expect(screen.getByText("Read the VIP list").className).toContain("text-fg");
     expect(screen.getByText("Could not read lists").className).toContain("text-bad");
   });
 
   it("a step with detail is a toggle that reveals the detail; one without is plain text", () => {
     render(<Steps steps={[step("a", { detail: "3 templates found" }), step("b")]} running={false} phase={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /Used 2 tools/ }));
+    fireEvent.click(screen.getByRole("button", { name: /2 steps/ }));
     const row = screen.getByRole("button", { name: /Read a/ });
     expect(screen.queryByText("3 templates found")).toBeNull();
     fireEvent.click(row);
@@ -648,7 +648,7 @@ describe("Steps", () => {
     render(<Steps steps={[step("a", { detail: "d" })]} running={false} phase={null} />);
     const row = screen.getByRole("button", { name: /Read a/, hidden: true });
     expect(row.getAttribute("tabindex")).toBe("-1");
-    fireEvent.click(screen.getByRole("button", { name: /Used 1 tool/ }));
+    fireEvent.click(screen.getByRole("button", { name: /1 step/ }));
     expect(screen.getByRole("button", { name: /Read a/ }).getAttribute("tabindex")).toBe("0");
   });
 });
@@ -1023,5 +1023,20 @@ describe("Composer", () => {
   it("falls back to 'free model' when no model is known", () => {
     render(<Harness />);
     expect(screen.getByText("free model · free")).toBeTruthy();
+  });
+});
+
+describe("Steps timer and labels", () => {
+  it("shows a live timer while running, then 'Thought for Ns' and no internal tool names", async () => {
+    vi.useFakeTimers();
+    const steps = [{ id: "a", name: "list", label: "Read 1 contact", status: "done" as const }];
+    const { rerender, container } = render(<Steps steps={[]} running phase={{ phase: "thinking", label: "Thinking…" }} />);
+    await act(async () => { vi.advanceTimersByTime(4000); });
+    expect(container.textContent).toMatch(/Thinking…[45]s/);
+    rerender(<Steps steps={steps} running={false} phase={null} />);
+    expect(container.textContent).toMatch(/Thought for [45]s · 1 step/);
+    expect(container.textContent).not.toContain("list");
+    expect(container.querySelector("code")).toBeNull();
+    vi.useRealTimers();
   });
 });

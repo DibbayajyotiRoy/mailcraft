@@ -38,7 +38,7 @@ async function list(a: any, ctx: Ctx): Promise<Out> {
   let rows: any[] = Array.isArray(r.data) ? r.data : [];
   if (a.status && !m.tool) rows = rows.filter((x) => x.status === a.status);
   if (q && !serverQ) rows = rows.filter((x) => hay(x).includes(q));
-  return { ok: compactList(a.kind, rows, r.next_cursor ? 1 : 0), done: `Read ${Math.min(rows.length, 20)}${rows.length > 20 || r.next_cursor ? "+" : ""} ${NOUN[a.kind]}`, total: rows.length };
+  return { ok: compactList(a.kind, rows, r.next_cursor ? 1 : 0), done: `Read ${Math.min(rows.length, 20)}${rows.length > 20 || r.next_cursor ? "+" : ""} ${rows.length === 1 && !r.next_cursor ? (a.kind === "event" ? "event name" : a.kind) : NOUN[a.kind]}`, total: rows.length };
 }
 
 async function get(a: any, ctx: Ctx): Promise<Out> {
