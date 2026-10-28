@@ -53,12 +53,61 @@ const KEYS = [
   { id: "k2", name: "CI", prefix: "mc_test_77ab", env: "test", scopes: ["read", "send"], created_at: ago(200), last_used_at: null },
 ];
 
+const MJML_SRC = `<mjml>
+  <mj-head>
+    <mj-title>Welcome {{ first_name }}</mj-title>
+    <mj-preview>Your account is ready</mj-preview>
+  </mj-head>
+  <mj-body>
+    <mj-section>
+      <mj-column>
+        <mj-text font-size="22px" font-weight="bold">Hi {{ first_name }}</mj-text>
+        <mj-text>Thanks for joining us.</mj-text>
+        <mj-button href="https://example.com/start">Get started</mj-button>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>
+`;
+const HTML_SRC = `<!doctype html>
+<html>
+  <head><title>Your receipt</title></head>
+  <body style="font-family: Arial, sans-serif">
+    <h1>Thanks, {{ first_name }}</h1>
+    <p>We received {{ amount }}.</p>
+    <a href="https://example.com/receipt">View receipt</a>
+  </body>
+</html>
+`;
 const TEMPLATES = [
-  { id: "t1", alias: "welcome", name: "Welcome", subject: "Welcome {{ first_name }}", status: "published", version: 3, published_version: 3, updated_at: ago(300), variables: ["first_name"] },
-  { id: "t2", alias: "receipt", name: "Receipt", subject: "Your receipt", status: "published", version: 5, published_version: 4, updated_at: ago(60 * 30), variables: ["first_name", "amount"] },
-  { id: "t3", alias: "winback", name: "Win-back", subject: "We miss you", status: "draft", version: 1, published_version: null, updated_at: ago(60 * 24 * 3), variables: ["first_name"] },
+  { id: "t1", alias: "welcome", name: "Welcome", stream: "transactional", subject: "Welcome {{ first_name }}", preheader: "Your account is ready", status: "published", version: 3, published_version: 3, updated_at: ago(300), variables: ["first_name"], source_format: "mjml", source: MJML_SRC },
+  { id: "t2", alias: "receipt", name: "Receipt", stream: "transactional", subject: "Your receipt", status: "published", version: 5, published_version: 4, updated_at: ago(60 * 30), variables: ["first_name", "amount"], source_format: "html", source: HTML_SRC },
+  { id: "t3", alias: "winback", name: "Win-back", stream: "marketing", subject: "We miss you", status: "draft", version: 1, published_version: null, updated_at: ago(60 * 24 * 3), variables: ["first_name"], source_format: "json", source: JSON.stringify({ version: 1, subject: "We miss you", blocks: [{ type: "heading", text: "Come back, {{ first_name }}" }] }, null, 2) },
 ];
 const llm = { version: 1, subject: "Welcome", blocks: [{ type: "heading", text: "Hi" }, { type: "slot", name: "intro", max_len: 240, instructions: "One warm sentence", fallback: "Thanks for signing up." }] };
+// Version history per template (newest first): t2 has a live v4 and an unpublished draft v5.
+const VERSIONS = {
+  t1: [3, 2, 1].map((v) => ({ version: v, source_format: "mjml", created_at: ago(300 + (4 - v) * 900), published_at: v === 3 ? ago(300) : v === 2 ? ago(1200) : null, published: v === 3 })),
+  t2: [5, 4, 3, 2, 1].map((v) => ({ version: v, source_format: "html", created_at: ago(800 + (5 - v) * 400), published_at: v === 4 ? ago(60 * 40) : v === 3 ? ago(60 * 90) : null, published: v === 4 })),
+  t3: [{ version: 1, source_format: "json", created_at: ago(60 * 24 * 3), published_at: null, published: false }],
+};
+const findTemplate = (k) => TEMPLATES.find((x) => x.id === k || x.alias === k);
+
+// Unsaved-content preview for the editor: substitutes sample values, lints a little, fails on the word BROKEN.
+const SAMPLE = { first_name: "Ana", amount: "$12.00" };
+const varsOf = (src) => [...new Set([...src.matchAll(/\{\{\s*([a-zA-Z_][\w.]*)\s*\}\}/g)].map((m) => m[1]))];
+function renderInline(b) {
+  const src = String(b.content ?? "");
+  if (src.includes("BROKEN")) return { error: { code: "template_render_failed", message: "mjml compile failed: unexpected tag near BROKEN", hint: "fix the template and preview again" }, status: 422 };
+  const vars = { ...SAMPLE, ...(b.variables ?? {}) };
+  const sub = (x) => x.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k) => String(vars[k] ?? `[${k}]`));
+  const body = b.format === "json" ? "<h1>Block template</h1>" : b.format === "mjml" ? sub(src).replace(/<mj-head>[\s\S]*<\/mj-head>/, "").replace(/<mj-(text|button)[^>]*>([^<]*)<\/mj-\1>/g, "<p>$2</p>").replace(/<\/?mj-[^>]*>|<\/?mjml>/g, "") : sub(src);
+  const lint = [];
+  if (b.format !== "json" && !String(b.subject ?? "").trim()) lint.push({ rule: "empty_subject", severity: "error", message: "subject is empty", path: "subject" });
+  if (/<img(?![^>]*alt=)/i.test(src)) lint.push({ rule: "image_missing_alt", severity: "warning", message: "1 <img> without alt", path: "blocks[0]" });
+  if (/href=["']http:\/\//i.test(src)) lint.push({ rule: "insecure_link", severity: "warning", message: "link is not https", path: "blocks[0]" });
+  return { data: { subject: sub(String(b.subject ?? "")), html: /<html/i.test(body) ? body : `<!doctype html><html><body style="font-family:Arial,sans-serif;padding:24px">${body}</body></html>`, text: "", lint, variables: varsOf(src + " " + String(b.subject ?? "")), warnings: [] } };
+}
 
 const stat = (entered, active, completed, exited, failed) => ({ entered, active, completed, exited, failed });
 const AUTOMATIONS = [
@@ -151,10 +200,11 @@ const body = (res, data, extra = {}, code = 200) => { res.statusCode = code; res
 const fail = (res, e, code) => { res.statusCode = code; res.end(JSON.stringify({ ok: false, error: e })); };
 const notFound = (res, what) => fail(res, { code: "not_found", message: `No such ${what}` }, 404);
 
+const readBody = async (req) => { let t = ""; for await (const c of req) t += c; try { return t ? JSON.parse(t) : {}; } catch { return {}; } };
+
 createServer(async (req, res) => {
   const u = new URL(req.url, "http://x"), p = u.pathname, q = u.searchParams; let m;
-  let input = {};
-  if (req.method !== "GET") { let raw = ""; for await (const c of req) raw += c; try { input = JSON.parse(raw || "{}"); } catch {} }
+  const input = req.method === "GET" ? {} : await readBody(req), b = input; // `input` and `b` are the same parsed JSON body
   res.setHeader("content-type", "application/json");
   if (process.env.FAIL) return fail(res, { code: "unreachable", message: "Cannot reach the database", hint: "Check the server" }, 503);
   if (req.method !== "GET") {
@@ -182,8 +232,54 @@ createServer(async (req, res) => {
       return body(res, { run_id: "run_test_" + Date.now(), automation_id: m[1], env: "test", status: "started" }, {}, 202);
     }
     if ((m = p.match(/^\/v1\/templates\/([^/]+)\/preview$/))) {
-      const t = TEMPLATES.find((x) => x.id === m[1] || x.alias === m[1]);
-      return body(res, { subject: t?.subject, html: html(t?.name ?? "Template"), text: "", lint: t?.id === "t1" ? [] : [{ rule: "missing-alt", severity: "warning", message: "Image has no alt text", path: "blocks[2]" }, { rule: "no-unsubscribe", severity: "error", message: "Marketing email needs an unsubscribe link", path: "footer" }] });
+      const t = findTemplate(m[1]);
+      if (!t) return notFound(res, "template");
+      if (b.content != null || b.html != null || b.mjml != null) {
+        const r = renderInline({ ...b, content: b.content ?? b.html ?? b.mjml, format: b.format ?? (b.mjml != null ? "mjml" : "html") });
+        return r.error ? fail(res, r.error, r.status) : body(res, r.data);
+      }
+      return body(res, { subject: t.subject, html: html(t.name ?? "Template"), text: "", variables: t.variables, lint: t.id === "t1" ? [] : [{ rule: "missing-alt", severity: "warning", message: "Image has no alt text", path: "blocks[2]" }, { rule: "no-unsubscribe", severity: "error", message: "Marketing email needs an unsubscribe link", path: "footer" }] });
+    }
+    if (p === "/v1/templates/import") {
+      if (!b.name || !b.content) return fail(res, { code: "invalid_request", message: "name and content are required", field: "content" }, 400);
+      const alias = String(b.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      if (findTemplate(alias)) return fail(res, { code: "template_exists", message: `a template with alias \`${alias}\` already exists`, field: "alias" }, 409);
+      const id = `t${TEMPLATES.length + 1}`, title = String(b.content).match(/<(?:mj-)?title>([^<]*)</i)?.[1] ?? "";
+      TEMPLATES.unshift({ id, alias, name: b.name, stream: "transactional", subject: title, status: "draft", version: 1, published_version: null, updated_at: ago(0), variables: varsOf(b.content), source_format: b.format, source: String(b.content) });
+      VERSIONS[id] = [{ version: 1, source_format: b.format, created_at: ago(0), published_at: null, published: false }];
+      return body(res, { id, alias, name: b.name, subject: title, status: "draft", version: 1, published: false, warnings: [] }, {}, 201);
+    }
+    if ((m = p.match(/^\/v1\/templates\/([^/]+)\/versions\/(\d+)\/restore$/))) {
+      const t = findTemplate(m[1]); if (!t || !VERSIONS[t.id].some((v) => v.version === Number(m[2]))) return notFound(res, "template version");
+      t.version += 1; VERSIONS[t.id].unshift({ version: t.version, source_format: t.source_format, created_at: ago(0), published_at: null, published: false });
+      return body(res, { id: t.id, alias: t.alias, version: t.version, restored_from: Number(m[2]), published_version: t.published_version }, {}, 201);
+    }
+    if ((m = p.match(/^\/v1\/templates\/([^/]+)\/draft$/))) {
+      const t = findTemplate(m[1]); if (!t) return notFound(res, "template");
+      if (t.published_version == null) return fail(res, { code: "no_published_version", message: "nothing is published to fall back to", hint: "publish a version first" }, 409);
+      const gone = VERSIONS[t.id].filter((v) => v.version > t.published_version && !v.published_at);
+      if (!gone.length) return fail(res, { code: "no_draft", message: "there are no unpublished changes to discard" }, 409);
+      VERSIONS[t.id] = VERSIONS[t.id].filter((v) => !gone.includes(v)); t.version = VERSIONS[t.id][0].version;
+      return body(res, { id: t.id, alias: t.alias, discarded: gone.length, version: t.version, published_version: t.published_version });
+    }
+    if ((m = p.match(/^\/v1\/templates\/([^/]+)\/publish$/))) {
+      const t = findTemplate(m[1]); if (!t) return notFound(res, "template");
+      t.published_version = t.version; t.status = "published";
+      VERSIONS[t.id] = VERSIONS[t.id].map((v) => ({ ...v, published: v.version === t.version, published_at: v.version === t.version ? ago(0) : v.published_at }));
+      return body(res, { id: t.id, alias: t.alias, published_version: t.version });
+    }
+    if (req.method === "PATCH" && (m = p.match(/^\/v1\/templates\/([^/]+)$/))) {
+      const t = findTemplate(m[1]); if (!t) return notFound(res, "template");
+      if (b.alias && b.alias !== t.alias && findTemplate(b.alias)) return fail(res, { code: "template_exists", message: `a template with alias \`${b.alias}\` already exists`, field: "alias" }, 409);
+      for (const k of ["name", "alias", "stream"]) if (b[k]) t[k] = b[k];
+      if (b.content != null) {
+        t.version += 1; t.source_format = b.format; t.source = String(b.content);
+        if (b.subject != null) t.subject = b.subject;
+        if (b.preheader != null) t.preheader = b.preheader;
+        t.variables = varsOf(t.source + " " + t.subject);
+        VERSIONS[t.id].unshift({ version: t.version, source_format: b.format, created_at: ago(0), published_at: null, published: false });
+      }
+      return body(res, { id: t.id, alias: t.alias, name: t.name, stream: t.stream, version: t.version, published_version: t.published_version, warnings: [] });
     }
     if (p === "/v1/broadcasts/preview") {
       const r = input.recipient ?? {}, name = r.first_name || "there";
@@ -224,7 +320,8 @@ createServer(async (req, res) => {
   if ((m = p.match(/^\/v1\/emails\/([^/]+)\/events$/))) { const e = EMAILS.find((x) => x.id === m[1]); return e ? body(res, eventsFor(e)) : notFound(res, "email"); }
   if ((m = p.match(/^\/v1\/emails\/([^/]+)$/))) { const e = EMAILS.find((x) => x.id === m[1]); return e ? body(res, e) : notFound(res, "email"); }
   if ((m = p.match(/^\/v1\/templates\/([^/]+)\/export$/))) return body(res, { content: q.get("format") === "json" ? JSON.stringify(llm, null, 2) : html("Export") });
-  if ((m = p.match(/^\/v1\/templates\/([^/]+)$/))) { const t = TEMPLATES.find((x) => x.id === m[1] || x.alias === m[1]); return t ? body(res, t.alias === "welcome" ? { ...t, content: llm } : t) : notFound(res, "template"); }
+  if ((m = p.match(/^\/v1\/templates\/([^/]+)\/versions$/))) { const t = findTemplate(m[1]); return t ? body(res, VERSIONS[t.id]) : notFound(res, "template"); }
+  if ((m = p.match(/^\/v1\/templates\/([^/]+)$/))) { const t = findTemplate(m[1]); return t ? body(res, t.alias === "welcome" ? { ...t, content: llm } : t) : notFound(res, "template"); }
   if ((m = p.match(/^\/v1\/automations\/([^/]+)\/runs\/([^/]+)$/))) { const r = RUNS.find((x) => x.id === m[2]) ?? (m[2].startsWith("run_test") ? { ...RUNS[0], id: m[2], contact_email: "you@example.com", test: true, current_step: "wait", started_at: ago(0.1) } : null); return r ? body(res, runDetail(r)) : notFound(res, "run"); }
   if ((m = p.match(/^\/v1\/automations\/([^/]+)\/runs$/))) return body(res, m[1] === "a1" ? RUNS : []);
   if ((m = p.match(/^\/v1\/automations\/([^/]+)$/))) { const a = AUTOMATIONS.find((x) => x.id === m[1]); return a ? body(res, a) : notFound(res, "automation"); }
