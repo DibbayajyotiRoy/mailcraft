@@ -16,7 +16,8 @@ use crate::{
     audit::{self, Actor, Entry},
     auth::Auth,
     error::{
-        envelope, envelope_list, err, invalid, json_or_default, not_found, ApiJson, ApiResult,
+        envelope, envelope_list, err, invalid, json_or_default, not_found, ApiError, ApiJson,
+        ApiResult,
     },
     page,
     state::AppState,
@@ -41,7 +42,13 @@ fn stream_of(s: Option<&str>) -> ApiResult<Stream> {
 }
 
 /// `content` is a string for every format; a JSON object is accepted for `json` too.
-fn import(format: Format, content: &Value, subject: Option<&str>) -> ApiResult<mt::Imported> {
+/// `preheader` overrides the template's own (`""` clears it); `subject` overrides html/mjml titles.
+fn import(
+    format: Format,
+    content: &Value,
+    subject: Option<&str>,
+    preheader: Option<&str>,
+) -> ApiResult<mt::Imported> {
     let src = match content {
         Value::String(s) => s.clone(),
         Value::Null => return Err(invalid("content is required").field("content")),
@@ -51,10 +58,22 @@ fn import(format: Format, content: &Value, subject: Option<&str>) -> ApiResult<m
         return Err(invalid("content is over 1 MB").field("content"));
     }
     let bad = |e: mt::RenderError| invalid(e.to_string()).field("content");
-    match format {
+    let mut imp = match format {
         Format::Json => mt::import_json(&src).map_err(bad),
         Format::Mjml => mt::import_mjml(&src, subject).map_err(bad),
         Format::Html => Ok(mt::import_html(&src, subject)),
+    }?;
+    if let Some(p) = preheader {
+        imp.template.preheader = (!p.trim().is_empty()).then(|| p.trim().to_owned());
+    }
+    Ok(imp)
+}
+
+fn stream_str(s: Stream) -> &'static str {
+    if s == Stream::Marketing {
+        "marketing"
+    } else {
+        "transactional"
     }
 }
 
@@ -237,7 +256,7 @@ async fn create_from(
     let stream = stream_of(b.stream.as_deref())?;
     let (format, content) = source(b.format, &b.content, &b.mjml, &b.html)
         .ok_or_else(|| invalid("provide `content`, `mjml` or `html`").field("content"))?;
-    let imp = import(format, &content, b.subject.as_deref())?;
+    let imp = import(format, &content, b.subject.as_deref(), None)?;
     let mut g = begin!(st, auth, headers, route, b);
     let id: Option<Uuid> = sqlx::query_scalar(
         "INSERT INTO templates (workspace_id, alias, name, stream) VALUES ($1,$2,$3,$4) ON CONFLICT (workspace_id, alias) DO NOTHING RETURNING id",
@@ -245,7 +264,7 @@ async fn create_from(
     .bind(ws)
     .bind(&alias)
     .bind(&b.name)
-    .bind(if stream == Stream::Marketing { "marketing" } else { "transactional" })
+    .bind(stream_str(stream))
     .fetch_optional(&mut *g.tx)
     .await?;
     let id = id.ok_or_else(|| {
@@ -322,13 +341,33 @@ async fn load(
     Ok((v, tpl))
 }
 
+/// What an editor opens: the author's own html/mjml as pasted, else the canonical block tree as JSON.
+/// Returns `(source_format, source)`.
+fn editable(format: &str, raw: Option<String>, tpl: &mt::Template) -> (String, String) {
+    match raw {
+        Some(r) if format == "html" || format == "mjml" => (format.to_owned(), r),
+        _ => ("json".to_owned(), mt::export_json(tpl)),
+    }
+}
+
 pub async fn get(State(st): State<AppState>, auth: Auth, Path(id): Path<String>) -> ApiResult {
     auth.require(Scope::Read)?;
     let t = find(&st, auth.0.workspace_id, &id).await?;
     let (v, tpl) = load(&st, &t, None).await?;
+    let (format, raw): (String, Option<String>) = sqlx::query_as(
+        "SELECT source_format, source_raw FROM template_versions WHERE template_id = $1 AND version = $2",
+    )
+    .bind(t.id)
+    .bind(v)
+    .fetch_one(&st.db)
+    .await?;
+    let (source_format, source) = editable(&format, raw, &tpl);
     let mut out = serde_json::to_value(&t).unwrap_or_default();
     out["version"] = json!(v);
     out["subject"] = json!(tpl.subject);
+    out["preheader"] = json!(tpl.preheader);
+    out["source_format"] = json!(source_format);
+    out["source"] = json!(source);
     out["template"] = serde_json::to_value(tpl).unwrap_or_default();
     Ok(envelope(StatusCode::OK, out))
 }
@@ -361,17 +400,20 @@ pub async fn version_get(
     auth.require(Scope::Read)?;
     let t = find(&st, auth.0.workspace_id, &id).await?;
     let (v, tpl) = load(&st, &t, Some(version)).await?;
-    let (pa, at): (Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
-        "SELECT published_at, created_at FROM template_versions WHERE template_id = $1 AND version = $2",
+    type Row = (Option<DateTime<Utc>>, DateTime<Utc>, String, Option<String>);
+    let (pa, at, format, raw): Row = sqlx::query_as(
+        "SELECT published_at, created_at, source_format, source_raw FROM template_versions WHERE template_id = $1 AND version = $2",
     )
     .bind(t.id)
     .bind(v)
     .fetch_one(&st.db)
     .await?;
+    let (source_format, source) = editable(&format, raw, &tpl);
     Ok(envelope(
         StatusCode::OK,
-        json!({"id": t.id, "alias": t.alias, "version": v, "subject": tpl.subject, "created_at": at,
-               "published_at": pa, "published": t.published_version == Some(v), "template": tpl}),
+        json!({"id": t.id, "alias": t.alias, "version": v, "subject": tpl.subject, "preheader": tpl.preheader,
+               "created_at": at, "published_at": pa, "published": t.published_version == Some(v),
+               "source_format": source_format, "source": source, "template": tpl}),
     ))
 }
 
@@ -380,6 +422,11 @@ pub async fn version_get(
 pub struct PatchTemplate {
     #[serde(default)]
     pub name: Option<String>,
+    /// Sends and automations reference templates by alias: changing it breaks those references.
+    #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default)]
+    pub stream: Option<String>,
     /// Adds a new draft version.
     #[serde(default)]
     pub format: Option<Format>,
@@ -395,6 +442,18 @@ pub struct PatchTemplate {
     pub variables: Option<Vec<String>>,
     #[serde(default)]
     pub subject: Option<String>,
+    /// Sets (or, when empty, clears) the preheader of the new version.
+    #[serde(default)]
+    pub preheader: Option<String>,
+}
+
+fn alias_taken(alias: &str) -> ApiError {
+    err(
+        "template_exists",
+        409,
+        format!("a template with alias `{alias}` already exists"),
+    )
+    .field("alias")
 }
 
 pub async fn patch(
@@ -408,21 +467,57 @@ pub async fn patch(
     let ws = auth.0.workspace_id;
     let t = find(&st, ws, &id).await?;
     let src = source(b.format, &b.content, &b.mjml, &b.html);
-    if b.name.is_none() && src.is_none() {
-        return Err(invalid("send `name` and/or `content`, `mjml` or `html`"));
+    if b.name.is_none() && b.alias.is_none() && b.stream.is_none() && src.is_none() {
+        return Err(invalid(
+            "send `name`, `alias`, `stream` and/or `content`, `mjml` or `html`",
+        ));
     }
+    if b.name.as_deref().is_some_and(|n| n.trim().is_empty()) {
+        return Err(invalid("name must not be empty").field("name"));
+    }
+    if b.alias
+        .as_deref()
+        .is_some_and(|a| a.is_empty() || a.len() > 100)
+    {
+        return Err(invalid("alias must be 1-100 characters").field("alias"));
+    }
+    let stream = b
+        .stream
+        .as_deref()
+        .map(|s| stream_of(Some(s)))
+        .transpose()?;
     let imp = match &src {
-        Some((f, c)) => Some(import(*f, c, b.subject.as_deref())?),
+        Some((f, c)) => Some(import(*f, c, b.subject.as_deref(), b.preheader.as_deref())?),
         None => None,
     };
     let route = format!("PATCH /v1/templates/{}", t.id);
     let mut g = begin!(st, auth, headers, &route, b);
-    if let Some(n) = &b.name {
-        sqlx::query("UPDATE templates SET name = $2 WHERE id = $1")
-            .bind(t.id)
-            .bind(n)
-            .execute(&mut *g.tx)
-            .await?;
+    let mut fields: Vec<&str> = vec![];
+    if b.name.is_some() || b.alias.is_some() || stream.is_some() {
+        sqlx::query(
+            "UPDATE templates SET name = COALESCE($2, name), alias = COALESCE($3, alias), stream = COALESCE($4, stream) WHERE id = $1",
+        )
+        .bind(t.id)
+        .bind(&b.name)
+        .bind(&b.alias)
+        .bind(stream.map(stream_str))
+        .execute(&mut *g.tx)
+        .await
+        .map_err(|e| match &e {
+            sqlx::Error::Database(d) if d.is_unique_violation() => {
+                alias_taken(b.alias.as_deref().unwrap_or_default())
+            }
+            _ => e.into(),
+        })?;
+        for (set, f) in [
+            (b.name.is_some(), "name"),
+            (b.alias.is_some(), "alias"),
+            (stream.is_some(), "stream"),
+        ] {
+            if set {
+                fields.push(f);
+            }
+        }
     }
     let mut version = t.latest_version.unwrap_or(0);
     let mut warnings = vec![];
@@ -430,6 +525,12 @@ pub async fn patch(
         version += 1;
         add_version(&mut g.tx, t.id, version, i, raw_of(*f, c).as_deref()).await?;
         warnings = i.warnings.clone();
+        fields.push("content");
+    }
+    let mut args = json!({"template_id": t.id, "version": version, "fields": fields});
+    if b.alias.as_deref().is_some_and(|a| a != t.alias) {
+        args["previous_alias"] = json!(t.alias);
+        args["alias"] = json!(b.alias);
     }
     audit::append(
         &mut g.tx,
@@ -437,13 +538,111 @@ pub async fn patch(
         Actor::Key(&auth.0),
         Entry {
             action: "template.update",
-            args: json!({"template_id": t.id, "version": version}),
+            args,
             decision: "auto",
             approval_id: None,
         },
     )
     .await?;
-    g.finish(StatusCode::OK, json!({"id": t.id, "alias": t.alias, "version": version, "published_version": t.published_version, "warnings": warnings})).await
+    g.finish(StatusCode::OK, json!({"id": t.id, "alias": b.alias.as_ref().unwrap_or(&t.alias), "name": b.name.as_ref().unwrap_or(&t.name), "stream": stream.map_or_else(|| t.stream.clone(), |s| stream_str(s).to_owned()), "version": version, "published_version": t.published_version, "warnings": warnings})).await
+}
+
+/// Copies an older version into a new draft (history is never rewritten).
+pub async fn restore(
+    State(st): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Path((id, version)): Path<(String, i32)>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    let ws = auth.0.workspace_id;
+    let t = find(&st, ws, &id).await?;
+    let route = format!("POST /v1/templates/{}/versions/{version}/restore", t.id);
+    let mut g = begin!(st, auth, headers, &route, json!({}));
+    let next = t.latest_version.unwrap_or(0) + 1;
+    let copied = sqlx::query(
+        "INSERT INTO template_versions (template_id, version, doc, source_format, source_raw, variables) \
+         SELECT template_id, $3, doc, source_format, source_raw, variables FROM template_versions \
+         WHERE template_id = $1 AND version = $2",
+    )
+    .bind(t.id)
+    .bind(version)
+    .bind(next)
+    .execute(&mut *g.tx)
+    .await?
+    .rows_affected();
+    if copied == 0 {
+        return Err(not_found("template version"));
+    }
+    audit::append(
+        &mut g.tx,
+        ws,
+        Actor::Key(&auth.0),
+        Entry {
+            action: "template.restore",
+            args: json!({"template_id": t.id, "from_version": version, "version": next}),
+            decision: "auto",
+            approval_id: None,
+        },
+    )
+    .await?;
+    g.finish(StatusCode::CREATED, json!({"id": t.id, "alias": t.alias, "version": next, "restored_from": version, "published_version": t.published_version})).await
+}
+
+/// Drops the unpublished versions newer than the published one, so the newest version is live again.
+/// A version that was ever published stays (it is history, not a draft).
+pub async fn discard_draft(
+    State(st): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    let ws = auth.0.workspace_id;
+    let t = find(&st, ws, &id).await?;
+    let Some(published) = t.published_version else {
+        return Err(err(
+            "no_published_version",
+            409,
+            "nothing is published to fall back to",
+        )
+        .hint_in("publish a version first, or restore an older version into a new draft"));
+    };
+    let route = format!("DELETE /v1/templates/{}/draft", t.id);
+    let mut g = begin!(st, auth, headers, &route, json!({}));
+    let discarded = sqlx::query(
+        "DELETE FROM template_versions WHERE template_id = $1 AND version > $2 AND published_at IS NULL",
+    )
+    .bind(t.id)
+    .bind(published)
+    .execute(&mut *g.tx)
+    .await?
+    .rows_affected();
+    if discarded == 0 {
+        return Err(err(
+            "no_draft",
+            409,
+            "there are no unpublished changes to discard",
+        ));
+    }
+    let latest: Option<i32> =
+        sqlx::query_scalar("SELECT max(version) FROM template_versions WHERE template_id = $1")
+            .bind(t.id)
+            .fetch_one(&mut *g.tx)
+            .await?;
+    audit::append(
+        &mut g.tx,
+        ws,
+        Actor::Key(&auth.0),
+        Entry {
+            action: "template.discard_draft",
+            args: json!({"template_id": t.id, "discarded": discarded, "version": latest}),
+            decision: "auto",
+            approval_id: None,
+        },
+    )
+    .await?;
+    g.finish(StatusCode::OK, json!({"id": t.id, "alias": t.alias, "discarded": discarded, "version": latest, "published_version": published})).await
 }
 
 #[derive(Deserialize, Default)]
@@ -503,6 +702,20 @@ pub struct PreviewBody {
     pub variables: Option<Value>,
     #[serde(default)]
     pub version: Option<i32>,
+    /// Unsaved content to render instead of a saved version (the editor's live preview).
+    /// Same fields as PATCH; nothing is stored.
+    #[serde(default)]
+    pub format: Option<Format>,
+    #[serde(default)]
+    pub content: Option<Value>,
+    #[serde(default)]
+    pub html: Option<String>,
+    #[serde(default)]
+    pub mjml: Option<String>,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub preheader: Option<String>,
 }
 
 pub(crate) async fn options(
@@ -538,7 +751,13 @@ pub async fn preview(
     auth.require(Scope::Read)?;
     let b: PreviewBody = json_or_default(&body)?;
     let t = find(&st, auth.0.workspace_id, &id).await?;
-    let (_, tpl) = load(&st, &t, b.version).await?;
+    let (tpl, warnings) = match source(b.format, &b.content, &b.mjml, &b.html) {
+        Some((f, c)) => {
+            let i = import(f, &c, b.subject.as_deref(), b.preheader.as_deref())?;
+            (i.template, i.warnings)
+        }
+        None => (load(&st, &t, b.version).await?.1, vec![]),
+    };
     let o = options(
         &st,
         auth.0.workspace_id,
@@ -553,7 +772,7 @@ pub async fn preview(
         .map_err(|e| err("template_render_failed", 422, e.to_string()))?;
     Ok(envelope(
         StatusCode::OK,
-        json!({"subject": p.rendered.subject, "html": p.rendered.html, "text": p.rendered.text, "lint": lint_json(&p.issues)}),
+        json!({"subject": p.rendered.subject, "html": p.rendered.html, "text": p.rendered.text, "lint": lint_json(&p.issues), "variables": mt::variables(&tpl), "warnings": warnings}),
     ))
 }
 
@@ -633,7 +852,7 @@ pub async fn lint(
         &b.html,
     )
     .ok_or_else(|| invalid("provide `html`, `mjml` or `content`").field("html"))?;
-    let imp = import(f, &c, b.subject.as_deref())?;
+    let imp = import(f, &c, b.subject.as_deref(), None)?;
     let o = options(&st, auth.0.workspace_id, stream_of(b.stream.as_deref())?).await?;
     Ok(envelope(
         StatusCode::OK,

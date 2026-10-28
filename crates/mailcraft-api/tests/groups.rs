@@ -1842,6 +1842,512 @@ async fn template_version_history() {
     assert_eq!(c.c("GET", "/v1/templates/nope/versions", None).await.0, 404);
 }
 
+// ------------------------------------------------------ template editor
+
+const MJML: &str = "<mjml><mj-head><mj-title>Hello</mj-title><mj-preview>Peek</mj-preview></mj-head><mj-body><mj-section><mj-column><mj-text>Hi {{ first_name }}</mj-text></mj-column></mj-section></mj-body></mjml>";
+
+async fn audit_actions(c: &Ctx) -> Vec<String> {
+    sqlx::query_scalar("SELECT action FROM audit_log WHERE workspace_id = $1 ORDER BY id")
+        .bind(c.ws)
+        .fetch_all(&c.st.db)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn editor_reads_the_authors_source_in_its_own_format() {
+    let c = ctx!();
+    let html = "<!doctype html><html><head><title>From title</title></head><body><p>Hi {{{first_name}}}</p></body></html>";
+    c.c(
+        "POST",
+        "/v1/templates",
+        Some(json!({"name": "Page", "html": html})),
+    )
+    .await;
+    c.c(
+        "POST",
+        "/v1/templates",
+        Some(json!({"name": "Mail", "mjml": MJML})),
+    )
+    .await;
+    c.c("POST", "/v1/templates", Some(json!({"name": "Tree", "content": {"version": 1, "subject": "S", "blocks": [{"type": "heading", "text": "Yo"}]}}))).await;
+    // html: the text as pasted (not the converted tree), subject from <title>
+    let (_, b) = c.c("GET", "/v1/templates/page", None).await;
+    assert_eq!(
+        (
+            b["data"]["source_format"].as_str(),
+            b["data"]["source"].as_str(),
+            b["data"]["subject"].as_str()
+        ),
+        (Some("html"), Some(html), Some("From title"))
+    );
+    // mjml: source as pasted, preheader lifted from <mj-preview>
+    let (_, b) = c.c("GET", "/v1/templates/mail", None).await;
+    assert_eq!(
+        (
+            b["data"]["source_format"].as_str(),
+            b["data"]["source"].as_str(),
+            b["data"]["preheader"].as_str()
+        ),
+        (Some("mjml"), Some(MJML), Some("Peek"))
+    );
+    // block tree: the canonical json is the source
+    let (_, b) = c.c("GET", "/v1/templates/tree", None).await;
+    let src: Value = serde_json::from_str(b["data"]["source"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        (
+            b["data"]["source_format"].as_str(),
+            src["blocks"][0]["text"].as_str()
+        ),
+        (Some("json"), Some("Yo"))
+    );
+    // the same fields on a specific version
+    let (_, b) = c.c("GET", "/v1/templates/mail/versions/1", None).await;
+    assert_eq!(
+        (
+            b["data"]["source_format"].as_str(),
+            b["data"]["preheader"].as_str()
+        ),
+        (Some("mjml"), Some("Peek"))
+    );
+}
+
+#[tokio::test]
+async fn saving_from_the_editor_adds_a_draft_with_subject_and_preheader() {
+    let c = ctx!();
+    c.c(
+        "POST",
+        "/v1/templates",
+        Some(json!({"name": "Mail", "mjml": MJML})),
+    )
+    .await;
+    c.c("POST", "/v1/templates/mail/publish", None).await;
+    let edited = MJML.replace("Hi {{ first_name }}", "Edited {{ first_name }}");
+    let (s, b) = c
+        .c(
+            "PATCH",
+            "/v1/templates/mail",
+            Some(json!({"format": "mjml", "content": edited, "subject": "New subject", "preheader": "New peek"})),
+        )
+        .await;
+    assert_eq!((s, b["data"]["version"].as_i64()), (200, Some(2)), "{b}");
+    let (_, b) = c.c("GET", "/v1/templates/mail", None).await;
+    let d = &b["data"];
+    assert_eq!(
+        (
+            d["version"].as_i64(),
+            d["published_version"].as_i64(),
+            d["subject"].as_str(),
+            d["preheader"].as_str(),
+            d["source"].as_str()
+        ),
+        (
+            Some(2),
+            Some(1),
+            Some("New subject"),
+            Some("New peek"),
+            Some(edited.as_str())
+        ),
+        "draft v2 is newest, v1 stays live"
+    );
+    // an empty preheader clears it
+    c.c(
+        "PATCH",
+        "/v1/templates/mail",
+        Some(json!({"format": "mjml", "content": edited, "preheader": ""})),
+    )
+    .await;
+    let (_, b) = c.c("GET", "/v1/templates/mail", None).await;
+    assert!(b["data"]["preheader"].is_null(), "{b}");
+    // the rendered preview carries the preheader we set
+    let (_, b) = c
+        .c(
+            "POST",
+            "/v1/templates/mail/preview",
+            Some(json!({"format": "mjml", "content": edited, "preheader": "Seen in inbox lists"})),
+        )
+        .await;
+    assert!(
+        b["data"]["html"]
+            .as_str()
+            .unwrap()
+            .contains("Seen in inbox lists"),
+        "{b}"
+    );
+    // json carries its own subject; the editor sends only the tree
+    let (s, _) = c
+        .c(
+            "POST",
+            "/v1/templates",
+            Some(json!({"name": "Tree", "content": {"version": 1, "subject": "S", "blocks": []}})),
+        )
+        .await;
+    assert_eq!(s, 201);
+    let (s, b) = c
+        .c(
+            "PATCH",
+            "/v1/templates/tree",
+            Some(json!({"format": "json", "content": "{not json"})),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (400, "invalid_request"));
+    let ro = c.key(&[Scope::Read]).await;
+    assert_eq!(
+        call(
+            &c.app,
+            "PATCH",
+            "/v1/templates/mail",
+            Some(&ro),
+            Some(json!({"name": "x"}))
+        )
+        .await
+        .0,
+        403
+    );
+    let a = audit_actions(&c).await;
+    assert_eq!(a.iter().filter(|x| *x == "template.update").count(), 2);
+}
+
+#[tokio::test]
+async fn preview_renders_unsaved_content_without_storing_it() {
+    let c = ctx!();
+    c.c(
+        "POST",
+        "/v1/templates",
+        Some(json!({"name": "Page", "subject": "S", "html": "<p>saved</p>"})),
+    )
+    .await;
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/templates/page/preview",
+            Some(json!({"html": "<p>Hi {{ first_name }}, you owe {{ amount }}</p>", "subject": "Due {{ amount }}", "variables": {"amount": "$5"}})),
+        )
+        .await;
+    assert_eq!(s, 200, "{b}");
+    let d = &b["data"];
+    assert!(d["html"].as_str().unwrap().contains("Hi Ana, you owe $5"));
+    assert_eq!(d["subject"], "Due $5");
+    let vars: Vec<&str> = d["variables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(
+        vars.contains(&"amount") && vars.contains(&"first_name"),
+        "{vars:?}"
+    );
+    assert!(d["lint"].is_array());
+    // lint sees the unsaved text too: an unfilled variable is reported
+    let (_, b) = c
+        .c(
+            "POST",
+            "/v1/templates/page/preview",
+            Some(json!({"html": "<p>{{ amount }}</p>", "subject": "S", "variables": {}})),
+        )
+        .await;
+    assert!(b["data"]["lint"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|l| l["rule"] == "missing_variable"));
+    // bad mjml is a 400, a template that cannot render is a 422
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/templates/page/preview",
+            Some(json!({"mjml": "<mjml><mj-body>"})),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (400, "invalid_request"), "{b}");
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/templates/page/preview",
+            Some(json!({"html": "{% if %}", "subject": "S"})),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (422, "template_render_failed"), "{b}");
+    // nothing was saved, and the saved preview is untouched
+    let (_, b) = c.c("GET", "/v1/templates/page/versions", None).await;
+    assert_eq!(b["data"].as_array().unwrap().len(), 1);
+    let (_, b) = c.c("POST", "/v1/templates/page/preview", None).await;
+    assert!(b["data"]["html"].as_str().unwrap().contains("saved"));
+    assert_eq!(
+        c.c(
+            "POST",
+            "/v1/templates/nope/preview",
+            Some(json!({"html": "<p>x</p>"}))
+        )
+        .await
+        .0,
+        404
+    );
+}
+
+#[tokio::test]
+async fn rename_alias_and_stream_without_a_new_version() {
+    let c = ctx!();
+    for n in ["Welcome", "Receipt"] {
+        c.c(
+            "POST",
+            "/v1/templates",
+            Some(json!({"name": n, "subject": "S", "html": "<p>x</p>"})),
+        )
+        .await;
+    }
+    let (s, b) = c
+        .c(
+            "PATCH",
+            "/v1/templates/welcome",
+            Some(json!({"name": "Welcome email", "alias": "hello", "stream": "marketing"})),
+        )
+        .await;
+    assert_eq!(s, 200, "{b}");
+    assert_eq!(
+        (
+            b["data"]["alias"].as_str(),
+            b["data"]["name"].as_str(),
+            b["data"]["stream"].as_str(),
+            b["data"]["version"].as_i64()
+        ),
+        (
+            Some("hello"),
+            Some("Welcome email"),
+            Some("marketing"),
+            Some(1)
+        ),
+        "metadata only: still v1"
+    );
+    let (_, b) = c.c("GET", "/v1/templates/hello", None).await;
+    assert_eq!(
+        (
+            b["data"]["name"].as_str(),
+            b["data"]["stream"].as_str(),
+            b["data"]["latest_version"].as_i64()
+        ),
+        (Some("Welcome email"), Some("marketing"), Some(1))
+    );
+    assert_eq!(
+        c.c("GET", "/v1/templates/welcome", None).await.0,
+        404,
+        "old alias is gone"
+    );
+    // the alias is unique per workspace; the failed call changes nothing
+    let (s, b) = c
+        .c(
+            "PATCH",
+            "/v1/templates/receipt",
+            Some(json!({"alias": "hello", "name": "Changed"})),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (409, "template_exists"));
+    let (_, b) = c.c("GET", "/v1/templates/receipt", None).await;
+    assert_eq!(b["data"]["name"], "Receipt");
+    // keeping your own alias is fine
+    assert_eq!(
+        c.c(
+            "PATCH",
+            "/v1/templates/receipt",
+            Some(json!({"alias": "receipt"}))
+        )
+        .await
+        .0,
+        200
+    );
+    // validation
+    for bad in [
+        json!({"stream": "weekly"}),
+        json!({"alias": ""}),
+        json!({"name": "  "}),
+        json!({}),
+    ] {
+        assert_eq!(
+            c.c("PATCH", "/v1/templates/receipt", Some(bad.clone()))
+                .await
+                .0,
+            400,
+            "{bad}"
+        );
+    }
+    let log: Vec<Value> = sqlx::query_scalar("SELECT args FROM audit_log WHERE workspace_id = $1 AND action = 'template.update' ORDER BY id")
+        .bind(c.ws)
+        .fetch_all(&c.st.db)
+        .await
+        .unwrap();
+    assert_eq!(log[0]["previous_alias"], "welcome");
+    assert_eq!(log[0]["alias"], "hello");
+    assert_eq!(log[0]["fields"], json!(["name", "alias", "stream"]));
+}
+
+#[tokio::test]
+async fn restore_copies_an_old_version_into_a_new_draft() {
+    let c = ctx!();
+    let (_, b) = c
+        .c(
+            "POST",
+            "/v1/templates",
+            Some(json!({"name": "News", "subject": "one", "mjml": MJML})),
+        )
+        .await;
+    let id = b["data"]["id"].as_str().unwrap().to_string();
+    c.c("POST", &format!("/v1/templates/{id}/publish"), None)
+        .await;
+    c.c(
+        "PATCH",
+        &format!("/v1/templates/{id}"),
+        Some(json!({"html": "<p>two</p>", "subject": "two"})),
+    )
+    .await;
+    let (s, b) = c
+        .c(
+            "POST",
+            &format!("/v1/templates/{id}/versions/1/restore"),
+            None,
+        )
+        .await;
+    assert_eq!(s, 201, "{b}");
+    assert_eq!(
+        (
+            b["data"]["version"].as_i64(),
+            b["data"]["restored_from"].as_i64(),
+            b["data"]["published_version"].as_i64()
+        ),
+        (Some(3), Some(1), Some(1))
+    );
+    let (_, b) = c.c("GET", &format!("/v1/templates/{id}"), None).await;
+    assert_eq!(
+        (
+            b["data"]["version"].as_i64(),
+            b["data"]["source_format"].as_str(),
+            b["data"]["source"].as_str(),
+            b["data"]["subject"].as_str()
+        ),
+        (Some(3), Some("mjml"), Some(MJML), Some("one")),
+        "v3 is a copy of v1, including its source and format"
+    );
+    let (_, b) = c
+        .c("GET", &format!("/v1/templates/{id}/versions"), None)
+        .await;
+    assert_eq!(b["data"].as_array().unwrap().len(), 3, "history keeps v2");
+    let (s, b) = c
+        .c(
+            "POST",
+            &format!("/v1/templates/{id}/versions/9/restore"),
+            None,
+        )
+        .await;
+    assert_eq!((s, code(&b)), (404, "not_found"));
+    let ro = c.key(&[Scope::Read]).await;
+    assert_eq!(
+        call(
+            &c.app,
+            "POST",
+            &format!("/v1/templates/{id}/versions/1/restore"),
+            Some(&ro),
+            None
+        )
+        .await
+        .0,
+        403
+    );
+    // an Idempotency-Key replays instead of restoring twice
+    let send = || async {
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/v1/templates/{id}/versions/2/restore"))
+            .header("authorization", format!("Bearer {}", c.admin))
+            .header("idempotency-key", "restore-once")
+            .body(Body::empty())
+            .unwrap();
+        let res = c.app.clone().oneshot(req).await.unwrap();
+        let st = res.status().as_u16();
+        let v: Value =
+            serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        (st, v["data"]["version"].as_i64())
+    };
+    assert_eq!(send().await, (201, Some(4)));
+    assert_eq!(send().await, (201, Some(4)));
+    let (_, b) = c
+        .c("GET", &format!("/v1/templates/{id}/versions"), None)
+        .await;
+    assert_eq!(b["data"].as_array().unwrap().len(), 4);
+    assert!(audit_actions(&c)
+        .await
+        .contains(&"template.restore".to_string()));
+}
+
+#[tokio::test]
+async fn discard_draft_returns_to_the_published_version() {
+    let c = ctx!();
+    let (_, b) = c
+        .c(
+            "POST",
+            "/v1/templates",
+            Some(json!({"name": "News", "subject": "v1", "html": "<p>one</p>"})),
+        )
+        .await;
+    let id = b["data"]["id"].as_str().unwrap().to_string();
+    let draft = format!("/v1/templates/{id}/draft");
+    // never published: nothing to fall back to
+    let (s, b) = c.c("DELETE", &draft, None).await;
+    assert_eq!((s, code(&b)), (409, "no_published_version"));
+    c.c("POST", &format!("/v1/templates/{id}/publish"), None)
+        .await;
+    let (s, b) = c.c("DELETE", &draft, None).await;
+    assert_eq!((s, code(&b)), (409, "no_draft"), "published == newest");
+    for n in 2..=3 {
+        c.c(
+            "PATCH",
+            &format!("/v1/templates/{id}"),
+            Some(json!({"html": format!("<p>v{n}</p>"), "subject": "s"})),
+        )
+        .await;
+    }
+    let ro = c.key(&[Scope::Read]).await;
+    assert_eq!(call(&c.app, "DELETE", &draft, Some(&ro), None).await.0, 403);
+    let (s, b) = c.c("DELETE", &draft, None).await;
+    assert_eq!(s, 200, "{b}");
+    assert_eq!(
+        (
+            b["data"]["discarded"].as_i64(),
+            b["data"]["version"].as_i64(),
+            b["data"]["published_version"].as_i64()
+        ),
+        (Some(2), Some(1), Some(1))
+    );
+    let (_, b) = c.c("GET", &format!("/v1/templates/{id}"), None).await;
+    assert_eq!(
+        (b["data"]["version"].as_i64(), b["data"]["subject"].as_str()),
+        (Some(1), Some("v1"))
+    );
+    // a version that was once live is history, not a draft
+    c.c(
+        "PATCH",
+        &format!("/v1/templates/{id}"),
+        Some(json!({"html": "<p>v2</p>", "subject": "s"})),
+    )
+    .await;
+    c.c("POST", &format!("/v1/templates/{id}/publish"), None)
+        .await;
+    c.c(
+        "POST",
+        &format!("/v1/templates/{id}/publish"),
+        Some(json!({"version": 1})),
+    )
+    .await;
+    let (s, b) = c.c("DELETE", &draft, None).await;
+    assert_eq!((s, code(&b)), (409, "no_draft"), "v2 was published once");
+    let (_, b) = c
+        .c("GET", &format!("/v1/templates/{id}/versions"), None)
+        .await;
+    assert_eq!(b["data"].as_array().unwrap().len(), 2);
+    assert!(audit_actions(&c)
+        .await
+        .contains(&"template.discard_draft".to_string()));
+}
+
 #[tokio::test]
 async fn automation_step_stats_and_run_current_step() {
     let c = ctx!();

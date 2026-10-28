@@ -213,7 +213,7 @@ Resource and route summary (full schemas live in `openapi.yaml`; the scaffold sh
 | Emails | `POST /emails`, `POST /emails/batch`, `GET /emails`, `GET /emails/{id}`, `POST /emails/{id}/cancel`, `GET /emails/{id}/events` | send / read |
 | Domains | `POST /domains`, `GET /domains`, `GET /domains/{id}`, `POST /domains/{id}/verify`, `POST /domains/{id}/rotate-dkim`, `DELETE /domains/{id}` | manage |
 | Transports | `POST /transports`, `GET /transports`, `POST /transports/{id}/test`, `DELETE /transports/{id}` | admin |
-| Templates | `POST /templates`, `GET /templates`, `GET/PATCH /templates/{id}`, `POST /templates/{id}/publish`, `POST /templates/{id}/preview`, `POST /templates/import`, `GET /templates/{id}/export?format=html|mjml|json`, `POST /content/lint` | manage |
+| Templates | `POST /templates`, `GET /templates`, `GET/PATCH /templates/{id}`, `GET /templates/{id}/versions[/{n}]`, `POST /templates/{id}/versions/{n}/restore`, `DELETE /templates/{id}/draft`, `POST /templates/{id}/publish`, `POST /templates/{id}/preview` (saved version, or unsaved `html`/`mjml`/`content`), `POST /templates/import`, `GET /templates/{id}/export?format=html|mjml|json`, `POST /content/lint` | manage |
 | Contacts | `PUT /contacts` (upsert), `GET /contacts`, `GET/PATCH/DELETE /contacts/{id_or_email}`, `POST /contacts/{id}/suppress` | manage |
 | Segments / Topics | `POST/GET /segments`, `POST /segments/{id}/members`, `POST/GET /topics` | manage |
 | Events | `POST /events` (track), `POST /event-definitions`, `GET /event-definitions` | manage (send events: `send`) |

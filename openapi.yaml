@@ -893,7 +893,8 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
     patch:
       operationId: template_update
-      summary: Rename and/or add a new draft version (scope manage)
+      summary: Rename, change alias or stream, and/or add a new draft version (scope manage)
+      description: Each call with content adds a version; `subject` / `preheader` apply to that version (empty `preheader` clears). Changing `alias` breaks sends and automations that reference the old one. 409 `template_exists` when the alias is taken.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PatchTemplate" } } } }
       responses:
@@ -914,8 +915,29 @@ paths:
         - { $ref: "#/components/parameters/Id" }
         - { name: version, in: path, required: true, schema: { type: integer } }
       responses:
-        "200": { description: "{id, alias, version, subject, created_at, published_at, published, template}" }
+        "200": { description: "{id, alias, version, subject, preheader, created_at, published_at, published, source_format, source, template}" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/templates/{id}/versions/{version}/restore:
+    post:
+      operationId: template_version_restore
+      summary: Copy an older version into a new draft (scope manage). History is kept; publish the new draft to go live.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { name: version, in: path, required: true, schema: { type: integer } }
+      responses:
+        "201": { description: "{id, alias, version, restored_from, published_version}" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/templates/{id}/draft:
+    delete:
+      operationId: template_discard_draft
+      summary: Discard unpublished changes (scope manage). Deletes the never-published versions newer than the published one; 409 `no_draft` / `no_published_version`.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "200": { description: "{id, alias, discarded, version, published_version}" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/templates/{id}/publish:
     post:
       operationId: template_publish
@@ -928,8 +950,9 @@ paths:
     post:
       operationId: template_preview
       summary: Render with sample data merged with `variables` (scope read). Undefined variable -> 422 `template_render_failed`.
+      description: Renders a saved `version` (default newest). Give `html`, `mjml` or `content` (+`format`) to render unsaved content instead - nothing is stored. Also returns the `variables` the content reads and import `warnings`.
       parameters: [{ $ref: "#/components/parameters/Id" }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { variables: { type: object }, version: { type: integer } } } } } }
+      requestBody: { content: { application/json: { schema: { type: object, properties: { variables: { type: object }, version: { type: integer }, html: { type: string }, mjml: { type: string }, content: {}, format: { type: string, enum: [json, mjml, html] }, subject: { type: string }, preheader: { type: string } } } } } }
       responses:
         "200": { description: preview, content: { application/json: { schema: { $ref: "#/components/schemas/TemplatePreview" } } } }
         "422": { $ref: "#/components/responses/Error" }
@@ -1185,11 +1208,14 @@ components:
       additionalProperties: false
       properties:
         name: { type: string }
+        alias: { type: string, description: "sends and automations reference the alias; changing it breaks them" }
+        stream: { type: string, enum: [transactional, marketing] }
         html: { type: string }
         mjml: { type: string }
         content: {}
         format: { type: string, enum: [json, mjml, html] }
         subject: { type: string }
+        preheader: { type: string, description: "empty clears it; full-document html ignores it" }
         text: { type: string }
         variables: { type: array, items: { type: string } }
     Template:
@@ -1211,6 +1237,8 @@ components:
         html: { type: string }
         text: { type: string }
         lint: { type: array, items: { $ref: "#/components/schemas/LintIssue" } }
+        variables: { type: array, items: { type: string }, description: merge fields the content reads }
+        warnings: { type: array, items: { type: string } }
     AutomationDefinition:
       type: object
       required: [name, steps]
