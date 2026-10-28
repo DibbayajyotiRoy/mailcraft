@@ -25,6 +25,11 @@ const toReview = async (p) => { await toContent(p); await p.getByRole("button", 
 const seq = (...acts) => async (p) => { for (const a of acts) await a(p); };
 const edit = (text) => async (p) => { await p.getByRole("textbox", { name: /source$/ }).fill(text); await p.waitForTimeout(1000); }; // past the 600ms preview debounce
 const previewPane = async (p) => { const b = p.getByRole("radio", { name: "Preview", exact: true }); if (await b.isVisible()) await b.click(); }; // the Code/Preview switch exists below 1024px only
+// Assistant panel: needs the dashboard started with OPENROUTER_API_KEY=mock and MAILCRAFT_ASSISTANT_BASE_URL=<mock-api>/openrouter/api/v1.
+const fresh = async (p) => { await p.evaluate(() => sessionStorage.clear()); await p.reload({ waitUntil: "load" }); await p.waitForTimeout(300); };
+const openAssistant = async (p) => { await fresh(p); await p.getByRole("button", { name: "Assistant" }).click(); await p.getByRole("dialog").waitFor(); await p.waitForTimeout(500); };
+const ask = (text) => async (p) => { await openAssistant(p); await p.getByLabel("Message the assistant").fill(text); await p.getByRole("button", { name: "Send message" }).click(); await p.getByRole("button", { name: "Send message" }).waitFor({ timeout: 20000 }); await p.waitForTimeout(500); };
+const typeInto = (text) => async (p) => { await openAssistant(p); await p.getByLabel("Message the assistant").pressSequentially(text); await p.waitForTimeout(500); };
 // [name, path, action?]  action = open a dialog/tab before the capture
 const ROUTES = [
   ["overview", "/"], ["overview-30d", "/?range=30d"],
@@ -73,6 +78,10 @@ const ROUTES = [
   ["segment-edit", "/contacts?tab=segments", click("button", "Edit Pro customers")], ["segment-edit-json", "/contacts?tab=segments", click("button", "Edit EU or UK")],
   ["segment-delete", "/contacts?tab=segments", click("button", "Delete Nudged")], ["segment-members", "/contacts?tab=segments", click("button", "Add contacts to Nudged")],
   ["domains", "/domains"], ["keys", "/keys"], ["keys-create", "/keys", click("button", /Create (your first )?key|New key|Create/)],
+  ["assistant-empty", "/", openAssistant], ["assistant-email-page", "/emails/em_02", openAssistant],
+  ["assistant-automation", "/", ask("Set up a welcome email for new signups")], ["assistant-fix-template", "/", ask("Fix the lint errors in the promo template")],
+  ["assistant-broadcast", "/", ask("Send the welcome template to my webinar list")], ["assistant-chat", "/", ask("hello")],
+  ["assistant-slash", "/", typeInto("/")], ["assistant-mention", "/", typeInto("send @")],
   ["settings", "/settings"], ["settings-senders-edit", "/settings", click("button", /Edit addresses of dev@example.com/)], ["settings-senders-connect", "/settings", click("button", "Connect a mailbox")],
   ["email-compose-other-from", "/emails", async (p) => { await click("button", "New email")(p); await p.getByRole("dialog").getByLabel("From", { exact: true }).selectOption({ label: "Other address…" }); }],
   ["notfound", "/nope"], ["design", "/dev/design"],
@@ -87,6 +96,7 @@ async function run(mode, w, h) {
   const ctx = await browser.newContext({ colorScheme: dark ? "dark" : "light", forcedColors: mode === "forced" ? "active" : "none", reducedMotion: mode === "reduced" ? "reduce" : "no-preference", viewport: { width: w, height: h } });
   const theme = { name: "mc_theme", value: dark ? "dark" : "light", url: base };
   const page = await ctx.newPage();
+  page.setDefaultTimeout(Number(process.env.QA_TIMEOUT || 30000)); // raise on a busy machine
   page.on("pageerror", (e) => report(`${mode}@${w} pageerror: ${e.message.slice(0, 120)}`));
   const snap = async (name) => { if (shots && (mode === "light" || mode === "dark")) await page.screenshot({ path: `${dir}/${name}-${mode}-${w}.png`, fullPage: true }); };
   const axe = async (name) => {

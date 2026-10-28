@@ -3,6 +3,7 @@ import { parseErr } from "@/lib/err";
 import { ErrorState } from "@/components/ui/error-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { InstructionsForm } from "@/components/Instructions";
+import { AiUsageCard } from "./ai-usage";
 import { DeliveryCard } from "./delivery";
 import { GeneralCard, PolicyCard, ProviderCard } from "./forms";
 import { sendersOf } from "@/lib/senders";
@@ -39,6 +40,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               <InstructionsForm initial={d.custom_instructions ?? ""} />
             </>
           )}
+          <AiUsageCard emailModel={d.llm_provider?.model} />
           {pol.error ? e(pol, "the policy") : <PolicyCard send={pol.data?.default?.send ?? ""} keys={pol.data?.keys ?? []} canEdit={admin} />}
           {ks.error ? e(ks, "the kill switch") : <KillSwitchCard on={!!ks.data.on} admin={admin} />}
         </div>

@@ -83,6 +83,7 @@ const TEMPLATES = [
   { id: "t1", alias: "welcome", name: "Welcome", stream: "transactional", subject: "Welcome {{ first_name }}", preheader: "Your account is ready", status: "published", version: 3, published_version: 3, updated_at: ago(300), variables: ["first_name"], source_format: "mjml", source: MJML_SRC },
   { id: "t2", alias: "receipt", name: "Receipt", stream: "transactional", subject: "Your receipt", status: "published", version: 5, published_version: 4, updated_at: ago(60 * 30), variables: ["first_name", "amount"], source_format: "html", source: HTML_SRC },
   { id: "t3", alias: "winback", name: "Win-back", stream: "marketing", subject: "We miss you", status: "draft", version: 1, published_version: null, updated_at: ago(60 * 24 * 3), variables: ["first_name"], source_format: "json", source: JSON.stringify({ version: 1, subject: "We miss you", blocks: [{ type: "heading", text: "Come back, {{ first_name }}" }] }, null, 2) },
+  { id: "t4", alias: "promo", name: "Promo", stream: "marketing", subject: "", status: "published", version: 1, published_version: 1, updated_at: ago(60 * 12), variables: ["first_name"], source_format: "html", source: `<!doctype html>\n<html>\n  <body>\n    <h1>Big autumn sale, {{ first_name }}</h1>\n    <img src="https://example.com/sale.png">\n    <p>Everything is 20% off this week.</p>\n    <a href="http://example.com/sale">Shop the sale</a>\n  </body>\n</html>\n` },
 ];
 const llm = { version: 1, subject: "Welcome", blocks: [{ type: "heading", text: "Hi" }, { type: "slot", name: "intro", max_len: 240, instructions: "One warm sentence", fallback: "Thanks for signing up." }] };
 // Version history per template (newest first): t2 has a live v4 and an unpublished draft v5.
@@ -90,6 +91,7 @@ const VERSIONS = {
   t1: [3, 2, 1].map((v) => ({ version: v, source_format: "mjml", created_at: ago(300 + (4 - v) * 900), published_at: v === 3 ? ago(300) : v === 2 ? ago(1200) : null, published: v === 3 })),
   t2: [5, 4, 3, 2, 1].map((v) => ({ version: v, source_format: "html", created_at: ago(800 + (5 - v) * 400), published_at: v === 4 ? ago(60 * 40) : v === 3 ? ago(60 * 90) : null, published: v === 4 })),
   t3: [{ version: 1, source_format: "json", created_at: ago(60 * 24 * 3), published_at: null, published: false }],
+  t4: [{ version: 1, source_format: "html", created_at: ago(60 * 12), published_at: ago(60 * 12), published: true }],
 };
 const findTemplate = (k) => TEMPLATES.find((x) => x.id === k || x.alias === k);
 
@@ -188,7 +190,7 @@ const SEGMENTS = [
 ];
 
 const status = { env: "test", live_enabled: false, name: "Acme", key_prefix: "mc_test_8f3a", scopes: ["read", "send", "manage", "admin"], kill_switch: false, pending_approvals: APPROVALS.length, verified: true };
-const settings = { llm_provider: { kind: "openrouter", model: "anthropic/claude-sonnet-4", base_url: null, api_key_set: true }, delivery_path: { kind: "smtp-relay", detail: "postmark via smtp.postmarkapp.com:587" }, default_from: "Acme <hello@mail.example.com>", reply_to: "support@example.com", custom_instructions: "Be brief and friendly." };
+const settings = { llm_provider: { kind: "openrouter", model: "nvidia/nemotron-3.5-super-vl:free", base_url: null, api_key_set: true }, delivery_path: { kind: "smtp-relay", detail: "postmark via smtp.postmarkapp.com:587" }, default_from: "Acme <hello@mail.example.com>", reply_to: "support@example.com", custom_instructions: "Be brief and friendly." };
 const policy = { default: { send: "needs_approval" }, keys: [{ key_id: "k1", name: "Production sender", policy: { send: "auto" } }] };
 const transports = [{ id: "tr1", kind: "smtp-relay", name: "postmark", label: "production", is_default: true, status: "active" }];
 
@@ -235,9 +237,54 @@ const notFound = (res, what) => fail(res, { code: "not_found", message: `No such
 
 const readBody = async (req) => { let t = ""; for await (const c of req) t += c; try { return t ? JSON.parse(t) : {}; } catch { return {}; } };
 
+
+// ---- Mock OpenRouter (offline QA/e2e): MAILCRAFT_ASSISTANT_BASE_URL=http://127.0.0.1:PORT/openrouter/api/v1 ----------------
+const ORMODELS = ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-super-vl:free"].map((id) => ({ id, hugging_face_id: "org/" + id.split("/")[1], pricing: { prompt: "0", completion: "0" }, supported_parameters: ["tools", "temperature", "max_tokens"] }))
+  .concat([{ id: "paid/closed-model", hugging_face_id: "", pricing: { prompt: "0.000003", completion: "0.000015" }, supported_parameters: ["tools"] }]);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const chunk = (delta, extra = {}) => `data: ${JSON.stringify({ choices: [{ delta, ...extra }] })}\n\n`;
+/** A scripted "model": decides from the conversation so far, streams text word by word or one tool call. */
+function scripted(messages) {
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  const after = messages.slice(messages.findLastIndex((m) => m.role === "user") + 1).filter((m) => m.role === "tool");
+  const sys = messages[0]?.content ?? "";
+  const call = (name, args) => ({ tool: { name, args } });
+  if (/fix|lint/i.test(lastUser) && /promo|template/i.test(lastUser + sys)) {
+    if (!after.length && !/Current page \(template/.test(sys)) return call("get", { kind: "template", id: "t4", source: true });
+    if (after.length < 2 && !after.some((m) => /proposal_shown/.test(m.content)))
+      return call("propose_template", { id: "t4", subject: "Our autumn sale, {{ first_name | default('there') }}", edits: [{ find: '<img src="https://example.com/sale.png">', replace: '<img src="https://example.com/sale.png" alt="Autumn sale banner">' }, { find: "http://example.com/sale", replace: "https://example.com/sale" }] });
+    return { text: "I fixed the three issues: a subject line, alt text on the banner and an https link. Review the draft and press Apply to save it as a new version. It stays unpublished until you publish it.\nNEXT: Send this to my webinar list | Check the unsubscribe footer" };
+  }
+  if (/welcome|automation/i.test(lastUser)) {
+    if (!after.length) return call("list", { kind: "template" });
+    if (after.length === 1) return call("propose_automation", { definition: { name: "welcome-signups", trigger: "signed_up", entry_rule: "once", steps: [{ key: "wait", type: "delay", config: { duration: "5m" }, next: "mail" }, { key: "mail", type: "send_email", config: { template: "welcome", from: "hello@mail.example.com", mode: "static" } }] } });
+    return { text: "I drafted a welcome automation: when someone signs up it waits five minutes, then sends the Welcome template. It is saved as a draft and won't send anything until you activate it.\nNEXT: Activate it | Add a reminder after 2 days" };
+  }
+  if (/broadcast|send .* to|webinar/i.test(lastUser)) {
+    if (!after.length) return call("propose_broadcast", { template: "welcome", from: "Acme <hello@mail.example.com>", emails: ["ana@example.com", "ben@example.com"] });
+    return { text: "The broadcast preview is ready: two recipients, rendered for the first one. Press Apply to queue it." };
+  }
+  return { text: "I can set up automations and broadcasts, fix templates, manage contacts and lists, and explain why an email bounced. What would you like to do?\nNEXT: Set up a welcome email | Fix a template | Why did an email bounce?" };
+}
+async function openrouter(req, res, p, input) {
+  res.setHeader("content-type", "application/json");
+  if (p.endsWith("/models")) return body(res, ORMODELS), true;
+  if (p.endsWith("/key")) return body(res, { label: "sk-or-v1-mock…key", usage: 0, limit: null, limit_remaining: null, is_free_tier: true }), true;
+  if (!p.endsWith("/chat/completions")) return false;
+  const step = scripted(input.messages ?? []);
+  res.setHeader("content-type", "text/event-stream");
+  await sleep(150);
+  if (step.tool) res.write(chunk({ tool_calls: [{ index: 0, id: "call_" + Date.now(), function: { name: step.tool.name, arguments: JSON.stringify(step.tool.args) } }] }));
+  else for (const w of step.text.split(/(?<= )/)) { res.write(chunk({ content: w })); await sleep(25); }
+  res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: step.tool ? "tool_calls" : "stop" }], usage: { prompt_tokens: 900, completion_tokens: 60 } })}\n\n`);
+  res.end("data: [DONE]\n\n");
+  return true;
+}
+
 createServer(async (req, res) => {
   const u = new URL(req.url, "http://x"), p = u.pathname, q = u.searchParams; let m;
   const input = req.method === "GET" ? {} : await readBody(req), b = input; // `input` and `b` are the same parsed JSON body
+  if (p.startsWith("/openrouter/") && (await openrouter(req, res, p, input))) return;
   res.setHeader("content-type", "application/json");
   if (process.env.FAIL) return fail(res, { code: "unreachable", message: "Cannot reach the database", hint: "Check the server" }, 503);
   if (req.method !== "GET") {
@@ -280,9 +327,11 @@ createServer(async (req, res) => {
       if (input.email === "nobody") return fail(res, { code: "invalid_request", message: "`nobody` is not a valid email address", hint: "Use name@domain.com" }, 422);
       return body(res, { run_id: "run_test_" + Date.now(), automation_id: m[1], env: "test", status: "started" }, {}, 202);
     }
+    if (p === "/v1/content/lint") { const r = renderInline({ ...b, content: b.content ?? b.html ?? b.mjml ?? "", format: b.format ?? (b.mjml != null ? "mjml" : "html") }); return r.error ? fail(res, r.error, r.status) : body(res, { lint: r.data.lint, warnings: [] }); }
     if ((m = p.match(/^\/v1\/templates\/([^/]+)\/preview$/))) {
       const t = findTemplate(m[1]);
       if (!t) return notFound(res, "template");
+      if (t.id === "t4" && b.content == null && b.html == null && b.mjml == null) return body(res, renderInline({ content: t.source, format: "html", subject: t.subject }).data);
       if (b.content != null || b.html != null || b.mjml != null) {
         const r = renderInline({ ...b, content: b.content ?? b.html ?? b.mjml, format: b.format ?? (b.mjml != null ? "mjml" : "html") });
         return r.error ? fail(res, r.error, r.status) : body(res, r.data);

@@ -1,6 +1,7 @@
 "use client";
 import { LogOut, Menu, ShieldAlert, ShieldCheck, User } from "lucide-react";
 import { useRef, useState } from "react";
+import { AssistantLauncher } from "@/components/assistant/AssistantPanel";
 import { logout, setKill } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogContent, Dialog, DialogTrigger, DrawerContent } from "@/components/ui/dialog";
@@ -72,6 +73,7 @@ export function TopBar({ env, killOn, pending, name, keyPrefix, theme }: {
       </Dialog>
       <span className="text-md font-semibold lg:hidden">mailcraft</span>
       <div className="ml-auto flex items-center gap-2">
+        <AssistantLauncher />
         <EnvChip env={env} />
         <KillSwitchControl on={killOn} />
         <AccountMenu name={name} keyPrefix={keyPrefix} theme={theme} />

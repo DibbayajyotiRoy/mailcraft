@@ -1,0 +1,1980 @@
+[
+ {
+  "name": "account_status",
+  "description": "Workspace, calling key (id, name, env test/live, scopes), live_enabled, kill_switch, pending_approvals count. Call first.",
+  "method": "GET",
+  "path": "/v1/account/status",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "sender_list",
+  "description": "The From addresses you can pick: address, display_name, transport (where a send from it goes), is_default, status ready|needs_domain|transport_missing. Read-only; a human adds addresses and transports. Use an address as email_send `from`.",
+  "method": "GET",
+  "path": "/v1/senders",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "email_send",
+  "description": "Send (queue) one email. `from` is one of sender_list's addresses (or an address on a verified domain); the transport is chosen by `from` unless you pass transport_id. Result status is queued or pending_approval (poll approval_get with approval_id, never decide); a blocked policy is an error with code blocked_by_policy. Test keys sandbox mail; use delivered@test.mailcraft.local. Use dry_run to render and lint without sending. Pass idempotency_key to make retries safe.",
+  "method": "POST",
+  "path": "/v1/emails",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "from": {
+     "type": "string"
+    },
+    "transport_id": {
+     "description": "force this transport (UUID from sender_list); omit to route by `from`",
+     "type": "string"
+    },
+    "to": {
+     "minItems": 1,
+     "maxItems": 50,
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "subject": {
+     "type": "string"
+    },
+    "html": {
+     "type": "string"
+    },
+    "text": {
+     "type": "string"
+    },
+    "template": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string"
+      },
+      "variables": {
+       "type": "object",
+       "propertyNames": {
+        "type": "string"
+       },
+       "additionalProperties": {}
+      }
+     },
+     "required": [
+      "id"
+     ]
+    },
+    "stream": {
+     "type": "string",
+     "enum": [
+      "transactional",
+      "marketing"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "value": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name",
+       "value"
+      ]
+     }
+    },
+    "reply_to": {
+     "type": "string"
+    },
+    "headers": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {
+      "type": "string"
+     }
+    },
+    "scheduled_at": {
+     "type": "string"
+    },
+    "dry_run": {
+     "type": "boolean"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "to"
+   ]
+  }
+ },
+ {
+  "name": "email_get",
+  "description": "Get one email: status, from_addr, to_addr, subject, attempts, last_error, policy_decisions. Timeline is in email_events.",
+  "method": "GET",
+  "path": "/v1/emails/{id}",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "email id (UUID)"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "email_events",
+  "description": "Event timeline of one email (type, enhanced_code, diagnostic, occurred_at).",
+  "method": "GET",
+  "path": "/v1/emails/{id}/events",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "email id (UUID)"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "email_cancel",
+  "description": "Cancel a queued, deferred or pending_approval email.",
+  "method": "POST",
+  "path": "/v1/emails/{id}/cancel",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "email id (UUID)"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "email_list",
+  "description": "List emails, newest first. Filters: status, stream, env, q (case-insensitive substring of to/from/subject, or an exact email id), from/to (created_at bounds: YYYY-MM-DD or RFC 3339).",
+  "method": "GET",
+  "path": "/v1/emails",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string"
+    },
+    "stream": {
+     "type": "string",
+     "enum": [
+      "transactional",
+      "marketing"
+     ]
+    },
+    "env": {
+     "type": "string",
+     "enum": [
+      "test",
+      "live"
+     ]
+    },
+    "q": {
+     "type": "string"
+    },
+    "from": {
+     "type": "string"
+    },
+    "to": {
+     "type": "string"
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    },
+    "cursor": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ {
+  "name": "broadcast_send",
+  "description": "Send ONE template to a list of recipients (up to 5000): each row becomes a queued email and contacts are upserted. A live key mails real people; test keys sandbox it. ALWAYS run it first with dry_run:true and read data.skipped[] (reason per dropped row: invalid_email, duplicate, invalid_data, suppressed, unsubscribed, not_allowed, missing_variable) and data.schedule (pacing under the daily cap), and check the rendering with broadcast_preview. Result status is queued or pending_approval (one approval_id for the whole broadcast: poll approval_get, never decide). Pass idempotency_key so a retry cannot send twice. Per-recipient template variables: first_name, last_name, email, data.<column>.",
+  "method": "POST",
+  "path": "/v1/broadcasts",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "template_id": {
+     "type": "string",
+     "description": "template id or alias"
+    },
+    "from": {
+     "type": "string",
+     "description": "one of sender_list's addresses, or an address on a verified domain"
+    },
+    "transport_id": {
+     "description": "force this transport (UUID from sender_list); omit to route by `from`",
+     "type": "string"
+    },
+    "recipients": {
+     "minItems": 1,
+     "maxItems": 5000,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "email": {
+        "type": "string"
+       },
+       "first_name": {
+        "type": "string"
+       },
+       "last_name": {
+        "type": "string"
+       },
+       "data": {
+        "type": "object",
+        "propertyNames": {
+         "type": "string"
+        },
+        "additionalProperties": {
+         "type": [
+          "string",
+          "number",
+          "boolean"
+         ]
+        }
+       }
+      },
+      "required": [
+       "email"
+      ]
+     }
+    },
+    "subject": {
+     "description": "replaces the template subject; may use the same variables",
+     "type": "string"
+    },
+    "stream": {
+     "description": "default marketing",
+     "type": "string",
+     "enum": [
+      "transactional",
+      "marketing"
+     ]
+    },
+    "max_per_day": {
+     "description": "upper bound on sends per day; the lowest of this and the transport/key caps applies",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 9007199254740991
+    },
+    "dry_run": {
+     "type": "boolean"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "template_id",
+    "from",
+    "recipients"
+   ]
+  }
+ },
+ {
+  "name": "broadcast_preview",
+  "description": "Render the template for ONE recipient exactly as broadcast_send would send it (subject, html, text). Nothing is stored or sent.",
+  "method": "POST",
+  "path": "/v1/broadcasts/preview",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "template_id": {
+     "type": "string",
+     "description": "template id or alias"
+    },
+    "recipient": {
+     "type": "object",
+     "properties": {
+      "email": {
+       "type": "string"
+      },
+      "first_name": {
+       "type": "string"
+      },
+      "last_name": {
+       "type": "string"
+      },
+      "data": {
+       "type": "object",
+       "propertyNames": {
+        "type": "string"
+       },
+       "additionalProperties": {
+        "type": [
+         "string",
+         "number",
+         "boolean"
+        ]
+       }
+      }
+     },
+     "required": [
+      "email"
+     ]
+    },
+    "subject": {
+     "type": "string"
+    },
+    "stream": {
+     "type": "string",
+     "enum": [
+      "transactional",
+      "marketing"
+     ]
+    }
+   },
+   "required": [
+    "template_id",
+    "recipient"
+   ]
+  }
+ },
+ {
+  "name": "broadcast_list",
+  "description": "List broadcasts, newest first, with status (pending_approval|sending|done) and per-status counts.",
+  "method": "GET",
+  "path": "/v1/broadcasts",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    },
+    "cursor": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ {
+  "name": "broadcast_get",
+  "description": "One broadcast with counts, skipped rows and its recipients' email status, paginated by email id (next_cursor). Filter recipients with status.",
+  "method": "GET",
+  "path": "/v1/broadcasts/{id}",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "broadcast id (UUID)"
+    },
+    "status": {
+     "description": "only recipients with this email status",
+     "type": "string"
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    },
+    "cursor": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "domain_add",
+  "description": "Add a sending domain; returns the DNS records the human must publish. A domain with relay_sender set sends that mailbox address through the default relay and needs no records.",
+  "method": "POST",
+  "path": "/v1/domains",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "domain": {
+     "type": "string"
+    },
+    "stream": {
+     "type": "string",
+     "enum": [
+      "transactional",
+      "marketing"
+     ]
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "domain"
+   ]
+  }
+ },
+ {
+  "name": "domain_check",
+  "description": "Re-check DNS for a domain (verify). Returns the domain with status not_started|pending|verified|failed, last_checked_at and per-record status; a record that is not verified has detail (why) and, when DNS returned something else, found (what it returned).",
+  "method": "POST",
+  "path": "/v1/domains/{domain_id}/verify",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "domain_id": {
+     "type": "string",
+     "description": "domain id (UUID)"
+    }
+   },
+   "required": [
+    "domain_id"
+   ]
+  }
+ },
+ {
+  "name": "template_create",
+  "description": "Create a template with a draft v1 (give html, mjml, or content + format). alias defaults to a slug of name. Publish it before sending.",
+  "method": "POST",
+  "path": "/v1/templates",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "alias": {
+     "type": "string"
+    },
+    "stream": {
+     "type": "string",
+     "enum": [
+      "transactional",
+      "marketing"
+     ]
+    },
+    "subject": {
+     "type": "string"
+    },
+    "html": {
+     "type": "string"
+    },
+    "mjml": {
+     "type": "string"
+    },
+    "content": {
+     "description": "string, or an object for format json"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "html",
+      "mjml",
+      "json"
+     ]
+    },
+    "text": {
+     "type": "string"
+    },
+    "variables": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "name"
+   ]
+  }
+ },
+ {
+  "name": "template_get",
+  "description": "Get a template by id or alias: newest version with source_format + source (the html/mjml as authored, else the block tree as JSON), subject, preheader and the canonical tree in template.",
+  "method": "GET",
+  "path": "/v1/templates/{id}",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id or alias"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "template_list",
+  "description": "List templates.",
+  "method": "GET",
+  "path": "/v1/templates",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    },
+    "cursor": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ {
+  "name": "template_update",
+  "description": "Rename, change alias or stream, and/or add a new draft version (give html, mjml, or content + format; subject/preheader for html and mjml, empty preheader clears). Nothing goes live until template_publish. Changing alias breaks sends and automations that name the old one (409 template_exists when taken).",
+  "method": "PATCH",
+  "path": "/v1/templates/{id}",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id or alias"
+    },
+    "name": {
+     "type": "string"
+    },
+    "alias": {
+     "type": "string"
+    },
+    "stream": {
+     "type": "string",
+     "enum": [
+      "transactional",
+      "marketing"
+     ]
+    },
+    "subject": {
+     "type": "string"
+    },
+    "preheader": {
+     "type": "string"
+    },
+    "html": {
+     "type": "string"
+    },
+    "mjml": {
+     "type": "string"
+    },
+    "content": {
+     "description": "string, or an object for format json"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "html",
+      "mjml",
+      "json"
+     ]
+    },
+    "text": {
+     "type": "string"
+    },
+    "variables": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "template_publish",
+  "description": "Publish the newest template draft, or the given version, so sends use it.",
+  "method": "POST",
+  "path": "/v1/templates/{id}/publish",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id or alias"
+    },
+    "version": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 9007199254740991
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "template_preview",
+  "description": "Render a template with variables; returns subject, html, text, lint[], the variables the content reads and warnings. Renders the saved version (default newest), or unsaved html/mjml/content (+format, subject, preheader) without storing it. Undefined variable is 422 template_render_failed. Sends nothing.",
+  "method": "POST",
+  "path": "/v1/templates/{id}/preview",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id or alias"
+    },
+    "variables": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "version": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 9007199254740991
+    },
+    "html": {
+     "type": "string"
+    },
+    "mjml": {
+     "type": "string"
+    },
+    "content": {
+     "description": "string, or an object for format json"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "html",
+      "mjml",
+      "json"
+     ]
+    },
+    "subject": {
+     "type": "string"
+    },
+    "preheader": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "template_import",
+  "description": "Import a template from html, mjml or json.",
+  "method": "POST",
+  "path": "/v1/templates/import",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "format": {
+     "type": "string",
+     "enum": [
+      "html",
+      "mjml",
+      "json"
+     ]
+    },
+    "name": {
+     "type": "string"
+    },
+    "content": {
+     "type": "string"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "format",
+    "name",
+    "content"
+   ]
+  }
+ },
+ {
+  "name": "template_export",
+  "description": "Export a template as html, mjml or json.",
+  "method": "GET",
+  "path": "/v1/templates/{id}/export",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "html",
+      "mjml",
+      "json"
+     ]
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "template_versions",
+  "description": "Version history of a template, newest first: version, source_format, created_at, published_at, published (true for the live one).",
+  "method": "GET",
+  "path": "/v1/templates/{id}/versions",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id or alias"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "template_version_get",
+  "description": "One template version with its source and block tree.",
+  "method": "GET",
+  "path": "/v1/templates/{id}/versions/{version}",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id or alias"
+    },
+    "version": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 9007199254740991
+    }
+   },
+   "required": [
+    "id",
+    "version"
+   ]
+  }
+ },
+ {
+  "name": "template_restore",
+  "description": "Copy an older version into a NEW draft; history is kept. Publish the new draft with template_publish to make it live.",
+  "method": "POST",
+  "path": "/v1/templates/{id}/versions/{version}/restore",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id or alias"
+    },
+    "version": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 9007199254740991
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id",
+    "version"
+   ]
+  }
+ },
+ {
+  "name": "template_discard_draft",
+  "description": "Discard unpublished changes: deletes the never-published versions newer than the published one. Cannot be undone. 409 no_draft or no_published_version when there is nothing to discard. Destructive.",
+  "method": "DELETE",
+  "path": "/v1/templates/{id}/draft",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "template id or alias"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "content_lint",
+  "description": "Lint subject/html for deliverability and compliance issues. Sends nothing.",
+  "method": "POST",
+  "path": "/v1/content/lint",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "subject": {
+     "type": "string"
+    },
+    "html": {
+     "type": "string"
+    },
+    "text": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ {
+  "name": "contact_upsert",
+  "description": "Create or update a contact by email.",
+  "method": "PUT",
+  "path": "/v1/contacts",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "email": {
+     "type": "string"
+    },
+    "first_name": {
+     "type": "string"
+    },
+    "last_name": {
+     "type": "string"
+    },
+    "timezone": {
+     "description": "IANA name, e.g. Europe/Berlin",
+     "type": "string"
+    },
+    "properties": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "email"
+   ]
+  }
+ },
+ {
+  "name": "contact_get",
+  "description": "Get a contact by id or email.",
+  "method": "GET",
+  "path": "/v1/contacts/{id_or_email}",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id_or_email": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "id_or_email"
+   ]
+  }
+ },
+ {
+  "name": "contact_list",
+  "description": "List contacts. q is a case-insensitive substring of email, first or last name. Each item carries suppressed and suppression_reason.",
+  "method": "GET",
+  "path": "/v1/contacts",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "q": {
+     "type": "string"
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    },
+    "cursor": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ {
+  "name": "contact_update",
+  "description": "Edit a contact by id or email. Omitted fields stay; an empty string clears first_name, last_name or timezone; properties merge shallowly and a null value deletes that key.",
+  "method": "PATCH",
+  "path": "/v1/contacts/{id_or_email}",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id_or_email": {
+     "type": "string"
+    },
+    "first_name": {
+     "type": "string"
+    },
+    "last_name": {
+     "type": "string"
+    },
+    "timezone": {
+     "description": "IANA name, e.g. Europe/Berlin",
+     "type": "string"
+    },
+    "properties": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id_or_email"
+   ]
+  }
+ },
+ {
+  "name": "contact_activity",
+  "description": "Recent activity of one contact (newest first, at most 25 each): events, emails, automation runs, topic opt-in state and segments.",
+  "method": "GET",
+  "path": "/v1/contacts/{id_or_email}/activity",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id_or_email": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "id_or_email"
+   ]
+  }
+ },
+ {
+  "name": "contact_import",
+  "description": "Upsert up to 5000 contacts in one call (same as contact_upsert per row). A bad row (invalid email or timezone) is skipped and listed in data.failed with its zero-based index; the rest are imported. Pass idempotency_key so a retry does not repeat it.",
+  "method": "POST",
+  "path": "/v1/contacts/import",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "contacts": {
+     "minItems": 1,
+     "maxItems": 5000,
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "email": {
+        "type": "string"
+       },
+       "first_name": {
+        "type": "string"
+       },
+       "last_name": {
+        "type": "string"
+       },
+       "timezone": {
+        "description": "IANA name, e.g. Europe/Berlin",
+        "type": "string"
+       },
+       "properties": {
+        "type": "object",
+        "propertyNames": {
+         "type": "string"
+        },
+        "additionalProperties": {}
+       }
+      },
+      "required": [
+       "email"
+      ]
+     }
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "contacts"
+   ]
+  }
+ },
+ {
+  "name": "contact_delete",
+  "description": "Permanently delete a contact. Destructive.",
+  "method": "DELETE",
+  "path": "/v1/contacts/{id_or_email}",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id_or_email": {
+     "type": "string"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id_or_email"
+   ]
+  }
+ },
+ {
+  "name": "segment_create",
+  "description": "Create a segment: a rule-tree filter ({and:[..]}, {or:[..]}, {not:..} or {field, op, value}) or, with no filter, a manual list. Check a filter with segment_preview first.",
+  "method": "POST",
+  "path": "/v1/segments",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "filter": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "name"
+   ]
+  }
+ },
+ {
+  "name": "segment_list",
+  "description": "List segments with member_count (who matches right now for a filter segment).",
+  "method": "GET",
+  "path": "/v1/segments",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "segment_preview",
+  "description": "Who a filter matches right now: {count, sample} (5 newest). Ops: eq neq lt lte gt gte in contains exists. Fields: email, first_name, last_name, timezone, created_at, properties.<key>, topic:<key>, event_count:<event>, days_since:<event>. Stores nothing.",
+  "method": "POST",
+  "path": "/v1/segments/preview",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "filter": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    }
+   },
+   "required": [
+    "filter"
+   ]
+  }
+ },
+ {
+  "name": "segment_update",
+  "description": "Replace a segment's name and filter (full replace; omit filter to make it a manual list). Overwrites the previous rule. 409 when another segment has the name.",
+  "method": "PUT",
+  "path": "/v1/segments/{id}",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "segment id (UUID)"
+    },
+    "name": {
+     "type": "string"
+    },
+    "filter": {
+     "anyOf": [
+      {
+       "type": "object",
+       "propertyNames": {
+        "type": "string"
+       },
+       "additionalProperties": {}
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id",
+    "name"
+   ]
+  }
+ },
+ {
+  "name": "segment_delete",
+  "description": "Delete a segment. 409 invalid_state while an automation still names it in a trigger or add_to_segment step. Destructive.",
+  "method": "DELETE",
+  "path": "/v1/segments/{id}",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "segment id (UUID)"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "segment_add_members",
+  "description": "Add contacts (by email, up to 1000) to a segment.",
+  "method": "POST",
+  "path": "/v1/segments/{id}/members",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "segment id (UUID)"
+    },
+    "emails": {
+     "minItems": 1,
+     "maxItems": 1000,
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id",
+    "emails"
+   ]
+  }
+ },
+ {
+  "name": "event_names",
+  "description": "Event names tracked in the last 90 days with counts and last_seen_at, newest first (use them as automation triggers).",
+  "method": "GET",
+  "path": "/v1/events/names",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "event_send",
+  "description": "Track an event for a contact (upserts the contact). May trigger automations. dry_run lists would_send[] without persisting.",
+  "method": "POST",
+  "path": "/v1/events",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "contact": {
+     "type": "object",
+     "properties": {
+      "email": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "email"
+     ]
+    },
+    "properties": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "contact_properties": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "dry_run": {
+     "type": "boolean"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "name",
+    "contact"
+   ]
+  }
+ },
+ {
+  "name": "automation_create",
+  "description": "Create an automation (trigger, steps, approval policy, caps). First sends need human approval per its approval setting.",
+  "method": "POST",
+  "path": "/v1/automations",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "trigger": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "entry_rule": {
+     "type": "string"
+    },
+    "goal": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "approval": {
+     "type": "string"
+    },
+    "caps": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "steps": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "propertyNames": {
+       "type": "string"
+      },
+      "additionalProperties": {}
+     }
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "name",
+    "trigger",
+    "steps"
+   ]
+  }
+ },
+ {
+  "name": "automation_get",
+  "description": "Get an automation.",
+  "method": "GET",
+  "path": "/v1/automations/{id}",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "automation_list",
+  "description": "List automations. Archived ones are hidden unless status is archived.",
+  "method": "GET",
+  "path": "/v1/automations",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string",
+     "enum": [
+      "draft",
+      "active",
+      "paused",
+      "archived"
+     ]
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    },
+    "cursor": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ {
+  "name": "automation_pause",
+  "description": "Pause an automation.",
+  "method": "POST",
+  "path": "/v1/automations/{id}/pause",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "automation_resume",
+  "description": "Resume a paused automation.",
+  "method": "POST",
+  "path": "/v1/automations/{id}/resume",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "automation_archive",
+  "description": "Archive a draft or paused automation (409 invalid_state otherwise). It leaves the default list and never runs; automation_unarchive brings it back.",
+  "method": "POST",
+  "path": "/v1/automations/{id}/archive",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "automation_unarchive",
+  "description": "Bring an archived automation back as a draft (publish it to go live).",
+  "method": "POST",
+  "path": "/v1/automations/{id}/unarchive",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "automation_test",
+  "description": "Start a REAL run of an automation for ONE contact now, whatever its status, skipping the entry rule (contact is created if new). A test key keeps every email in the sandbox; a live key sends for real once the workspace is live (kill switch, suppressions, topic opt-outs and the approval policy still apply). Poll automation_run_get with data.run_id. There is no dry run: use a test key unless a human said otherwise.",
+  "method": "POST",
+  "path": "/v1/automations/{id}/test",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id or name"
+    },
+    "email": {
+     "type": "string"
+    },
+    "first_name": {
+     "type": "string"
+    },
+    "properties": {
+     "description": "properties of the simulated trigger event",
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "contact_properties": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "id",
+    "email"
+   ]
+  }
+ },
+ {
+  "name": "automation_run_get",
+  "description": "One automation run with its step log: state, current_step, next_wake_at, exit_reason, test and steps[{step_key, result, at}] (why an email was held, a wait timed out, the run exited).",
+  "method": "GET",
+  "path": "/v1/automations/{id}/runs/{run}",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id or name"
+    },
+    "run": {
+     "type": "string",
+     "description": "run id (UUID)"
+    }
+   },
+   "required": [
+    "id",
+    "run"
+   ]
+  }
+ },
+ {
+  "name": "automation_simulate",
+  "description": "Simulate an automation against a sample event; nothing is sent or persisted.",
+  "method": "POST",
+  "path": "/v1/automations/{id}/simulate",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id"
+    },
+    "event": {
+     "type": "object",
+     "propertyNames": {
+      "type": "string"
+     },
+     "additionalProperties": {}
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "automation_runs",
+  "description": "List runs of an automation, newest first (each has contact_email, exit_reason and test).",
+  "method": "GET",
+  "path": "/v1/automations/{id}/runs",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "automation id"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "active",
+      "waiting",
+      "completed",
+      "exited",
+      "failed"
+     ]
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    },
+    "cursor": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "approval_list",
+  "description": "List approval items (humans decide them, you cannot).",
+  "method": "GET",
+  "path": "/v1/approvals",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string",
+     "enum": [
+      "pending",
+      "approved",
+      "rejected",
+      "expired"
+     ]
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    }
+   }
+  }
+ },
+ {
+  "name": "approval_get",
+  "description": "Get an approval item (payload.preview has the subject/text/html; reason is the decider's note); poll this after a pending_approval result.",
+  "method": "GET",
+  "path": "/v1/approvals/{id}",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "approval id (UUID)"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "settings_get_instructions",
+  "description": "Read workspace settings; `custom_instructions` is the workspace's writing guidance for LLM emails (null when unset).",
+  "method": "GET",
+  "path": "/v1/settings",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "settings_set_instructions",
+  "description": "ADMIN KEY ONLY (agent keys get 403 forbidden_scope). Replace the workspace's writing instructions for LLM emails (max 2,000 chars, trimmed; empty string clears). Overwrites the previous text. Style and tone only: cannot override safety rules (no invented features, template-owned links, unsubscribe always included). Too long is 422 custom_instructions_too_long.",
+  "method": "PUT",
+  "path": "/v1/settings",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "custom_instructions": {
+     "type": "string",
+     "maxLength": 2000,
+     "description": "empty string clears"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "custom_instructions"
+   ]
+  }
+ },
+ {
+  "name": "kill_switch_status",
+  "description": "Whether the workspace kill switch is on (`on`) and which keys are individually paused (`paused_keys`).",
+  "method": "GET",
+  "path": "/v1/kill-switch",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "kill_switch_engage",
+  "description": "Emergency stop: halt all sending, or only one key when key_id is given. Only a human (admin) can turn it off again.",
+  "method": "POST",
+  "path": "/v1/kill-switch",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "key_id": {
+     "description": "pause just this key (UUID); omit for the whole workspace",
+     "type": "string"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   }
+  }
+ },
+ {
+  "name": "doctor",
+  "description": "Server-side health and deliverability checks with hints.",
+  "method": "GET",
+  "path": "/v1/doctor",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ },
+ {
+  "name": "audit_list",
+  "description": "Audit log of actions taken with API keys.",
+  "method": "GET",
+  "path": "/v1/audit",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100
+    },
+    "before": {
+     "description": "return rows with id below this (the next_cursor)",
+     "type": "integer",
+     "minimum": -9007199254740991,
+     "maximum": 9007199254740991
+    }
+   }
+  }
+ },
+ {
+  "name": "go_live_request",
+  "description": "Ask a human to enable live sending. Creates a go_live approval; poll approval_get. You cannot approve it.",
+  "method": "POST",
+  "path": "/v1/go-live-requests",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "note": {
+     "type": "string"
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   }
+  }
+ },
+ {
+  "name": "policy_propose",
+  "description": "Propose a send-policy change for a key ({send: auto|needs_approval|blocked}); a human approves it.",
+  "method": "POST",
+  "path": "/v1/policy/proposals",
+  "mutating": true,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {
+    "key_id": {
+     "type": "string",
+     "description": "key id (UUID)"
+    },
+    "policy": {
+     "type": "object",
+     "properties": {
+      "send": {
+       "type": "string",
+       "enum": [
+        "auto",
+        "needs_approval",
+        "blocked"
+       ]
+      }
+     }
+    },
+    "idempotency_key": {
+     "description": "Same key + same request returns the original result",
+     "type": "string",
+     "maxLength": 256
+    }
+   },
+   "required": [
+    "key_id",
+    "policy"
+   ]
+  }
+ },
+ {
+  "name": "policy_get",
+  "description": "Current send policy (what is auto, needs_approval, blocked).",
+  "method": "GET",
+  "path": "/v1/policy",
+  "mutating": false,
+  "parameters": {
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "type": "object",
+   "properties": {}
+  }
+ }
+]

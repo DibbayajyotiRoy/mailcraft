@@ -35,6 +35,7 @@ The defaults are ports the host firewall already allows (see below). The API por
 | `/opt/mailcraft/current` | symlink to the live release; the units run from it, switching it is atomic. `/opt/mailcraft/bin` is a symlink to `current/bin`, so the CLI path below keeps working |
 | `/usr/local/sbin/mailcraft-autodeploy`, `mailcraft-autodeploy.{service,timer}` | the pull agent, see below. State in `/var/lib/mailcraft-autodeploy/` |
 | `/etc/mailcraft/mailcraft.env` | `DATABASE_URL`, `REDIS_URL`, `MAILCRAFT_SECRET_KEY`, `MAILCRAFT_PUBLIC_URL` ... (0640 root:mailcraft, generated once; edit it for `OPENROUTER_API_KEY` etc., then `sudo systemctl restart mailcraft-api`) |
+| `/etc/mailcraft/dashboard.env` | the dashboard's own environment (0640 root:mailcraft, created once, never rewritten): `OPENROUTER_API_KEY` (and optionally `MAILCRAFT_ASSISTANT_MODEL`) enable the [AI assistant](ASSISTANT.md); then `sudo systemctl restart mailcraft-dashboard`. Kept separate so the dashboard never sees the database URL or the master secret |
 | `mailcraft-api`, `mailcraft-dashboard`, `mailcraft.target` | units: user `mailcraft`, `MemoryMax=512M` each, `ProtectSystem=strict`, `NoNewPrivileges`, `Restart=on-failure` |
 | database `mailcraft` / role `mailcraft` | in the existing Postgres (only these are created); `pg_trgm` + `pgcrypto` installed in it |
 | `~ubuntu/mailcraft-init.txt` on the VM, `~/.config/mailcraft/vm-init-output.txt` here | output of the first-run `mailcraft init` (admin + test API keys), 0600. Sign in to the dashboard with one of those keys. |

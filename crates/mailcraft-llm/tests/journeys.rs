@@ -155,7 +155,7 @@ fn job(j: &Journey) -> GenerateJob {
     GenerateJob {
         tenant: "t1".into(),
         journey: j.id.into(),
-        model: "deepseek/deepseek-v4-flash".into(),
+        model: "nvidia/nemotron-3.5-super-vl:free".into(),
         system_prompt: "Use only facts present in context.".into(),
         prompt_version: "t1".into(),
         renderer: None,
@@ -353,9 +353,11 @@ async fn missing_provider_cost_uses_price_table() {
         temperature: 0.4,
         max_tokens: 400,
     };
-    let r = g.run(&job(j)).await; // model "deepseek/deepseek-v4-flash" -> $0.14 per 1M input, 2 attempts
+    let mut jb = job(j);
+    jb.model = "gpt-5-nano".into(); // the "openai" mock above: $0.05 per 1M input, 2 attempts
+    let r = g.run(&jb).await;
     assert!(
-        (r.total_cost_usd - 0.28).abs() < 1e-9,
+        (r.total_cost_usd - 0.10).abs() < 1e-9,
         "{}",
         r.total_cost_usd
     );
