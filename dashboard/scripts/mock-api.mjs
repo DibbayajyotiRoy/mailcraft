@@ -179,11 +179,11 @@ const transports = [{ id: "tr1", kind: "smtp-relay", name: "postmark", label: "p
 
 const NOW = Date.now();
 const BROADCASTS = [
-  { id: "b1", template_id: "t1", template_name: "Welcome", from: "Dev <dev@spicrawl.com>", subject: "Spring launch, {{ first_name }}", stream: "marketing", env: "live", status: "sending", total: 120, created_at: ago(95),
+  { id: "b1", template_id: "t1", template_name: "Welcome", from: "Dev <dev@example.com>", subject: "Spring launch, {{ first_name }}", stream: "marketing", env: "live", status: "sending", total: 120, created_at: ago(95),
     counts: { queued: 84, sent: 20, delivered: 12, bounced: 1, failed: 0, skipped: 5 }, first_at: ago(94), last_at: new Date(NOW + 84 * 1728e3).toISOString() },
-  { id: "b2", template_id: "t2", template_name: "Receipt", from: "Dev <dev@spicrawl.com>", subject: "", stream: "marketing", env: "live", status: "done", total: 8, created_at: ago(60 * 30),
+  { id: "b2", template_id: "t2", template_name: "Receipt", from: "Dev <dev@example.com>", subject: "", stream: "marketing", env: "live", status: "done", total: 8, created_at: ago(60 * 30),
     counts: { queued: 0, sent: 1, delivered: 6, bounced: 1, failed: 0, skipped: 0 }, first_at: null, last_at: null },
-  { id: "b3", template_id: "t1", template_name: "Welcome", from: "Dev <dev@spicrawl.com>", subject: "Pilot customers", stream: "marketing", env: "live", status: "pending_approval", total: 40, created_at: ago(5),
+  { id: "b3", template_id: "t1", template_name: "Welcome", from: "Dev <dev@example.com>", subject: "Pilot customers", stream: "marketing", env: "live", status: "pending_approval", total: 40, created_at: ago(5),
     counts: { queued: 40, sent: 0, delivered: 0, bounced: 0, failed: 0, skipped: 2 }, first_at: ago(-1), last_at: ago(-60) },
 ];
 const RECIPIENT_STATUS = ["queued", "queued", "sent", "delivered", "delivered", "bounced", "queued", "delivered"];

@@ -35,7 +35,7 @@
           "key": "hello",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-welcome-back",
+            "template": "lifecycle-welcome-back",
             "topic": "product",
             "mode": "llm"
           }
@@ -76,7 +76,7 @@
           "key": "ask",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-checkin",
+            "template": "lifecycle-checkin",
             "topic": "product",
             "mode": "llm"
           }

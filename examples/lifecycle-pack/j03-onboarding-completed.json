@@ -46,7 +46,7 @@
           "key": "nudge",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-first-call",
+            "template": "lifecycle-first-call",
             "topic": "product",
             "mode": "llm"
           },

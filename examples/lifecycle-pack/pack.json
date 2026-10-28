@@ -1,6 +1,6 @@
 {
-  "name": "spicrawl-lifecycle",
-  "description": "Spicrawl lifecycle journeys J1-J12 (data only). Install topics, then templates, then automations.",
+  "name": "lifecycle-pack",
+  "description": "Example lifecycle journeys J1-J12 for a developer-API product (data only). Install topics, then templates, then automations.",
   "topics": [
     {
       "key": "product",
@@ -112,22 +112,22 @@
     }
   ],
   "templates_needed": [
-    "spicrawl-checkin",
-    "spicrawl-credits-80",
-    "spicrawl-credits-exhausted",
-    "spicrawl-credits-reset",
-    "spicrawl-feature-tip",
-    "spicrawl-first-call",
-    "spicrawl-first-success",
-    "spicrawl-nudge-completed",
-    "spicrawl-nudge-key-waiting",
-    "spicrawl-nudge-second",
-    "spicrawl-onboarding-abandoned",
-    "spicrawl-site-failure",
-    "spicrawl-stalled",
-    "spicrawl-weekly-digest",
-    "spicrawl-welcome",
-    "spicrawl-welcome-back"
+    "lifecycle-checkin",
+    "lifecycle-credits-80",
+    "lifecycle-credits-exhausted",
+    "lifecycle-credits-reset",
+    "lifecycle-feature-tip",
+    "lifecycle-first-call",
+    "lifecycle-first-success",
+    "lifecycle-nudge-completed",
+    "lifecycle-nudge-key-waiting",
+    "lifecycle-nudge-second",
+    "lifecycle-onboarding-abandoned",
+    "lifecycle-site-failure",
+    "lifecycle-stalled",
+    "lifecycle-weekly-digest",
+    "lifecycle-welcome",
+    "lifecycle-welcome-back"
   ],
   "segments": [
     {

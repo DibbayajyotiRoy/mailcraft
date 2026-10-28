@@ -1038,7 +1038,8 @@ async fn approval_policy_holds_first_sends_and_failures_back_off() {
 #[tokio::test]
 async fn example_pack_installs() {
     let f = fx!();
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/spicrawl");
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/lifecycle-pack");
     let pack: Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("pack.json")).unwrap()).unwrap();
     for t in pack["topics"].as_array().unwrap() {

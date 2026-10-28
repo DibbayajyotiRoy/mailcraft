@@ -67,9 +67,10 @@ impl Default for Guardrails {
 }
 
 impl Guardrails {
-    /// The Spicrawl pack the model bake-off validated (`ValidatorConfig::spicrawl()`).
-    pub fn spicrawl() -> Self {
-        let v = ValidatorConfig::spicrawl();
+    /// The developer-API preset the model bake-off validated (`ValidatorConfig::api_product()`).
+    /// Set `allowed_link_domains` to your own hosts.
+    pub fn api_product() -> Self {
+        let v = ValidatorConfig::api_product();
         Self {
             banned_terms: v.banned_terms,
             allowed_link_domains: v.allowed_hosts,

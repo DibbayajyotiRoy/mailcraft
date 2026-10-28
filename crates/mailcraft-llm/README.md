@@ -10,11 +10,11 @@ generate, validate, one repair, static fallback.
 | `MAILCRAFT_LLM_PROVIDER` | `openrouter`, `openai`, `ollama` | `openrouter` |
 | `MAILCRAFT_LLM_MODEL` | any model id | `deepseek/deepseek-v4-flash` |
 | `MAILCRAFT_LLM_REASONING` | `off`, `low`, `medium`, `high` (OpenRouter only) | `off` |
-| `MAILCRAFT_LLM_GUARDRAILS` | `default`, `spicrawl` | `default` |
+| `MAILCRAFT_LLM_GUARDRAILS` | `default`, `api-product` | `default` |
 | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` | key | required |
 
 Reasoning is off by default: short email copy does not benefit and reasoning tokens eat `max_tokens`.
-Pass `LlmSettings::guardrails` as `PersonalizeRequest.guardrails`. Use `spicrawl` in production.
+Pass `LlmSettings::guardrails` as `PersonalizeRequest.guardrails`. `api-product` is a stricter preset for developer-API products (no pricing promises, guarantees or internal engine names); it allows no link hosts, so add yours.
 
 ## Free / dev default
 

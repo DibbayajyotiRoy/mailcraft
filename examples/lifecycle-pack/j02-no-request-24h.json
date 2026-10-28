@@ -63,7 +63,7 @@
           "key": "nudge_completed",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-nudge-completed",
+            "template": "lifecycle-nudge-completed",
             "topic": "product",
             "mode": "llm"
           },
@@ -73,7 +73,7 @@
           "key": "nudge_waiting",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-nudge-key-waiting",
+            "template": "lifecycle-nudge-key-waiting",
             "topic": "product",
             "mode": "llm"
           },
@@ -106,7 +106,7 @@
           "key": "nudge_second",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-nudge-second",
+            "template": "lifecycle-nudge-second",
             "topic": "product",
             "mode": "llm"
           },

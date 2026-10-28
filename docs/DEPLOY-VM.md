@@ -44,9 +44,9 @@ Logs: `journalctl -u mailcraft-api -u mailcraft-dashboard`. CLI on the VM:
 
 ## LAN access and the firewall
 
-The VM runs a default-drop nftables input chain (table `inet spicrawl_fw`, allow-list of ports). 8080 and 3000
-are on that list, hence the defaults, so mailcraft takes them over: **it cannot run next to Spicrawl's API
-(8080) or the testbench UI (3000)** — stop and disable those units first (`systemctl disable --now ...`).
+The VM runs a default-drop nftables input chain (an allow-list of ports). 8080 and 3000
+are on that list, hence the defaults, so mailcraft takes them over: **it cannot run next to another service
+already using 8080 or 3000** — stop and disable those units first (`systemctl disable --now ...`).
 
 Any other port is dropped from the LAN even though the service is healthy (the deploy prints "NOT reachable
 from here"). A separate nftables table with an `accept` rule does not help: every base chain on the `input`
