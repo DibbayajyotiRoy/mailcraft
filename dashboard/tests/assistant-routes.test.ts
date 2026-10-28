@@ -67,3 +67,26 @@ test("the OpenRouter key never appears in anything sent to the browser", async (
   fakeWorld([], {});
   expect(JSON.stringify(await (await GET()).json())).not.toContain("SECRET");
 });
+
+test("status reports OpenRouter's free-request count from /key, and a 429 since the last poll updates it", async () => {
+  process.env.OPENROUTER_API_KEY = "or-key";
+  const { resetKeyInfo } = await import("@/lib/assistant/usage");
+  resetKeyInfo();
+  const { GET } = await import("@/app/api/assistant/status/route");
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: { is_free_tier: true, usage: 0, limit_remaining: 50, free_model_daily_requests: { used: 8, limit: 50, remaining: 42 } } })));
+  const s = await (await GET()).json();
+  expect(s.free).toMatchObject({ limit: 50, remaining: 42, source: "key" });
+  expect(s.free.resetAt).toBeGreaterThan(Date.now()); // the next UTC midnight
+  expect(s.key.limit_remaining).toBe(50); // credit limit stays its own field
+  resetKeyInfo();
+});
+
+test("status gives no free count when OpenRouter has not reported one", async () => {
+  process.env.OPENROUTER_API_KEY = "or-key";
+  const { resetKeyInfo } = await import("@/lib/assistant/usage");
+  resetKeyInfo();
+  const { GET } = await import("@/app/api/assistant/status/route");
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: { is_free_tier: true, limit_remaining: 50 } })));
+  expect((await (await GET()).json()).free).toBeNull();
+  resetKeyInfo();
+});

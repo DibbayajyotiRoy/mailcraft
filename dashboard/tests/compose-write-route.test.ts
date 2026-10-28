@@ -133,7 +133,15 @@ test("a failing model hands over to the next free one before anything is shown",
 test("when every model fails the stream ends with one explained error", async () => {
   fakeWorld([orError(429, "Rate limit exceeded: free-models-per-day")]);
   const ev = await lines(await (await POST())(post({ prompt: "hi", mode: "text" })));
-  expect(ev).toEqual([{ error: { code: "rate_limited", message: expect.stringContaining("daily"), hint: expect.any(String) } }]);
+  expect(ev).toEqual([{ error: { code: "rate_limited", message: "Today's free AI requests are used up.", hint: expect.any(String), resetAt: expect.any(Number) } }]);
+});
+
+test("the daily-cap error carries when the free requests come back, from OpenRouter's headers", async () => {
+  const resetAt = Date.now() + 5 * 3_600_000;
+  const cap = new Response(JSON.stringify({ error: { message: "Rate limit exceeded: free-models-per-day", code: 429 } }), { status: 429, headers: { "X-RateLimit-Limit": "50", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(resetAt) } });
+  fakeWorld([cap]);
+  const ev = await lines(await (await POST())(post({ prompt: "hi", mode: "text" })));
+  expect(ev).toEqual([{ error: { code: "rate_limited", message: "Today's free AI requests are used up.", hint: expect.any(String), resetAt } }]);
 });
 
 test("a stream that dies half way keeps what was shown and reports the error instead of retrying over it", async () => {

@@ -1,15 +1,19 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { allowedModels, resolveModels } from "@/lib/assistant/models";
-import { keyInfo, requestsToday } from "@/lib/assistant/usage";
+import { ResetAt } from "@/components/assistant/ResetAt";
+import { nextUtcMidnight } from "@/lib/assistant/reset";
+import { freeToday, keyInfo, requestsToday } from "@/lib/assistant/usage";
 
 /** What the mailcraft-llm crate falls back to when MAILCRAFT_LLM_MODEL is unset (crates/mailcraft-llm/src/config.rs DEFAULT_MODEL). */
 export const EMAIL_DEFAULT_MODEL = "nvidia/nemotron-3.5-super-vl:free";
 
 const LABEL: Record<string, string> = {
-  label: "Key", usage: "Credits used", usage_daily: "Used today", usage_weekly: "Used this week", usage_monthly: "Used this month",
-  limit: "Credit limit", limit_remaining: "Remaining", limit_reset: "Limit resets", is_free_tier: "Free tier",
+  label: "Key", usage: "Credits used", usage_daily: "Credits used today", usage_weekly: "Credits used this week", usage_monthly: "Credits used this month",
+  limit: "Credit limit", limit_remaining: "Credit limit left", limit_reset: "Credit limit resets", is_free_tier: "Free tier",
 };
+/** Not shown as generic rows: rate_limit is deprecated (-1), the free-request counter has its own row, and a null "left" just repeats "Credit limit: none". */
+const hidden = (k: string, v: unknown) => k === "rate_limit" || k === "free_model_daily_requests" || (k === "limit_remaining" && v === null);
 const show = (v: unknown) => (v === null ? "none" : typeof v === "boolean" ? (v ? "yes" : "no") : String(v));
 
 function Model({ id, note }: { id: string; note?: string }) {
@@ -22,6 +26,7 @@ export async function AiUsageCard({ emailModel }: { emailModel?: string | null }
   const [key, allowed] = await Promise.all([keyInfo(), allowedModels()]);
   const m = resolveModels(process.env, allowed);
   const d = key.ok ? key.data : null;
+  const free = freeToday(); // after keyInfo(): reads its cache
   const rate = d && typeof d.rate_limit === "object" && d.rate_limit && Number((d.rate_limit as { requests?: number }).requests) > 0 ? (d.rate_limit as { requests: number; interval: string }) : null; // OpenRouter reports -1 and marks the field deprecated
   return (
     <Card id="ai-usage" aria-labelledby="ai-usage-h" className="scroll-mt-20">
@@ -49,9 +54,13 @@ export async function AiUsageCard({ emailModel }: { emailModel?: string | null }
           <h3 id="ai-key-h" className="text-sm font-medium">OpenRouter key</h3>
           {key.ok ? (
             <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-              {Object.entries(key.data).filter(([k]) => k !== "rate_limit").map(([k, v]) => <div key={k} className="contents"><dt className="text-muted">{LABEL[k] ?? k}</dt><dd className="break-all tabular-nums">{show(v)}</dd></div>)}
+              {Object.entries(key.data).filter(([k, v]) => !hidden(k, v)).map(([k, v]) => <div key={k} className="contents"><dt className="text-muted">{LABEL[k] ?? k}</dt><dd className="break-all tabular-nums">{show(v)}</dd></div>)}
               {rate && <div className="contents"><dt className="text-muted">Rate limit</dt><dd className="tabular-nums">{rate.requests} requests per {rate.interval}</dd></div>}
-              <div className="contents"><dt className="text-muted">Requests today</dt><dd className="tabular-nums">{requestsToday()} <span className="text-xs text-muted">sent by this dashboard since midnight UTC; a local tally, approximate</span></dd></div>
+              {free ? (
+                <div className="contents"><dt className="text-muted">Free requests today</dt><dd className="tabular-nums">{free.limit != null ? `${free.remaining} of ${free.limit}` : free.remaining} left <span className="text-xs text-muted">from OpenRouter, shared by everything using this key · <ResetAt at={free.resetAt} /></span></dd></div>
+              ) : (
+                <div className="contents"><dt className="text-muted">Requests today</dt><dd className="tabular-nums">~{requestsToday()} <span className="text-xs text-muted">sent by this dashboard since midnight UTC; a local tally, approximate · <ResetAt at={nextUtcMidnight()} /></span></dd></div>
+              )}
             </dl>
           ) : (
             <p role="status" className="mt-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
@@ -61,7 +70,7 @@ export async function AiUsageCard({ emailModel }: { emailModel?: string | null }
           <p className="mt-3 text-sm text-muted">
             {d?.is_free_tier === false
               ? "This key has credits, but mailcraft still only calls free models."
-              : `Free models have a small allowance of requests per day and per minute, shared by everything that uses this key. When it runs out the assistant says so and tries again after the reset; it never switches to a paid model.${key.ok ? ' OpenRouter does not report how many requests were used today, so the count above is this dashboard\'s own.' : ""}`}
+              : `Free models have a small allowance of requests per day and per minute, shared by everything that uses this key. When it runs out the assistant says so and tries again after the reset; it never switches to a paid model.${key.ok && !free ? " OpenRouter has not reported the free requests left, so the count above is this dashboard's own." : ""}`}
           </p>
         </section>
       </CardBody>

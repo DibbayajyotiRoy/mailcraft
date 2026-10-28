@@ -1,8 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ keyInfo: vi.fn(), requestsToday: vi.fn(), allowedModels: vi.fn() }));
-vi.mock("@/lib/assistant/usage", () => ({ keyInfo: h.keyInfo, requestsToday: h.requestsToday }));
+const h = vi.hoisted(() => ({ keyInfo: vi.fn(), requestsToday: vi.fn(), freeToday: vi.fn(), allowedModels: vi.fn() }));
+vi.mock("@/lib/assistant/usage", () => ({ keyInfo: h.keyInfo, requestsToday: h.requestsToday, freeToday: h.freeToday }));
 // The real resolveModels stays, so a paid pin is rejected with the real message; only the network-backed allowlist is replaced.
 vi.mock("@/lib/assistant/models", async (orig) => ({ ...(await orig<typeof import("@/lib/assistant/models")>()), allowedModels: h.allowedModels }));
 
@@ -18,6 +18,7 @@ const noRow = (label: string) => expect(screen.queryByText(label, { selector: "d
 beforeEach(() => {
   h.keyInfo.mockResolvedValue(ok({ label: "mailcraft-prod" }));
   h.requestsToday.mockReturnValue(0);
+  h.freeToday.mockReturnValue(null);
   h.allowedModels.mockResolvedValue(ALLOWED);
   vi.stubEnv("MAILCRAFT_ASSISTANT_MODEL", "");
   vi.stubEnv("MAILCRAFT_LLM_MODEL", "");
@@ -32,9 +33,9 @@ describe("OpenRouter key", () => {
     expect(dd("Key").textContent).toMatch(/^mailcraft-prod$/);
     expect(dd("Credits used").textContent).toMatch(/^12\.3456$/);
     expect(dd("Credit limit").textContent).toMatch(/^none$/); // null stays "none", not 0
-    expect(dd("Remaining").textContent).toMatch(/^87\.6544$/);
+    expect(dd("Credit limit left").textContent).toMatch(/^87\.6544$/); // spend, so it is not called "Remaining"
     expect(dd("Free tier").textContent).toMatch(/^no$/);
-    noRow("Used today"); // fields OpenRouter did not send are not shown
+    noRow("Credits used today"); // fields OpenRouter did not send are not shown
     expect(container.innerHTML).not.toContain("sk-or-v1-secret-value"); // the key itself never reaches the page
     expect(screen.getByText("This key has credits, but mailcraft still only calls free models.")).toBeTruthy();
   });
@@ -43,7 +44,7 @@ describe("OpenRouter key", () => {
     h.keyInfo.mockResolvedValue(ok({ usage: 0, limit_remaining: 0, is_free_tier: true }));
     await renderCard();
     expect(dd("Credits used").textContent).toMatch(/^0$/);
-    expect(dd("Remaining").textContent).toMatch(/^0$/);
+    expect(dd("Credit limit left").textContent).toMatch(/^0$/);
     expect(dd("Free tier").textContent).toMatch(/^yes$/);
     expect(screen.getByText(/Free models have a small allowance of requests/)).toBeTruthy();
   });
@@ -64,13 +65,39 @@ describe("OpenRouter key", () => {
     noRow("rate_limit");
   });
 
-  it("counts this dashboard's own requests today and says the number is approximate", async () => {
+  it("no free-request count from OpenRouter: this dashboard's own tally, approximate, with the UTC reset", async () => {
     h.requestsToday.mockReturnValue(7);
     await renderCard();
     const row = dd("Requests today");
-    expect(row.textContent).toMatch(/^7 /);
+    expect(row.textContent).toMatch(/^~7 /);
     expect(row.textContent).toMatch(/local tally, approximate/);
     expect(row.textContent).toMatch(/since midnight UTC/);
+    expect(row.textContent).toMatch(/resets \d/);
+    noRow("Free requests today");
+    expect(screen.getByText(/OpenRouter has not reported the free requests left/)).toBeTruthy();
+  });
+
+  it("OpenRouter's free-request count replaces the tally, with the reset time", async () => {
+    h.requestsToday.mockReturnValue(7);
+    h.freeToday.mockReturnValue({ limit: 50, remaining: 0, resetAt: Date.now() + 3 * 3_600_000, source: "headers" });
+    h.keyInfo.mockResolvedValue(ok({ label: "k", limit: null, limit_remaining: 50, is_free_tier: true }));
+    await renderCard();
+    const row = dd("Free requests today");
+    expect(row.textContent).toMatch(/^0 of 50 left/);
+    expect(row.textContent).toMatch(/from OpenRouter/);
+    expect(row.textContent).toMatch(/resets \d.* · in 3h/);
+    noRow("Requests today"); // one count, not two that disagree
+    expect(dd("Credit limit left").textContent).toMatch(/^50$/); // the 50 credits are spend, a different thing from the 0 free requests
+    expect(screen.queryByText(/OpenRouter has not reported/)).toBeNull();
+  });
+
+  it("the key's free-request counter object is never dumped as a generic row, and a null credit-limit-left is hidden", async () => {
+    h.keyInfo.mockResolvedValue(ok({ label: "k", limit: null, limit_remaining: null, free_model_daily_requests: { used: 3, limit: 50, remaining: 47 } }));
+    const { container } = await renderCard();
+    noRow("free_model_daily_requests");
+    noRow("Credit limit left");
+    expect(dd("Credit limit").textContent).toBe("none");
+    expect(container.textContent).not.toContain("[object Object]");
   });
 
   it("a missing key shows the hint to set OPENROUTER_API_KEY, and no key rows", async () => {

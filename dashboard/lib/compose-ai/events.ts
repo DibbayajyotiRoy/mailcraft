@@ -17,7 +17,7 @@ export type WriteRequest = {
 /** `field` is "subject" | "text" | "html" | "var:<variable name>". A field's first delta replaces what was in the box; later deltas append. */
 export type FieldEvent = { field: string; delta: string } | { field: string; done: true };
 export type WriteUsage = { tokens: number; prompt: number; completion: number; ms: number; model: string; estimated?: boolean };
-export type WriteEvent = FieldEvent | { done: true; usage: WriteUsage } | { error: { code: string; message: string; hint?: string } };
+export type WriteEvent = FieldEvent | { done: true; usage: WriteUsage } | { error: { code: string; message: string; hint?: string; resetAt?: number } };
 
 /** lib/compose-ai/fields.ts exports the tolerant streaming JSON reader the route uses:
  *    class FieldStream { push(chunk: string): FieldEvent[]; end(): FieldEvent[] }

@@ -12,6 +12,7 @@ import { control } from "@/components/ui/field";
 import type { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { Compose } from "@/lib/compose";
+import { shown } from "@/lib/assistant/reset";
 import { applyField, doneLabel, restoreFields, shortName, snapshot, writingLabel, type Snap } from "@/lib/compose-ai/apply";
 import { TONES, type Tone, type WriteEvent, type WriteRequest, type WriteUsage } from "@/lib/compose-ai/events";
 import { fieldsFor } from "@/lib/compose-ai/prompt";
@@ -24,7 +25,7 @@ const IDLE: State = { phase: "idle", fields: [], done: [], cur: null, started: f
 
 /** One NDJSON event into the status state. Pure. */
 function step(s: State, e: WriteEvent): State {
-  if ("error" in e) return { ...s, phase: "error", cur: null, error: e.error, incomplete: s.started, announce: s.started ? "The draft is incomplete. Edit it or regenerate before sending." : "" };
+  if ("error" in e) return { ...s, phase: "error", cur: null, error: shown(e.error), incomplete: s.started, announce: s.started ? "The draft is incomplete. Edit it or regenerate before sending." : "" };
   if ("field" in e) {
     if ("delta" in e) return s.cur === e.field && s.started ? s : { ...s, started: true, cur: e.field };
     return s.done.includes(e.field) ? s : { ...s, started: true, done: [...s.done, e.field], cur: s.cur === e.field ? null : s.cur, announce: doneLabel(e.field) };
