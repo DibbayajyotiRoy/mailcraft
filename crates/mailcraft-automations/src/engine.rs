@@ -1306,7 +1306,8 @@ impl Engine {
         .bind(now)
         .bind(now + Duration::hours(72))
         .bind(env)
-        .bind(transport_id)
+        // sandbox mail reaches no transport, so none is pinned (same as the API send path)
+        .bind(transport_id.filter(|_| env != "test"))
         .fetch_optional(&mut *tx)
         .await?;
         let Some(email_id) = inserted else {
