@@ -385,7 +385,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List contacts (scope manage). Each item carries `suppressed` and `suppression_reason`. */
+        /** List contacts (scope manage). Each item carries `suppressed`, `suppression_reason` and `lists`. */
         get: operations["contact_list"];
         /** Upsert a contact (scope manage; ContactService) */
         put: operations["contact_upsert"];
@@ -409,6 +409,13 @@ export interface paths {
          * Upsert up to 5000 contacts in one call (scope manage)
          * @description Same semantics as `PUT /v1/contacts` per row. A bad row (invalid email or timezone) is skipped and
          *     reported in `failed` with its zero-based `index`; the rest are imported. Idempotent by `Idempotency-Key`.
+         *     With `list_id` (id or name of an existing list) or `list_name` (found, or created with origin `import`),
+         *     every imported contact, new or existing, is also added to that list; the answer carries `list_id`.
+         *     Not both. Repeating `list_name` across calls keeps filling the same list. Suppressions are not affected.
+         *     `dry_run: true` changes nothing (no contact, no list, no audit row) and answers
+         *     `{dry_run, summary: {new, update, unchanged, skipped, list_adds}, list: {id, name, exists} | null, rows}` with one row
+         *     per input: `{index, email, status: new|update|unchanged|skipped, changes: [{field, old, new}], list: add|already|null}`;
+         *     a skipped row has `reason` (`invalid_email`, `invalid_properties`, `invalid_timezone`) and `message`.
          */
         post: operations["contact_import"];
         delete?: never;
@@ -514,7 +521,7 @@ export interface paths {
          * @description Returns `{count, sample: [{email, first_name, last_name}]}` (5 newest matches). The filter is a rule tree:
          *     `{"and":[..]}`, `{"or":[..]}`, `{"not":..}` or `{"field","op","value"}` with op one of
          *     `eq neq lt lte gt gte in contains exists`. Fields: `email`, `first_name`, `last_name`, `timezone`,
-         *     `created_at`, `properties.<key>`, `topic:<key>` (opted in), `event_count:<event>` and
+         *     `created_at`, `properties.<key>`, `topic:<key>` (opted in), `list:<id or name>` (true when the contact is on that list), `event_count:<event>` and
          *     `days_since:<event>` (whole days since the contact last tracked it; absent if never).
          */
         post: operations["segment_preview"];
@@ -559,6 +566,200 @@ export interface paths {
         put?: never;
         /** Add contacts (by email) to a segment (scope manage) */
         post: operations["segment_add_members"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List contact lists with `member_count`, by name (scope manage) */
+        get: operations["list_list"];
+        put?: never;
+        /**
+         * Create a contact list (scope manage)
+         * @description A list is a manual segment (no `filter`) that also knows its `origin`: `manual` (made here), `import`
+         *     (made by a CSV import) or `source` (fed by a contact source). It works anywhere a segment does:
+         *     the `segment.entered` trigger and `add_to_segment` step of automations, the `list:<id or name>` rule
+         *     field of segments, `GET /v1/contacts?list=` and the broadcast `list_id` audience. Names are unique
+         *     across lists and segments. Audited as `list.create`.
+         */
+        post: operations["list_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/lists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One list (scope manage) */
+        get: operations["list_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a list; its contacts, events and suppressions are untouched (scope manage)
+         * @description 409 `invalid_state` while a contact source feeds the list (delete the source, optionally with its list) or an
+         *     automation still names it. Audited as `list.delete`.
+         */
+        delete: operations["list_delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a list or change its description (scope manage)
+         * @description `description: ""` clears it. 409 `invalid_state` when the name is taken, or when an automation refers to the
+         *     list by its current name (point it at the id first). Audited as `list.update`.
+         */
+        patch: operations["list_update"];
+        trace?: never;
+    };
+    "/v1/lists/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add contacts to a list by id and/or email (scope manage)
+         * @description 1 to 1000 entries in total. An email that is not a contact yet becomes one. Idempotent; returns
+         *     `{list_id, added, already_members, not_found}` (`not_found` counts unknown contact ids). Suppressions are
+         *     not affected: a suppressed contact can be on a list and still receives nothing. Audited as `list.members_add`.
+         */
+        post: operations["list_add_members"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/lists/{id}/members/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove contacts from a list by id and/or email; the contacts stay (scope manage)
+         * @description 1 to 1000 entries in total. Returns `{list_id, removed}`. On a source list the next sync adds a contact back
+         *     while the source still returns it. Audited as `list.members_remove`.
+         */
+        post: operations["list_remove_members"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/contact-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List contact sources with their last run (scope manage) */
+        get: operations["contact_source_list"];
+        put?: never;
+        /**
+         * Pull contacts from another product's HTTP API (scope manage)
+         * @description mailcraft calls `GET <url>?limit=500&cursor=..&updated_since=..` with `Authorization: Bearer <key>` every
+         *     `interval_minutes` and upserts what it returns; see docs/CONTACT-SOURCES.md for the contract. The `url`
+         *     may be an internal address; it must be http(s) without credentials. The `key` is sealed at rest and never
+         *     returned. A list named `list_name` (default: `name`) is created for the source and every synced contact joins
+         *     it. The first run starts within a minute. Audited as `contact_source.create`.
+         */
+        post: operations["contact_source_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/contact-sources/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a URL and key by fetching one page with `limit=1`; writes nothing (scope manage)
+         * @description Give `url` and `key`, or the `id` of a saved source (its stored URL and key fill what you leave out).
+         *     Always 200: `{ok: true, sample_count, has_more, fields, property_keys}` or `{ok: false, error}`.
+         *     `fields` and `property_keys` are the first row's field names, never its values.
+         */
+        post: operations["contact_source_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/contact-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One contact source (scope manage) */
+        get: operations["contact_source_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a source; contacts and suppressions stay (scope manage)
+         * @description The source's list is kept and becomes `detached` unless `delete_list=true` (members still stay contacts).
+         *     409 when `delete_list=true` and an automation still names the list. Audited as `contact_source.delete`.
+         */
+        delete: operations["contact_source_delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit a source, rotate its key, pause it (scope manage)
+         * @description Send `key` to rotate it. Changing `url` clears the watermark, so the next run reads everything again.
+         *     Audited as `contact_source.update` (field names only).
+         */
+        patch: operations["contact_source_update"];
+        trace?: never;
+    };
+    "/v1/contact-sources/{id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a source now and wait for it (scope manage)
+         * @description Returns `{id, ok, error, counts: {created, updated, skipped, deleted, fetched, reasons}, watermark, duration_ms}`.
+         *     A failed pull is still 200 with `ok: false` (the reason is also on the source). 409 `sync_in_progress` while
+         *     another run holds the source. At most 50,000 rows per run; a larger source finishes over several runs.
+         *     Audited as `contact_source.sync`. With `dry_run=true` it fetches only the first page and answers
+         *     `{ok, dry_run, sample: true, has_more, summary, list, rows}` (rows shaped as in `POST /v1/contacts/import`
+         *     `dry_run`, plus `external_id`) without writing anything; a failing source answers `{ok: false, error}`.
+         */
+        post: operations["contact_source_sync"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1892,6 +2093,87 @@ export interface components {
                 id?: string;
             }[];
         };
+        List: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            description?: string | null;
+            /** @enum {string} */
+            origin?: "manual" | "import" | "source";
+            /**
+             * Format: uuid
+             * @description the contact source feeding the list; null once the source is deleted
+             */
+            source_id?: string | null;
+            /** @description origin is `source` but the source is gone */
+            detached?: boolean;
+            member_count?: number;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        ListMembers: {
+            contact_ids?: string[];
+            emails?: string[];
+        };
+        CreateContactSource: {
+            name: string;
+            /** @description http(s) endpoint implementing the pull contract; private and loopback addresses are allowed */
+            url: string;
+            /** @description sent as `Authorization: Bearer <key>`; write-only */
+            key: string;
+            /** @default 15 */
+            interval_minutes?: number;
+            /**
+             * @description also read everything (no updated_since) this often; 0 = never
+             * @default 24
+             */
+            full_sync_hours?: number;
+            /** @default true */
+            enabled?: boolean;
+            /** @description display name of the source's list (default: name) */
+            list_name?: string;
+        };
+        ContactSource: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            url?: string;
+            enabled?: boolean;
+            interval_minutes?: number;
+            full_sync_hours?: number;
+            /**
+             * Format: date-time
+             * @description when a run last read the whole source
+             */
+            last_full_at?: string | null;
+            /**
+             * Format: date-time
+             * @description where the next incremental run resumes (it sends 5 minutes before it as updated_since): the source's synced_at after a finished run, the newest updated_at after a run stopped at a cap
+             */
+            watermark?: string | null;
+            /** Format: date-time */
+            last_run_at?: string | null;
+            /** @enum {string|null} */
+            last_status?: "ok" | "error" | null;
+            last_error?: string | null;
+            last_counts?: {
+                created?: number;
+                updated?: number;
+                skipped?: number;
+                deleted?: number;
+                fetched?: number;
+                reasons?: {
+                    [key: string]: number;
+                };
+            } | null;
+            /** Format: date-time */
+            created_at?: string;
+            list?: {
+                /** Format: uuid */
+                id?: string;
+                name?: string;
+            } | null;
+        };
         BroadcastRecipient: {
             email: string;
             first_name?: string;
@@ -1899,6 +2181,7 @@ export interface components {
             /** @description extra columns, usable as {{ data.<column> }}; keys are letters, digits and _, values are text, numbers or booleans */
             data?: Record<string, never>;
         };
+        /** @description The audience is `recipients` or `list_id`, exactly one of them. */
         CreateBroadcast: {
             /** @description id or alias */
             template_id: string;
@@ -1910,7 +2193,9 @@ export interface components {
              * @enum {string}
              */
             stream?: "transactional" | "marketing";
-            recipients: components["schemas"]["BroadcastRecipient"][];
+            recipients?: components["schemas"]["BroadcastRecipient"][];
+            /** @description a contact list (id or name) with 1-5000 members; each member is screened like an inline row (suppressed and opted-out contacts are skipped); only first_name and last_name are available as variables */
+            list_id?: string;
             /** @description upper bound on sends per day; the lowest of this and the transport / key caps applies */
             max_per_day?: number;
             /**
@@ -2725,6 +3010,8 @@ export interface operations {
                 cursor?: string;
                 /** @description Case-insensitive substring of email, first or last name */
                 q?: string;
+                /** @description Only members of this list (id or exact name); 404 when there is no such list */
+                list?: string;
             };
             header?: never;
             path?: never;
@@ -2732,7 +3019,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description page of contacts */
+            /** @description page of contacts; each carries `lists: [{id, name, origin}]` */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2786,6 +3073,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    list_id?: string;
+                    list_name?: string;
+                    /** @default false */
+                    dry_run?: boolean;
                     contacts: {
                         /** Format: email */
                         email: string;
@@ -2798,7 +3089,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description `{imported, failed: [{index, email, error: {code, message}}]}` */
+            /** @description `{imported, failed: [{index, email, error: {code, message}}], list_id}` */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2806,6 +3097,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             501: components["responses"]["Error"];
         };
     };
@@ -3085,6 +3377,368 @@ export interface operations {
                 content?: never;
             };
             501: components["responses"]["Error"];
+        };
+    };
+    list_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description lists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["List"][];
+                };
+            };
+        };
+    };
+    list_create: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    description?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["List"];
+                };
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    list_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["List"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    list_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    list_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    description?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["List"];
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    list_add_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListMembers"];
+            };
+        };
+        responses: {
+            /** @description counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    list_remove_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListMembers"];
+            };
+        };
+        responses: {
+            /** @description counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    contact_source_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description sources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactSource"][];
+                };
+            };
+        };
+    };
+    contact_source_create: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateContactSource"];
+            };
+        };
+        responses: {
+            /** @description created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactSource"];
+                };
+            };
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    contact_source_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    id?: string;
+                    url?: string;
+                    key?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    contact_source_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactSource"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    contact_source_delete: {
+        parameters: {
+            query?: {
+                delete_list?: boolean;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `{id, deleted, list_deleted}` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    contact_source_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    url?: string;
+                    key?: string;
+                    enabled?: boolean;
+                    interval_minutes?: number;
+                    full_sync_hours?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactSource"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    contact_source_sync: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description run result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     event_send: {
@@ -3831,7 +4485,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 cursor?: string;
-                reason?: "hard_bounce" | "soft_bounce_limit" | "complaint" | "unsubscribe" | "manual" | "spam_trap";
+                reason?: "hard_bounce" | "soft_bounce_limit" | "complaint" | "unsubscribe" | "manual" | "spam_trap" | "source_deleted" | "source_suspended";
             };
             header?: never;
             path?: never;
