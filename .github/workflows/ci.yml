@@ -57,11 +57,6 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
-  compose:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: MAILCRAFT_SECRET_KEY=ci docker compose config -q
   node:
     runs-on: ubuntu-latest
     strategy:
@@ -74,12 +69,3 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
-  docker:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with: { context: ., push: false, cache-from: type=gha, cache-to: "type=gha,mode=max" }
-      - uses: docker/build-push-action@v6
-        with: { context: dashboard, push: false, cache-from: "type=gha,scope=dashboard", cache-to: "type=gha,mode=max,scope=dashboard" }

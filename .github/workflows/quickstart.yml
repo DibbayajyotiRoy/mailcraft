@@ -1,7 +1,19 @@
 name: quickstart
+# Runs the README quickstart end to end with docker compose. Every push to main; on PRs only
+# when the quickstart's inputs change.
 on:
   push: { branches: [main] }
   pull_request:
+    paths:
+      - README.md
+      - docs/QUICKSTART.md
+      - scripts/quickstart-check.sh
+      - Dockerfile
+      - dashboard/Dockerfile
+      - docker-compose*.yml
+      - migrations/**
+      - crates/mailcraft-cli/**
+      - .github/workflows/quickstart.yml
 permissions: { contents: read }
 jobs:
   quickstart:
