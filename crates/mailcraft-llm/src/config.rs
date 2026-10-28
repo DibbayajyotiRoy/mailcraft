@@ -1,5 +1,6 @@
 //! Provider config from env: MAILCRAFT_LLM_PROVIDER (openrouter|openai|ollama, default openrouter),
 //! MAILCRAFT_LLM_BASE_URL, MAILCRAFT_LLM_MODEL, MAILCRAFT_LLM_FALLBACK_MODELS (comma list, OpenRouter only),
+//! Free models only on OpenRouter: ids must end in `:free` (see [`is_free_model`]); others are refused.
 //! MAILCRAFT_LLM_REASONING (off|low|medium|high, default off,
 //! OpenRouter only), MAILCRAFT_LLM_GUARDRAILS (default|api-product), OPENROUTER_API_KEY (OPENAI_API_KEY for openai).
 //! The key is never logged: `Debug` of this type and of `OpenAiCompatConfig` redact it.
@@ -7,7 +8,22 @@ use crate::personalize::Guardrails;
 use crate::provider::{OpenAiCompat, OpenAiCompatConfig};
 use mailcraft_core::llm::LlmError;
 
-pub const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash";
+/// Free models only (hard product requirement): the default is the bake-off winner.
+pub const DEFAULT_MODEL: &str = "nvidia/nemotron-3.5-super-vl:free";
+
+/// Used when MAILCRAFT_LLM_FALLBACK_MODELS is unset (OpenRouter only), tried in order.
+/// All `:free`, tool/JSON capable open-weight models.
+pub const DEFAULT_FALLBACK_MODELS: &[&str] = &[
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "google/gemma-4-31b-it:free",
+];
+
+/// True iff `id` is a free OpenRouter model. `:free` is an OpenRouter naming convention and
+/// means nothing for openai/ollama ids, so only the `openrouter` provider is gated on it
+/// (see `OpenAiCompat::generate`, the single choke point every generation passes through).
+pub fn is_free_model(id: &str) -> bool {
+    id.ends_with(":free")
+}
 
 pub struct LlmSettings {
     pub provider: OpenAiCompatConfig,
@@ -59,9 +75,16 @@ impl LlmSettings {
                     v.split(',')
                         .map(|m| m.trim().to_owned())
                         .filter(|m| !m.is_empty())
+                        .filter(|m| {
+                            let free = is_free_model(m);
+                            if !free {
+                                tracing::warn!(model = %m, "MAILCRAFT_LLM_FALLBACK_MODELS: dropping non-:free model (free models only)");
+                            }
+                            free
+                        })
                         .collect()
                 })
-                .unwrap_or_default();
+                .unwrap_or_else(|| DEFAULT_FALLBACK_MODELS.iter().map(|m| (*m).into()).collect());
             provider.reasoning = Some(
                 match get("MAILCRAFT_LLM_REASONING").as_deref().unwrap_or("off") {
                     "off" => serde_json::json!({"enabled": false}),
@@ -118,6 +141,7 @@ mod tests {
         assert_eq!(s.provider.id, "openrouter");
         assert_eq!(s.model, DEFAULT_MODEL);
         assert!(!format!("{s:?}").contains("sk-secret"));
+        assert_eq!(s.provider.fallback_models, DEFAULT_FALLBACK_MODELS);
 
         let s = LlmSettings::from_lookup(env(&[
             ("MAILCRAFT_LLM_PROVIDER", "ollama"),
@@ -156,10 +180,12 @@ mod tests {
             .banned_terms
             .iter()
             .any(|t| t.contains("camoufox")));
-        let s =
-            LlmSettings::from_lookup(env(&[k, ("MAILCRAFT_LLM_FALLBACK_MODELS", " a/x, b/y ,")]))
-                .unwrap();
-        assert_eq!(s.provider.fallback_models, ["a/x", "b/y"]);
+        let s = LlmSettings::from_lookup(env(&[
+            k,
+            ("MAILCRAFT_LLM_FALLBACK_MODELS", " a/x:free, b/y:free ,"),
+        ]))
+        .unwrap();
+        assert_eq!(s.provider.fallback_models, ["a/x:free", "b/y:free"]);
         assert!(LlmSettings::from_lookup(env(&[k, ("MAILCRAFT_LLM_REASONING", "x")])).is_err());
         let s = LlmSettings::from_lookup(env(&[("MAILCRAFT_LLM_PROVIDER", "ollama")])).unwrap();
         assert_eq!(s.provider.reasoning, None);
@@ -168,5 +194,47 @@ mod tests {
             .unwrap_err()
             .contains("OPENROUTER_API_KEY"));
         assert!(LlmSettings::from_lookup(env(&[("MAILCRAFT_LLM_PROVIDER", "x")])).is_err());
+    }
+
+    #[test]
+    fn is_free_model_means_colon_free_suffix() {
+        assert!(is_free_model("nvidia/nemotron-3.5-super-vl:free"));
+        assert!(!is_free_model("deepseek/deepseek-v4-flash"));
+        assert!(!is_free_model("a/x:free:online"));
+        assert!(!is_free_model("a/x:freebie"));
+        assert!(!is_free_model(""));
+    }
+
+    #[test]
+    fn defaults_are_free() {
+        assert!(is_free_model(DEFAULT_MODEL));
+        assert!(DEFAULT_FALLBACK_MODELS.iter().all(|m| is_free_model(m)));
+        assert!(!DEFAULT_FALLBACK_MODELS.contains(&DEFAULT_MODEL));
+    }
+
+    #[test]
+    fn paid_fallback_entries_are_dropped_and_free_override_accepted() {
+        let k = ("OPENROUTER_API_KEY", "k");
+        let s = LlmSettings::from_lookup(env(&[
+            k,
+            ("MAILCRAFT_LLM_MODEL", "google/gemma-4-31b-it:free"),
+            (
+                "MAILCRAFT_LLM_FALLBACK_MODELS",
+                "deepseek/deepseek-v4-flash, a/x:free, openai/gpt-5-nano",
+            ),
+        ]))
+        .unwrap();
+        assert_eq!(s.model, "google/gemma-4-31b-it:free");
+        assert_eq!(s.provider.fallback_models, ["a/x:free"]);
+        // An explicit all-paid list means no fallbacks, not a silent switch to the defaults.
+        let s = LlmSettings::from_lookup(env(&[
+            k,
+            ("MAILCRAFT_LLM_FALLBACK_MODELS", "openai/gpt-5-nano"),
+        ]))
+        .unwrap();
+        assert!(s.provider.fallback_models.is_empty());
+        // Non-OpenRouter providers are not gated and get no OpenRouter fallbacks.
+        let s = LlmSettings::from_lookup(env(&[("MAILCRAFT_LLM_PROVIDER", "ollama")])).unwrap();
+        assert!(s.provider.fallback_models.is_empty());
     }
 }

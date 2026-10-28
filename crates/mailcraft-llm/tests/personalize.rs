@@ -67,7 +67,7 @@ fn p(outs: Vec<Slots>) -> (LlmPersonalizer, Arc<Scripted>) {
     (
         LlmPersonalizer::new(
             m.clone(),
-            "deepseek/deepseek-v4-flash",
+            "nvidia/nemotron-3.5-super-vl:free",
             Arc::new(NoopSpamChecker),
             Arc::new(NoBudget),
         ),
@@ -161,4 +161,42 @@ fn api_product_guardrail_pack_is_selectable() {
     assert!(g.banned_terms.iter().any(|t| t.contains("camoufox")));
     assert!(g.allowed_link_domains.is_empty());
     assert_eq!(g.spam_threshold, Guardrails::default().spam_threshold);
+}
+
+#[tokio::test]
+async fn paid_openrouter_model_falls_back_to_static_copy_without_a_call() {
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let srv = MockServer::start().await;
+    Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&srv)
+        .await;
+    // Paid configured default, then a paid per-call override on a free default.
+    for (default, per_call) in [
+        ("deepseek/deepseek-v4-flash", None),
+        (
+            "nvidia/nemotron-3.5-super-vl:free",
+            Some("deepseek/deepseek-v4-flash"),
+        ),
+    ] {
+        let cfg = OpenAiCompatConfig::openrouter("k", "r", "t").with_base_url(&srv.uri());
+        let pz = LlmPersonalizer::new(
+            Arc::new(OpenAiCompat::new(cfg).unwrap()),
+            default,
+            Arc::new(NoopSpamChecker),
+            Arc::new(NoBudget),
+        );
+        let mut rq = req(Guardrails::default());
+        rq.model = per_call.map(Into::into);
+        let r = pz.personalize(rq).await;
+        assert_eq!(r.outcome, Outcome::Fallback);
+        assert_eq!(r.slots, slots("Static copy."));
+        let why = r.fallback_reason.unwrap();
+        assert!(
+            why.starts_with("provider_error") && why.contains("not a :free"),
+            "{why}"
+        );
+    }
+    assert!(srv.received_requests().await.unwrap().is_empty());
 }

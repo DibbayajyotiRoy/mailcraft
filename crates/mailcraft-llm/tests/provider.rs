@@ -7,7 +7,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn req() -> GenerateRequest {
     GenerateRequest {
-        model: "deepseek/deepseek-v4-flash".into(),
+        model: "nvidia/nemotron-3.5-super-vl:free".into(),
         fallbacks: vec![],
         messages: vec![
             Msg {
@@ -25,7 +25,7 @@ fn req() -> GenerateRequest {
     }
 }
 fn ok_body() -> Value {
-    json!({"id":"gen-1","model":"deepseek/deepseek-v4-flash","choices":[{"message":{"content":"{\"a\":1}"}}],
+    json!({"id":"gen-1","model":"nvidia/nemotron-3.5-super-vl:free","choices":[{"message":{"content":"{\"a\":1}"}}],
         "usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"cost":0.0001}})
 }
 fn fast(c: OpenAiCompatConfig, url: &str) -> OpenAiCompat {
@@ -235,7 +235,7 @@ async fn openrouter_sends_model_fallbacks() {
         .mount(&s)
         .await;
     let mut r = req();
-    r.fallbacks = vec!["openai/gpt-5-nano".into()];
+    r.fallbacks = vec!["google/gemma-4-31b-it:free".into()];
     fast(OpenAiCompatConfig::openrouter("k", "r", "t"), &s.uri())
         .generate(r)
         .await
@@ -243,7 +243,7 @@ async fn openrouter_sends_model_fallbacks() {
     let b = s.received_requests().await.unwrap()[0]
         .body_json::<Value>()
         .unwrap();
-    assert_eq!(b["models"], json!(["openai/gpt-5-nano"]));
+    assert_eq!(b["models"], json!(["google/gemma-4-31b-it:free"]));
 }
 
 #[tokio::test]
@@ -278,24 +278,24 @@ async fn reasoning_is_sent_only_when_configured() {
 async fn empty_completion_retries_on_next_fallback_model() {
     use wiremock::matchers::body_partial_json;
     let s = MockServer::start().await;
-    let empty = json!({"id":"g0","model":"a/free","choices":[{"message":{"content":""}}],
+    let empty = json!({"id":"g0","model":"a/x:free","choices":[{"message":{"content":""}}],
         "usage":{"prompt_tokens":0,"completion_tokens":0}});
     Mock::given(method("POST"))
-        .and(body_partial_json(json!({"model": "a/free"})))
+        .and(body_partial_json(json!({"model": "a/x:free"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(empty))
         .expect(1)
         .mount(&s)
         .await;
     Mock::given(method("POST"))
-        .and(body_partial_json(json!({"model": "b/paid"})))
+        .and(body_partial_json(json!({"model": "b/y:free"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
         .expect(1)
         .mount(&s)
         .await;
     let mut c = OpenAiCompatConfig::openrouter("k", "r", "t");
-    c.fallback_models = vec!["b/paid".into()];
+    c.fallback_models = vec!["b/y:free".into()];
     let mut r = req();
-    r.model = "a/free".into();
+    r.model = "a/x:free".into();
     let out = fast(c, &s.uri()).generate(r).await.unwrap();
     assert_eq!(out.json, json!({"a":1}));
     let first = s.received_requests().await.unwrap()[0]
@@ -303,7 +303,69 @@ async fn empty_completion_retries_on_next_fallback_model() {
         .unwrap();
     assert_eq!(
         first["models"],
-        json!(["b/paid"]),
+        json!(["b/y:free"]),
         "configured fallbacks are sent"
     );
+}
+
+#[tokio::test]
+async fn openrouter_refuses_a_paid_model_without_calling_out() {
+    let s = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .expect(0)
+        .mount(&s)
+        .await;
+    let mut r = req();
+    r.model = "deepseek/deepseek-v4-flash".into();
+    let err = fast(OpenAiCompatConfig::openrouter("k", "r", "t"), &s.uri())
+        .generate(r)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, LlmError::Fatal(m) if m.contains("not a :free")),
+        "{err:?}"
+    );
+    assert!(s.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn openrouter_drops_paid_fallbacks_from_request_and_config() {
+    let s = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .mount(&s)
+        .await;
+    // Per-request list and the configured list are both filtered.
+    let mut c = OpenAiCompatConfig::openrouter("k", "r", "t");
+    c.fallback_models = vec!["openai/gpt-5-nano".into(), "a/x:free".into()];
+    let p = fast(c, &s.uri());
+    p.generate(req()).await.unwrap();
+    let mut r = req();
+    r.fallbacks = vec!["openai/gpt-5-nano".into(), "b/y:free".into()];
+    p.generate(r).await.unwrap();
+    let got = s.received_requests().await.unwrap();
+    assert_eq!(
+        got[0].body_json::<Value>().unwrap()["models"],
+        json!(["a/x:free"])
+    );
+    assert_eq!(
+        got[1].body_json::<Value>().unwrap()["models"],
+        json!(["b/y:free"])
+    );
+}
+
+#[tokio::test]
+async fn free_suffix_gate_is_openrouter_only() {
+    let s = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .mount(&s)
+        .await;
+    let mut r = req();
+    r.model = "gpt-5-nano".into();
+    fast(OpenAiCompatConfig::openai("k"), &s.uri())
+        .generate(r)
+        .await
+        .unwrap();
 }

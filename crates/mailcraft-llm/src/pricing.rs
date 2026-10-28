@@ -41,12 +41,11 @@ mod tests {
             prompt_tokens: 1_000_000,
             completion_tokens: 1_000_000,
         };
+        // A paid id still prices from the table (the table is pure; mailcraft never calls it).
+        let llama = "meta-llama/llama-3.3-70b-instruct";
+        assert!((estimate_cost_usd("openrouter", llama, &u) - 0.42).abs() < 1e-9);
         assert!(
-            (estimate_cost_usd("openrouter", "deepseek/deepseek-v4-flash", &u) - 0.42).abs() < 1e-9
-        );
-        assert!(
-            (estimate_cost_usd("openrouter", "deepseek/deepseek-v4-flash:free", &u) - 0.42).abs()
-                < 1e-9
+            (estimate_cost_usd("openrouter", &format!("{llama}:free"), &u) - 0.42).abs() < 1e-9
         );
         assert!((estimate_cost_usd("openai", "mystery", &u) - 4.0).abs() < 1e-9);
         assert_eq!(estimate_cost_usd("ollama", "llama3", &u), 0.0);

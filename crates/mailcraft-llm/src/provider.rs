@@ -1,5 +1,6 @@
 //! OpenAI-compatible chat-completions provider (OpenRouter default, OpenAI, Ollama),
 //! implementing `mailcraft_core::llm::LlmProvider`.
+use crate::config::is_free_model;
 use async_trait::async_trait;
 use mailcraft_core::llm::{GenerateRequest, GenerateResult, LlmError, LlmProvider, Usage};
 use serde_json::{json, Value};
@@ -170,6 +171,25 @@ impl LlmProvider for OpenAiCompat {
     async fn generate(&self, mut request: GenerateRequest) -> Result<GenerateResult, LlmError> {
         if request.fallbacks.is_empty() {
             request.fallbacks = self.cfg.fallback_models.clone();
+        }
+        // Free models only. `:free` is an OpenRouter naming convention, so only that provider
+        // is gated (openai/ollama ids never carry it). Every generation path ends here, so a
+        // paid model cannot reach OpenRouter; the pipeline turns this error into static copy.
+        if self.cfg.id == "openrouter" {
+            if !is_free_model(&request.model) {
+                tracing::warn!(model = %request.model, "refusing non-:free OpenRouter model (free models only)");
+                return Err(LlmError::Fatal(format!(
+                    "model {:?} is not a :free OpenRouter model; mailcraft uses free models only",
+                    request.model
+                )));
+            }
+            request.fallbacks.retain(|m| {
+                let free = is_free_model(m);
+                if !free {
+                    tracing::warn!(model = %m, "dropping non-:free OpenRouter fallback model (free models only)");
+                }
+                free
+            });
         }
         let url = format!("{}/chat/completions", self.cfg.base_url);
         let mut attempt = 0u32;
