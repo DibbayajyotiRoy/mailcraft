@@ -7,7 +7,7 @@ import { Meter } from "@/components/ui/meter";
 import { DomainMenu } from "./domain-menu";
 import { VerifyForm } from "./verify-form";
 
-export type Domain = { id: string; name: string; status: string; stream?: string; records?: DnsRec[]; last_checked_at?: string | null };
+export type Domain = { id: string; name: string; status: string; stream?: string; records?: DnsRec[]; last_checked_at?: string | null; relay_sender?: string };
 
 const BANNER: Record<string, string> = {
   not_started: "Add these records at your DNS provider, then verify.",
@@ -19,12 +19,13 @@ const BANNER: Record<string, string> = {
 export function DomainCard({ d }: { d: Domain }) {
   const recs = d.records ?? [];
   const done = recs.filter((r) => r.status === "verified").length;
-  const verified = d.status === "verified";
+  const viaRelay = !!d.relay_sender && d.status !== "verified";
+  const verified = d.status === "verified" || viaRelay;
   return (
     <Card aria-labelledby={`d-${d.id}`}>
       <CardHeader
-        title={<span className="flex flex-wrap items-center gap-2"><span id={`d-${d.id}`} className="font-mono text-[15px] [overflow-wrap:anywhere]">{d.name}</span><StatusBadge status={d.status} pulse={d.status === "pending"} />{d.stream && <Badge>{d.stream}</Badge>}</span>}
-        description={BANNER[d.status]}
+        title={<span className="flex flex-wrap items-center gap-2"><span id={`d-${d.id}`} className="font-mono text-[15px] [overflow-wrap:anywhere]">{d.name}</span>{viaRelay ? <StatusBadge status="verified" label="Verified via relay" /> : <StatusBadge status={d.status} pulse={d.status === "pending"} />}{d.stream && <Badge>{d.stream}</Badge>}</span>}
+        description={viaRelay ? `Sending as ${d.relay_sender} through your mailbox relay. The relay's own SPF and DKIM cover it, so the records below are optional. Other addresses on this domain still need them.` : BANNER[d.status]}
         action={<DomainMenu id={d.id} name={d.name} />}
       />
       <CardBody className="grid gap-4">
