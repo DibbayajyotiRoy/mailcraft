@@ -97,6 +97,7 @@ function GmailConnect({ canEdit }: { canEdit: boolean }) {
 }
 
 export function DeliveryCard({ path, transports, canEdit }: { path?: { kind: string; detail?: string } | null; transports: Transport[]; canEdit: boolean }) {
+  const fallback = transports.find((t) => t.is_default);
   return (
     <Card id="delivery" aria-labelledby="delivery-h" className="scroll-mt-20">
       <CardHeader title={<span id="delivery-h">Delivery</span>} description="How mail leaves mailcraft. Test mode never leaves the box: it lands in the sandbox inbox."
@@ -105,8 +106,13 @@ export function DeliveryCard({ path, transports, canEdit }: { path?: { kind: str
         <div className="flex items-center gap-3 rounded-md bg-surface-2 px-3 py-2.5">
           <Server aria-hidden className="size-4 text-muted" />
           <div className="min-w-0 text-sm">
-            <p className="font-medium">{path ? KIND[path.kind] ?? path.kind : "Not configured"}</p>
-            <p className="truncate text-muted">{path?.detail ?? (path ? "Active delivery path" : "Add a relay or connect Gmail to send real mail.")}</p>
+            {transports.length > 1 ? <>
+              <p className="font-medium">Routed by sender</p>
+              <p className="text-muted">Each From address goes out through the mailbox it belongs to. Any other address uses the fallback{fallback ? `: ${fallback.name ?? fallback.kind}` : ""}.</p>
+            </> : <>
+              <p className="font-medium">{path ? KIND[path.kind] ?? path.kind : "Not configured"}</p>
+              <p className="truncate text-muted">{path?.detail ?? (path ? "Active delivery path" : "Add a relay or connect Gmail to send real mail.")}</p>
+            </>}
           </div>
         </div>
         {transports.length > 0 ? (
@@ -118,7 +124,7 @@ export function DeliveryCard({ path, transports, canEdit }: { path?: { kind: str
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{name}</span>
                     <span className="text-sm text-muted">{KIND[t.kind] ?? t.kind}{t.from ? ` · ${t.from}` : ""}</span>
-                    {t.is_default && <span className="rounded-full bg-accent-soft px-2 text-xs text-accent">default</span>}
+                    {t.is_default && <span className="rounded-full bg-accent-soft px-2 text-xs text-accent" title="Used only when the From address is not one of your mailboxes or bound to another relay">{transports.length > 1 ? "fallback" : "default"}</span>}
                     {t.label && <span className="text-xs text-muted">{t.label}</span>}
                     {t.status && <span className="ml-auto"><StatusBadge status={t.status} size="sm" /></span>}
                   </div>
