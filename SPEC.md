@@ -672,6 +672,6 @@ Pinned Next.js app in `dashboard/` talking to the REST API (separate container i
 5. Spam scorer: rspamd (HTTP, lighter) or SpamAssassin (default threshold known); recommended rspamd.
 6. Dashboard embedded in the Rust binary vs separate Next.js container (single-binary promise vs Next.js choice).
 7. Kumo adapter vs finishing the built-in MTA first for volume users [R §1 plan].
-8. Mailcraft as dogfood for Spicrawl: do journeys J1-J12 become the shipped example pack, and is the validator in mailcraft or app-side [J §6 Q6]?
+8. Mailcraft as dogfood for the first product built on it: do journeys J1-J12 become the shipped example pack, and is the validator in mailcraft or app-side [J §6 Q6]?
 9. DMARC `t` tag semantics and whether `_report._dmarc` authorization is still required under RFC 9989 (research UNVERIFIED) [D §1.3].
 10. Legal: CAN-SPAM/GDPR/CASL guidance in docs needs counsel review (research UNVERIFIED for GDPR/CASL citations) [D §7].

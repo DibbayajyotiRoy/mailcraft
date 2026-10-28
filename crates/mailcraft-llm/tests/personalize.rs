@@ -156,9 +156,9 @@ async fn repeated_greeting_is_repaired_then_falls_back() {
 }
 
 #[test]
-fn spicrawl_guardrail_pack_is_selectable() {
-    let g = Guardrails::spicrawl();
+fn api_product_guardrail_pack_is_selectable() {
+    let g = Guardrails::api_product();
     assert!(g.banned_terms.iter().any(|t| t.contains("camoufox")));
-    assert!(g.allowed_link_domains.contains(&"spicrawl.com".to_string()));
+    assert!(g.allowed_link_domains.is_empty());
     assert_eq!(g.spam_threshold, Guardrails::default().spam_threshold);
 }

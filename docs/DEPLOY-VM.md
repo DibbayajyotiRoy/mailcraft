@@ -1,7 +1,7 @@
 # Deploy to a LAN VM (systemd, no Docker)
 
 ```bash
-./scripts/deploy-vm.sh ubuntu@10.0.0.200
+./scripts/deploy-vm.sh user@your-vm
 ```
 
 Builds on this machine, uploads, puts the release in place, restarts only the mailcraft units, health-checks
@@ -44,16 +44,16 @@ Logs: `journalctl -u mailcraft-api -u mailcraft-dashboard`. CLI on the VM:
 
 ## LAN access and the firewall
 
-The VM runs a default-drop nftables input chain (table `inet spicrawl_fw`, allow-list of ports). 8080 and 3000
-are on that list, hence the defaults, so mailcraft takes them over: **it cannot run next to Spicrawl's API
-(8080) or the testbench UI (3000)** — stop and disable those units first (`systemctl disable --now ...`).
+The VM runs a default-drop nftables input chain (an allow-list of ports). 8080 and 3000
+are on that list, hence the defaults, so mailcraft takes them over: **it cannot run next to another service
+already using 8080 or 3000** — stop and disable those units first (`systemctl disable --now ...`).
 
 Any other port is dropped from the LAN even though the service is healthy (the deploy prints "NOT reachable
 from here"). A separate nftables table with an `accept` rule does not help: every base chain on the `input`
 hook is evaluated and any one of them may drop, so the port has to be added to the allow-list of the table
 that drops (its file under `/etc/nftables.d/`). Until then, tunnel over SSH (port 22 is open):
 
-    ssh -L 18095:127.0.0.1:<api port> -L 13095:127.0.0.1:<dashboard port> ubuntu@10.0.0.200   # then http://localhost:13095
+    ssh -L 18095:127.0.0.1:<api port> -L 13095:127.0.0.1:<dashboard port> user@your-vm   # then http://localhost:13095
 
 ## Automatic deploys
 

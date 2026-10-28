@@ -91,8 +91,10 @@ impl Default for ValidatorConfig {
 }
 
 impl ValidatorConfig {
-    /// Spicrawl rules from journeys.md 4.2/4.3.
-    pub fn spicrawl() -> Self {
+    /// Preset for a developer-API / web-data product (`MAILCRAFT_LLM_GUARDRAILS=api-product`): no
+    /// pricing promises or hard guarantees, no AI-hype wording, no internal engine or feature names.
+    /// No link hosts are baked in: set `allowed_hosts` to yours; any other host is rejected.
+    pub fn api_product() -> Self {
         let banned = [
             r"crawl endpoint",
             r"\bcrawl(s|ing|er)?\b",
@@ -115,7 +117,6 @@ impl ValidatorConfig {
         ];
         Self {
             banned_terms: banned.iter().map(|s| s.to_string()).collect(),
-            allowed_hosts: vec!["*.spicrawl.com".into(), "spicrawl.com".into()],
             ..Self::default()
         }
     }
@@ -687,12 +688,15 @@ mod tests {
     fn ctx() -> Value {
         json!({"first_name":"Ana","used":800,"limit":1000,"success_pct_30d":0.44,
             "failures":[{"host":"example.com","error_code":"ERR::UPSTREAM::CHALLENGE","allowed_advice":["js_render=true"],
-            "doc_url":"https://docs.spicrawl.com/errors#UPSTREAM_CHALLENGE","last_seen":"2026-10-26T14:03:00Z"}]})
+            "doc_url":"https://docs.example.com/errors#UPSTREAM_CHALLENGE","last_seen":"2026-10-26T14:03:00Z"}]})
     }
     fn run(s: &Slots) -> Vec<Violation> {
-        Validator::new(ValidatorConfig::spicrawl())
-            .unwrap()
-            .validate(s, &ctx())
+        Validator::new(ValidatorConfig {
+            allowed_hosts: vec!["*.example.com".into(), "example.com".into()],
+            ..ValidatorConfig::api_product()
+        })
+        .unwrap()
+        .validate(s, &ctx())
     }
     fn rules(s: &Slots) -> Vec<&'static str> {
         run(s).iter().map(|v| v.rule).collect()
@@ -720,17 +724,17 @@ mod tests {
     #[test]
     fn hosts_and_urls() {
         assert!(rules(&with_body("example.com returned a challenge page.")).is_empty());
-        assert!(rules(&with_body("Docs at docs.spicrawl.com are handy.")).is_empty());
+        assert!(rules(&with_body("Docs at docs.example.com are handy.")).is_empty());
         assert!(rules(&with_body("Try other-site.io instead.")).contains(&"host"));
         assert_eq!(
             run(&with_body(
-                "See https://docs.spicrawl.com/errors#UPSTREAM_CHALLENGE."
+                "See https://docs.example.com/errors#UPSTREAM_CHALLENGE."
             )),
             vec![]
         );
-        assert!(rules(&with_body("See https://docs.spicrawl.com/made-up")).contains(&"url"));
-        assert!(rules(&with_body("See http://evil.spicrawl.com/x")).contains(&"url"));
-        assert!(rules(&with_body("evilspicrawl.com is not ours")).contains(&"host"));
+        assert!(rules(&with_body("See https://docs.example.com/made-up")).contains(&"url"));
+        assert!(rules(&with_body("See http://evil.example.com/x")).contains(&"url"));
+        assert!(rules(&with_body("evilexample.com is not ours")).contains(&"host"));
     }
     #[test]
     fn codes_and_params() {
@@ -761,7 +765,7 @@ mod tests {
     fn allowed_terms_override() {
         let mut c = ctx();
         c["allowed_terms"] = json!(["unlimited"]);
-        let v = Validator::new(ValidatorConfig::spicrawl()).unwrap();
+        let v = Validator::new(ValidatorConfig::api_product()).unwrap();
         assert!(v
             .validate(&with_body("Unlimited retries."), &c)
             .iter()

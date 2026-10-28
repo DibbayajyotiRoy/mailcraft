@@ -2,6 +2,8 @@
 
 Pre-alpha: commands that are not built yet return `not_implemented`; see the README status.
 
+Once it runs, connect your product (events, contacts, senders, consent): [INTEGRATION.md](INTEGRATION.md).
+
 ## With a domain (three commands)
 
 ```

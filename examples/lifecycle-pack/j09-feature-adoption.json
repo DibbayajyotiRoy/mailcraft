@@ -42,7 +42,7 @@
           "key": "tip",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-feature-tip",
+            "template": "lifecycle-feature-tip",
             "topic": "product",
             "instructions": "Choose wording only; tips come from context.tips.",
             "mode": "llm"

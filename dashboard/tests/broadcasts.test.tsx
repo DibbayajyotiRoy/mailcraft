@@ -91,7 +91,7 @@ describe("NewBroadcast", () => {
       create: vi.fn().mockImplementation(async (_d, _r, dry) => ({ data: dry ? plan : { id: "b9", status: "queued", queued: 2, skipped: [] } })),
       sendTest: vi.fn().mockResolvedValue({ id: "em_1" }),
     };
-    render(<NewBroadcast templates={templates} defaultFrom="dev@spicrawl.com" actions={actions} />);
+    render(<NewBroadcast templates={templates} defaultFrom="dev@example.com" actions={actions} />);
     return actions;
   };
   async function toContent() {
@@ -112,7 +112,7 @@ describe("NewBroadcast", () => {
   it("previews the first recipient, switches recipient, then reviews, tests and sends after a confirmation", async () => {
     const a = make();
     await toContent();
-    expect((screen.getByLabelText("From") as HTMLInputElement).value).toBe("dev@spicrawl.com");
+    expect((screen.getByLabelText("From") as HTMLInputElement).value).toBe("dev@example.com");
     await waitFor(() => expect(a.preview).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(a.preview.mock.calls[0][1]).toMatchObject({ email: "ada@example.com", first_name: "Ada" });
     expect(await screen.findByText("Hello Ada")).toBeTruthy();

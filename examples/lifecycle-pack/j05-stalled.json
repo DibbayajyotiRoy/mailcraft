@@ -70,7 +70,7 @@
           "key": "help",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-stalled",
+            "template": "lifecycle-stalled",
             "topic": "product",
             "mode": "llm"
           }

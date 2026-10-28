@@ -59,7 +59,7 @@
           "key": "nudge",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-onboarding-abandoned",
+            "template": "lifecycle-onboarding-abandoned",
             "topic": "product",
             "mode": "llm"
           }

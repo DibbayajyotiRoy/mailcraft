@@ -35,7 +35,7 @@
           "key": "welcome",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-welcome",
+            "template": "lifecycle-welcome",
             "topic": "product",
             "weekend_ok": true,
             "instructions": "Founder voice, 2-3 sentences, one next step. Facts only from context.",

@@ -45,7 +45,7 @@
           "key": "help",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-site-failure",
+            "template": "lifecycle-site-failure",
             "topic": "product",
             "instructions": "Phrase the code-chosen advice in event.allowed_advice. Never name internal engines.",
             "mode": "llm"

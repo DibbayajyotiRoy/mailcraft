@@ -42,7 +42,7 @@
           "key": "digest",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-weekly-digest",
+            "template": "lifecycle-weekly-digest",
             "topic": "digest",
             "mode": "llm"
           }

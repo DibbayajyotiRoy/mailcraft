@@ -1,7 +1,7 @@
 //! Provider config from env: MAILCRAFT_LLM_PROVIDER (openrouter|openai|ollama, default openrouter),
 //! MAILCRAFT_LLM_BASE_URL, MAILCRAFT_LLM_MODEL, MAILCRAFT_LLM_FALLBACK_MODELS (comma list, OpenRouter only),
 //! MAILCRAFT_LLM_REASONING (off|low|medium|high, default off,
-//! OpenRouter only), MAILCRAFT_LLM_GUARDRAILS (default|spicrawl), OPENROUTER_API_KEY (OPENAI_API_KEY for openai).
+//! OpenRouter only), MAILCRAFT_LLM_GUARDRAILS (default|api-product), OPENROUTER_API_KEY (OPENAI_API_KEY for openai).
 //! The key is never logged: `Debug` of this type and of `OpenAiCompatConfig` redact it.
 use crate::personalize::Guardrails;
 use crate::provider::{OpenAiCompat, OpenAiCompatConfig};
@@ -12,7 +12,7 @@ pub const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash";
 pub struct LlmSettings {
     pub provider: OpenAiCompatConfig,
     pub model: String,
-    /// MAILCRAFT_LLM_GUARDRAILS=default|spicrawl: pass to `PersonalizeRequest.guardrails`.
+    /// MAILCRAFT_LLM_GUARDRAILS=default|api-product: pass to `PersonalizeRequest.guardrails`.
     pub guardrails: Guardrails,
 }
 
@@ -79,10 +79,10 @@ impl LlmSettings {
             .unwrap_or("default")
         {
             "default" => Guardrails::default(),
-            "spicrawl" => Guardrails::spicrawl(),
+            "api-product" => Guardrails::api_product(),
             o => {
                 return Err(format!(
-                    "unknown MAILCRAFT_LLM_GUARDRAILS {o:?} (default|spicrawl)"
+                    "unknown MAILCRAFT_LLM_GUARDRAILS {o:?} (default|api-product)"
                 ))
             }
         };
@@ -144,7 +144,7 @@ mod tests {
         let s = LlmSettings::from_lookup(env(&[
             k,
             ("MAILCRAFT_LLM_REASONING", "low"),
-            ("MAILCRAFT_LLM_GUARDRAILS", "spicrawl"),
+            ("MAILCRAFT_LLM_GUARDRAILS", "api-product"),
         ]))
         .unwrap();
         assert_eq!(

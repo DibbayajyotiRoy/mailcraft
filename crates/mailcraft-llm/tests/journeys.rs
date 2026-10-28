@@ -66,8 +66,8 @@ fn s(subject: &str, pre: &str, greeting: &str, body: &[&str], cta: &str) -> Slot
 }
 fn fb(id: &str) -> Slots {
     s(
-        &format!("Spicrawl: {id}"),
-        "A note from Spicrawl",
+        &format!("Acme: {id}"),
+        "A note from Acme",
         "Hi there,",
         &["Static fallback copy."],
         "Open the docs",
@@ -79,7 +79,7 @@ fn journeys() -> Vec<Journey> {
         Journey { id: "J2", fallback: fb("J2"),
             context: json!({"first_name":"Ana","role":"engineer","use_cases":["price monitoring"],"endpoints":["batch"],
                 "has_default_key":true,"onboarding_completed":true,"hours_since_signup":24,"plan_credits":1000,
-                "docs_url":"https://docs.spicrawl.com/batch"}),
+                "docs_url":"https://docs.example.com/batch"}),
             good: s("Your API key is ready", "A short path to your first request", "Hi Ana,",
                 &["You signed up about 24 hours ago and your default key is ready.",
                   "You mentioned price monitoring, so the batch endpoint is a good first call. The free plan has 1,000 credits per month and failed requests cost 0."],
@@ -94,7 +94,7 @@ fn journeys() -> Vec<Journey> {
         Journey { id: "J6", fallback: fb("J6"),
             context: json!({"first_name":"Ana","failures":[{"host":"example.com","error_code":"ERR::UPSTREAM::CHALLENGE","http_status":403,
                 "count":4,"last_seen":"2026-10-26T14:03:00Z","sample_detail":"challenge page","charged_credits":0,"used_js_render":false,
-                "allowed_advice":["js_render=true"],"doc_url":"https://docs.spicrawl.com/docs/errors#UPSTREAM_CHALLENGE"}],
+                "allowed_advice":["js_render=true"],"doc_url":"https://docs.example.com/docs/errors#UPSTREAM_CHALLENGE"}],
                 "requests_total":9,"success_pct_30d":0.44}),
             good: s("example.com returned a challenge page", "It cost 0 credits", "Hi Ana,",
                 &["On 2026-10-26 example.com returned a challenge page (ERR::UPSTREAM::CHALLENGE, HTTP 403) 4 times. These requests cost 0 credits.",
@@ -115,7 +115,7 @@ fn mutations() -> Vec<(&'static str, Mutate, &'static str)> {
             "hallucinated link",
             |s| {
                 s.body_paragraphs
-                    .push("Details at https://docs.spicrawl-help.io/fix".into())
+                    .push("Details at https://docs.example-help.io/fix".into())
             },
             "url",
         ),
@@ -134,16 +134,16 @@ fn mutations() -> Vec<(&'static str, Mutate, &'static str)> {
 
 fn template() -> EmailTemplate {
     EmailTemplate {
-        cta_url: "https://app.spicrawl.com/dashboard".into(),
-        signature: "Roy, Spicrawl".into(),
-        footer: "Spicrawl, 1 Example St".into(),
-        unsubscribe_url: "https://app.spicrawl.com/unsub/abc".into(),
+        cta_url: "https://app.example.com/dashboard".into(),
+        signature: "Roy, Acme".into(),
+        footer: "Acme, 1 Example St".into(),
+        unsubscribe_url: "https://app.example.com/unsub/abc".into(),
     }
 }
 fn generator(p: Arc<Mock>, budget: Arc<dyn BudgetGuard>, spam: Arc<dyn SpamChecker>) -> Generator {
     Generator {
         provider: p,
-        validator: Validator::new(ValidatorConfig::spicrawl()).unwrap(),
+        validator: Validator::new(ValidatorConfig::api_product()).unwrap(),
         spam,
         spam_cfg: SpamConfig::default(),
         budget,
@@ -346,7 +346,7 @@ async fn missing_provider_cost_uses_price_table() {
     let j = &journeys()[0];
     let g = Generator {
         provider: Arc::new(NoCost),
-        validator: Validator::new(ValidatorConfig::spicrawl()).unwrap(),
+        validator: Validator::new(ValidatorConfig::api_product()).unwrap(),
         spam: Arc::new(NoopSpamChecker),
         spam_cfg: SpamConfig::default(),
         budget: Arc::new(NoBudget),
@@ -471,7 +471,7 @@ async fn provider_error_falls_back_without_repair() {
 async fn template_owns_links_and_footer() {
     let j = &journeys()[2];
     let t = template().render_text(&j.good);
-    assert!(t.contains("Read the error docs: https://app.spicrawl.com/dashboard"));
-    assert!(t.contains("Unsubscribe: https://app.spicrawl.com/unsub/abc"));
-    assert!(t.contains("Spicrawl, 1 Example St"));
+    assert!(t.contains("Read the error docs: https://app.example.com/dashboard"));
+    assert!(t.contains("Unsubscribe: https://app.example.com/unsub/abc"));
+    assert!(t.contains("Acme, 1 Example St"));
 }

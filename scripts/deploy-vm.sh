@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build mailcraft on this machine and (re)deploy it to a Debian 12 VM under systemd. No Docker on the VM.
-#   ./scripts/deploy-vm.sh ubuntu@10.0.0.200
+#   ./scripts/deploy-vm.sh user@your-vm
 # First run also creates the user, database, env file, units and runs `mailcraft init`; later runs only
 # put a new release in place and restart the mailcraft units. Every run also (re)installs the pull agent
 # ops/vm/mailcraft-autodeploy.* and enables its timer, which deploys whatever lands on main (the agent

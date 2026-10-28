@@ -29,7 +29,7 @@
           "key": "congrats",
           "type": "send_email",
           "config": {
-            "template": "spicrawl-first-success",
+            "template": "lifecycle-first-success",
             "topic": "product",
             "cap_exempt": true,
             "weekend_ok": true,

@@ -6,6 +6,7 @@ Use test keys (`mc_test_...`) until a human approves go-live. Never print or ask
 
 ## Start here
 - [Quickstart](QUICKSTART.md): docker compose up -d, mailcraft init, mailcraft domain add; no-domain Gmail path
+- [Integrate with your product](INTEGRATION.md): API keys per product, push events (curl, TypeScript, Python, Go), contact endpoint contract, senders, consent, testing
 - [Agent setup](agent-setup.md): MCP URL and config, init flow, what needs a human
 - [AGENTS.md snippet](AGENTS.md): what `mailcraft init` appends to a project
 - [OpenAPI](/openapi.json): single source of truth for REST, CLI and MCP
