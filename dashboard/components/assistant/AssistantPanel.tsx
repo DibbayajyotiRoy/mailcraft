@@ -107,7 +107,7 @@ export function AssistantLauncher() {
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, []);
-  useEffect(() => { if (stick.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight }); }, [a.msgs, a.phase]);
+  useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [a.msgs, a.phase]);
 
   const off = status?.configured === false || !!status?.model?.error;
   const lastStats = [...a.msgs].reverse().find((m) => m.stats)?.stats;
