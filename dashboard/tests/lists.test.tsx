@@ -215,8 +215,7 @@ describe("AddToList dialog", () => {
     expect([d.get("list_id"), d.get("new_name"), d.get("list_label")]).toEqual(["new", "Launch", ""]);
   });
 
-  // BUG (ListsUI.tsx AddBody): `new_name` is uncontrolled, so React's post-action form reset empties it after a rejected add.
-  it.fails("a rejected add keeps the typed list name", async () => {
+  it("a rejected add keeps the typed list name", async () => {
     A.addToList.mockResolvedValue({ error: { code: "already_exists", message: "A list with this name exists.", field: "new_name" } });
     const q = await open({ lists: [] });
     fireEvent.change(q.getByLabelText("New list name"), { target: { value: "VIPs" } });
@@ -417,9 +416,7 @@ describe("ContactsView: list filter, badges and bulk bar", () => {
     expect(bar()).toBeTruthy();
   });
 
-  // BUG (ContactsView.tsx ContactsTab, `picked` state; page.tsx renders <ContactsView> without a key): ticks survive a list or page
-  // change, so the bar counts, and Add to list / Remove from list acts on, people who are no longer on screen. Drop `.fails` once fixed.
-  it.fails("the selection follows the page: moving to another list does not keep ticks for people no longer shown", () => {
+  it("the selection follows the page: moving to another list does not keep ticks for people no longer shown", () => {
     const { rerender } = view();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select ana@example.com" }));
     expect(bar()).toBeTruthy();

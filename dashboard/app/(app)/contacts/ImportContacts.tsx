@@ -47,6 +47,7 @@ function Body({ lists }: { lists: ListItem[] }) {
   const suggested = fileName ? fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() : `Import ${today()}`;
   const listName = named ? newName.trim() : suggested;
   const target: ListTarget = pick === "" ? null : pick === "new" ? (listName ? { name: listName } : null) : { id: pick };
+  const nameMissing = pick === "new" && !listName; // "New list…" with no name would import into no list at all
   const targetKey = JSON.stringify(target);
 
   async function onFile(f?: File) {
@@ -146,7 +147,7 @@ function Body({ lists }: { lists: ListItem[] }) {
               </Select>
             )}
           </Field>
-          {pick === "new" && <Field label="New list name" description="Shown on each contact and in the Lists tab. You can rename it later.">{(a) => <Input {...a} value={named ? newName : suggested} maxLength={100} autoComplete="off" onChange={(e) => { setNamed(true); setNewName(e.target.value); }} />}</Field>}
+          {pick === "new" && <Field label="New list name" description="Shown on each contact and in the Lists tab. You can rename it later." error={nameMissing ? "Give the list a name, or choose Do not add to a list." : undefined}>{(a) => <Input {...a} value={named ? newName : suggested} maxLength={100} autoComplete="off" onChange={(e) => { setNamed(true); setNewName(e.target.value); }} />}</Field>}
         </fieldset>
       )}
       {parsed && !parsed.error && (
@@ -171,7 +172,7 @@ function Body({ lists }: { lists: ListItem[] }) {
       )}
       <div className="flex justify-end gap-2">
         <DialogClose asChild><Button variant="secondary" disabled={progress !== null}>Cancel</Button></DialogClose>
-        <Button disabled={!ok || progress !== null} onClick={run}>{progress !== null ? `Importing ${formatNumber(progress)} of ${formatNumber(ok)}` : `Import ${ok ? formatNumber(ok) : ""} ${ok === 1 ? "contact" : "contacts"}`}</Button>
+        <Button disabled={!ok || progress !== null || nameMissing} onClick={run}>{progress !== null ? `Importing ${formatNumber(progress)} of ${formatNumber(ok)}` : `Import ${ok ? formatNumber(ok) : ""} ${ok === 1 ? "contact" : "contacts"}`}</Button>
       </div>
     </div>
   );

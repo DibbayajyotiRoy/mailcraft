@@ -116,9 +116,7 @@ describe("add / edit dialog", () => {
     expect(T.success).not.toHaveBeenCalled();
   });
 
-  // BUG (sources.tsx SourceForm): the inputs are uncontrolled and React resets a <form action> once the action settles,
-  // error or not, so a rejected save empties name, URL and key. Drop `.fails` when the form keeps what was typed.
-  it.fails("a rejected save keeps what was typed", async () => {
+  it("a rejected save keeps what was typed", async () => {
     A.saveSource.mockResolvedValue({ error: "URL must be https" });
     render(<SourcesCard sources={[]} />);
     click("Add source");
@@ -319,7 +317,7 @@ describe("preview sync", () => {
     resolve({ rows, summary: { new: 1, update: 1, unchanged: 1, skipped: 1 }, list: { name: "Acme app" }, hasMore: true });
     const summary = within(await q.findByRole("list", { name: "Summary" }));
     expect(summary.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["New1", "Update1", "Unchanged1", "Skipped1"]);
-    expect(q.getByText("A sample: only the first page (there is more). A full read happens every 24 hours.")).toBeTruthy();
+    expect(q.getByText("A sample: only the first page (there is more). Everything is read again every 24 hours.")).toBeTruthy();
     expect(q.getByText("Added to Acme app")).toBeTruthy();
     expect(q.getByText("Not a valid email address")).toBeTruthy(); // a skipped row carries its reason, not blank cells
   });
@@ -332,11 +330,11 @@ describe("preview sync", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("with full reads off, the note says never (and no 'there is more')", async () => {
+  it("with full reads off, the note says full reads are off (and no 'there is more')", async () => {
     A.previewSource.mockResolvedValue({ rows: [], summary: { new: 0, update: 0, unchanged: 0, skipped: 0 }, list: null, hasMore: false });
     render(<SourcesCard sources={[fresh]} />);
     click("Preview the next sync of Newsletter");
-    expect(await screen.findByText("A sample: only the first page. A full read happens never.")).toBeTruthy();
+    expect(await screen.findByText("A sample: only the first page. Full reads are off.")).toBeTruthy();
     expect(screen.getByText("No rows in this group.")).toBeTruthy();
   });
 

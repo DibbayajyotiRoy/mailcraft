@@ -49,7 +49,7 @@ describe("ContactDiff summary and chips", () => {
       expect(bodyRows()).toHaveLength(1);
       expect(within(bodyRows()[0]).getByText(label, { selector: "span" })).toBeTruthy();
       expect(bodyRows()[0].textContent).toContain(email);
-      expect(screen.getByRole("status").textContent).toBe("Showing 1 of 1 rows");
+      expect(screen.getByRole("status").textContent).toBe("Showing 1 of 1 row");
     }
     fireEvent.click(chip("All 4"));
     expect(bodyRows()).toHaveLength(4);

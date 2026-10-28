@@ -38,7 +38,10 @@ export function SuppressedBadge({ c }: { c: Contact }) {
 /** "All contacts" and one chip per list with its count. Plain links: the list is part of the URL, so it survives reloads and sharing. */
 function ListFilter({ lists, active, search }: { lists: ListItem[]; active?: string; search: string }) {
   if (!lists.length) return null;
-  const href = (id?: string) => `/contacts?${new URLSearchParams({ ...(id ? { list: id } : {}), ...(search ? { q: search } : {}) })}`;
+  const href = (id?: string) => {
+    const qs = new URLSearchParams({ ...(id ? { list: id } : {}), ...(search ? { q: search } : {}) }).toString();
+    return qs ? `/contacts?${qs}` : "/contacts";
+  };
   const chip = (on: boolean) => cn("inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-sm transition-colors duration-[var(--dur-fast)] pointer-coarse:h-11",
     on ? "border-accent bg-accent-soft font-medium text-fg" : "border-border text-muted hover:bg-surface-2 hover:text-fg");
   return (
@@ -91,8 +94,10 @@ function ContactsTab({ contacts, error, search, lists, activeList }: { contacts:
     );
   }
   const ids = contacts.flatMap((c) => (c.id ? [c.id] : []));
-  const all = ids.length > 0 && ids.every((id) => picked.includes(id));
-  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  // Ticks only count for people on screen: after a list, search or page change the old ones are gone from view.
+  const sel = picked.filter((id) => ids.includes(id));
+  const all = ids.length > 0 && ids.every((id) => sel.includes(id));
+  const toggle = (id: string) => setPicked((p) => (sel.includes(id) ? p.filter((x) => x !== id) : [...sel, id]));
   return (
     <div className="grid gap-4">
       <ListFilter lists={lists} active={activeList} search={search} />
@@ -102,7 +107,7 @@ function ContactsTab({ contacts, error, search, lists, activeList }: { contacts:
         <Input type="search" name="q" aria-label="Search contacts" placeholder={active ? `Search ${active.name}, then Enter` : "Search by email or name, then Enter"} className="pl-9" defaultValue={search} />
       </form>
       <p role="status" className="sr-only">{contacts.length} contacts{search ? ` matching ${search}` : ""}{active ? ` on ${active.name}` : ""}</p>
-      {picked.length > 0 && <BulkBar ids={picked} contacts={contacts} lists={lists} active={active} clear={() => setPicked([])} />}
+      {sel.length > 0 && <BulkBar ids={sel} contacts={contacts} lists={lists} active={active} clear={() => setPicked([])} />}
       {!contacts.length ? (
         <EmptyState variant="no-results" title={filtered && !search ? "Nobody is on this list yet" : "No contacts match"}
           description={filtered && !search ? "Tick contacts on All contacts and choose Add to list, or import a CSV into it." : `No contact has “${search}” in their email or name.`}
@@ -114,8 +119,8 @@ function ContactsTab({ contacts, error, search, lists, activeList }: { contacts:
             <TH>Contact</TH><TH>Name</TH><TH>Lists</TH><TH>Status</TH><TH>Added</TH></TR></THead>
           <TBody>
             {contacts.map((c) => (
-              <TR key={c.id ?? c.email} className={cn(c.id && picked.includes(c.id) && "bg-accent-soft")}>
-                <TD label="Select">{c.id && <input type="checkbox" aria-label={`Select ${c.email}`} className="size-4 accent-[var(--accent)]" checked={picked.includes(c.id)} onChange={() => toggle(c.id!)} />}</TD>
+              <TR key={c.id ?? c.email} className={cn(c.id && sel.includes(c.id) && "bg-accent-soft")}>
+                <TD label="Select">{c.id && <input type="checkbox" aria-label={`Select ${c.email}`} className="size-4 accent-[var(--accent)]" checked={sel.includes(c.id)} onChange={() => toggle(c.id!)} />}</TD>
                 <TD label="Contact">
                   <span className="inline-flex items-center gap-2"><Avatar c={c} />
                     <Link href={`/contacts/${encodeURIComponent(c.id ?? c.email)}`} className="rounded-sm font-medium text-accent hover:underline">{c.email}</Link>

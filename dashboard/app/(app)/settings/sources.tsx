@@ -83,7 +83,7 @@ function Preview({ source }: { source: Source }) {
         {res === "loading" || res === null ? <p role="status" className="text-sm text-muted">Reading the first page from the source…</p>
           : res.error ? <p role="alert" className="text-sm font-medium text-bad">{res.error}</p>
           : <ContactDiff caption={`Next sync of ${source.name}`} rows={(res.rows ?? []) as PreviewRow[]} summary={res.summary as PreviewSummary} listName={res.list?.name}
-              sample={`A sample: only the first page${res.hasMore ? " (there is more)" : ""}. A full read happens every ${source.full_sync_hours || "no"} hours.`.replace("every no hours", "never")} />}
+              sample={`A sample: only the first page${res.hasMore ? " (there is more)" : ""}. ${source.full_sync_hours ? `Everything is read again every ${source.full_sync_hours} hours.` : "Full reads are off."}`} />}
       </DialogContent>
     </Dialog>
   );
@@ -94,19 +94,22 @@ function SourceForm({ source, close }: { source?: Source; close: () => void }) {
   const [t, test] = useActionState(testSource, {} as Result);
   const seen = useRef<Result>(undefined);
   useEffect(() => { if (s.ok && seen.current !== s) { seen.current = s; toast.success(s.ok); close(); } }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Controlled, so a rejected save keeps what was typed (React 19 resets a <form action> once it settles). The key lives only here, never echoed by the server.
+  const [v, setV] = useState({ name: source?.name ?? "", url: source?.url ?? "", key: "", interval_minutes: String(source?.interval_minutes ?? 15), full_sync_hours: String(source?.full_sync_hours ?? 24), list_name: "" });
+  const bind = (k: keyof typeof v) => ({ value: v[k], onChange: (e: React.ChangeEvent<HTMLInputElement>) => setV((p) => ({ ...p, [k]: e.target.value })) });
   return (
     <form action={act} className="grid gap-4">
       {source && <input type="hidden" name="id" value={source.id} />}
-      <Field label="Name" description="Shown in Settings and, by default, as the name of the list its contacts go on.">{(a) => <Input {...a} name="name" defaultValue={source?.name} required maxLength={100} autoComplete="off" placeholder="Acme app" />}</Field>
-      <Field label="URL" description="The endpoint that lists your contacts. An internal address is fine.">{(a) => <Input {...a} name="url" type="url" mono defaultValue={source?.url} required autoComplete="off" placeholder="http://acme-api.internal:8080/internal/contacts" />}</Field>
+      <Field label="Name" description="Shown in Settings and, by default, as the name of the list its contacts go on.">{(a) => <Input {...a} name="name" {...bind("name")} required maxLength={100} autoComplete="off" placeholder="Acme app" />}</Field>
+      <Field label="URL" description="The endpoint that lists your contacts. An internal address is fine.">{(a) => <Input {...a} name="url" type="url" mono {...bind("url")} required autoComplete="off" placeholder="http://acme-api.internal:8080/internal/contacts" />}</Field>
       <Field label="API key" description={source ? "Leave blank to keep the stored key. Type a new one to rotate it. It is never shown again." : "Sent as a Bearer token. Stored encrypted and never shown again."}>
-        {(a) => <Input {...a} name="key" type="password" mono required={!source} autoComplete="new-password" placeholder={source ? "••••••••••••" : "sk_…"} />}
+        {(a) => <Input {...a} name="key" type="password" mono {...bind("key")} required={!source} autoComplete="new-password" placeholder={source ? "••••••••••••" : "sk_…"} />}
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Check every (minutes)">{(a) => <Input {...a} name="interval_minutes" type="number" min={1} max={1440} defaultValue={source?.interval_minutes ?? 15} required />}</Field>
-        <Field label="Read everything every (hours)" description="0 = never. Catches changes the source does not timestamp.">{(a) => <Input {...a} name="full_sync_hours" type="number" min={0} max={720} defaultValue={source?.full_sync_hours ?? 24} required />}</Field>
+        <Field label="Check every (minutes)">{(a) => <Input {...a} name="interval_minutes" type="number" min={1} max={1440} {...bind("interval_minutes")} required />}</Field>
+        <Field label="Read everything every (hours)" description="0 = never. Catches changes the source does not timestamp.">{(a) => <Input {...a} name="full_sync_hours" type="number" min={0} max={720} {...bind("full_sync_hours")} required />}</Field>
       </div>
-      {!source && <Field label="List name" description="Contacts from this source go on this list. Blank = the source's name. You can rename it later.">{(a) => <Input {...a} name="list_name" autoComplete="off" maxLength={100} />}</Field>}
+      {!source && <Field label="List name" description="Contacts from this source go on this list. Blank = the source's name. You can rename it later.">{(a) => <Input {...a} name="list_name" autoComplete="off" maxLength={100} {...bind("list_name")} />}</Field>}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" variant="secondary" size="sm" formAction={test}><Plug aria-hidden />Test connection</Button>
         <Outcome s={t} />

@@ -59,7 +59,7 @@ export function DiffTable({ caption, columns, rows, summary, sample, pageSize = 
       {sample && <p className="text-xs text-muted">{sample}</p>}
       <div className="overflow-x-auto"><SegmentedControl label="Show rows" value={filter} onValueChange={(v) => { setFilter(v); setShown(pageSize); }}
         options={FILTERS.map(([value, label]) => ({ value, label: `${label} ${count(value)}` }))} /></div>
-      <p role="status" className="sr-only">Showing {Math.min(shown, visible.length)} of {visible.length} rows</p>
+      <p role="status" className="sr-only">Showing {Math.min(shown, visible.length)} of {visible.length} {visible.length === 1 ? "row" : "rows"}</p>
       {visible.length === 0 ? <p className="rounded-md bg-surface-2 px-3 py-4 text-sm text-muted">No rows in this group.</p> : (
         <Table caption={caption} stack={false}>
           <THead><TR><TH>Status</TH>{columns.map((c) => <TH key={c.id} className={c.className}>{c.header}</TH>)}</TR></THead>

@@ -51,6 +51,7 @@ export function AddToList({ ids, label, lists, children }: { ids: string[]; labe
 function AddBody({ ids, lists, close }: { ids: string[]; lists: ListItem[]; close: () => void }) {
   const [s, act] = useActionState<FormState, FormData>(addToList, {});
   const [pick, setPick] = useState(lists[0]?.id ?? "new");
+  const [newName, setNewName] = useState(""); // controlled: a rejected add keeps it (React resets a <form action> once it settles)
   const seen = useRef<FormState>(undefined);
   useEffect(() => { if (s.ok && seen.current !== s) { seen.current = s; toast.success(s.ok); close(); } }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
   const label = lists.find((l) => l.id === pick)?.name ?? "";
@@ -66,7 +67,7 @@ function AddBody({ ids, lists, close }: { ids: string[]; lists: ListItem[]; clos
           </Select>
         )}
       </Field>
-      {pick === "new" && <Field label="New list name" error={s.error?.field === "new_name" ? s.error.message : undefined}>{(a) => <Input {...a} name="new_name" autoComplete="off" required placeholder="Webinar Oct 2026" />}</Field>}
+      {pick === "new" && <Field label="New list name" error={s.error?.field === "new_name" ? s.error.message : undefined}>{(a) => <Input {...a} name="new_name" autoComplete="off" required placeholder="Webinar Oct 2026" value={newName} onChange={(e) => setNewName(e.target.value)} />}</Field>}
       {s.error && !["list_id", "new_name"].includes(s.error.field ?? "") && <ErrorState error={s.error} />}
       <div className="flex justify-end gap-2">
         <DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose>
@@ -79,12 +80,13 @@ function AddBody({ ids, lists, close }: { ids: string[]; lists: ListItem[]; clos
 function ListBody({ list, close }: { list?: ListItem; close: () => void }) {
   const [s, act] = useActionState<FormState, FormData>(saveList, {});
   const seen = useRef<FormState>(undefined);
+  const [name, setName] = useState(list?.name ?? ""), [description, setDescription] = useState(list?.description ?? "");
   useEffect(() => { if (s.ok && seen.current !== s) { seen.current = s; toast.success(s.ok); close(); } }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <form action={act} className="grid gap-4">
       {list && <input type="hidden" name="id" value={list.id} />}
-      <Field label="Display name" error={s.error?.field === "name" ? s.error.message : undefined}>{(a) => <Input {...a} name="name" defaultValue={list?.name} required maxLength={100} autoComplete="off" />}</Field>
-      <Field label="Description" description="Optional. Where these people came from, or what the list is for.">{(a) => <Textarea {...a} name="description" defaultValue={list?.description ?? ""} rows={3} maxLength={500} />}</Field>
+      <Field label="Display name" error={s.error?.field === "name" ? s.error.message : undefined}>{(a) => <Input {...a} name="name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} autoComplete="off" />}</Field>
+      <Field label="Description" description="Optional. Where these people came from, or what the list is for.">{(a) => <Textarea {...a} name="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} maxLength={500} />}</Field>
       {s.error && s.error.field !== "name" && <ErrorState error={s.error} />}
       <div className="flex justify-end gap-2">
         <DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose>

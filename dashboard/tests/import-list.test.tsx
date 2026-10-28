@@ -176,6 +176,15 @@ describe("the chosen target reaches the server", () => {
     await waitFor(() => expect(lastTarget()).toEqual({ name: nameBox().value }));
   });
 
+  it("a blank 'New list…' name is refused instead of importing into no list", async () => {
+    await openWith(csv);
+    fireEvent.change(nameBox(), { target: { value: "  " } });
+    expect(await screen.findByText("Give the list a name, or choose Do not add to a list.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: /^Import \d+ contacts?$/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(listSelect(), { target: { value: "" } }); // explicitly no list: fine again
+    expect((screen.getByRole("button", { name: /^Import \d+ contacts?$/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("every chunk of a big file carries the same target, in the preview and in the import", async () => {
     const big = "email\n" + Array.from({ length: 1001 }, (_, i) => `z${i}@example.com`).join("\n");
     await openWith(big);
