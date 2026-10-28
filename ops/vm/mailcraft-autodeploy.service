@@ -1,0 +1,16 @@
+[Unit]
+Description=mailcraft pull-based deploy (polls the GitHub release vm-latest)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mailcraft-autodeploy
+StateDirectory=mailcraft-autodeploy
+TimeoutStartSec=20min
+Nice=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/mailcraft

@@ -1,0 +1,61 @@
+name: vm-build
+# Builds the LAN VM's release (scripts/build-vm-release.sh, the same build `scripts/deploy-vm.sh` uses) on every push
+# to main and publishes it as the rolling prerelease `vm-latest`. The VM polls that release and deploys it
+# (ops/vm/mailcraft-autodeploy.sh), so nothing here needs a path into the private LAN and there are no SSH secrets.
+# Never add pull_request/pull_request_target triggers: this job holds a write token and publishes what it builds.
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency: { group: vm-build, cancel-in-progress: false }
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions: { contents: write }
+    env:
+      MAILCRAFT_RELEASE_ID: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # dependencies only: they change with Cargo.lock, the workspace crates are rebuilt every time
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/mc-vm/cargo
+            ${{ runner.temp }}/mc-vm/target
+          key: vm-rust-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: vm-rust-
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22, cache: npm, cache-dependency-path: dashboard/package-lock.json }
+      - name: Build (rust in rust:1.99.1-bookworm, dashboard standalone, pack)
+        env:
+          MAILCRAFT_CARGO_CACHE: ${{ runner.temp }}/mc-vm/cargo
+          MAILCRAFT_TARGET_CACHE: ${{ runner.temp }}/mc-vm/target
+        run: scripts/build-vm-release.sh
+      # the container ran as root; hand its cache dirs back so the cache action can save them
+      - run: sudo chown -R "$USER" "$RUNNER_TEMP/mc-vm"
+      - name: Publish rolling release vm-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Only the newest main is ever published: a slow build or a re-run of an old commit must not roll vm-latest back.
+          head=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+          if [ "$head" != "$GITHUB_SHA" ]; then echo "main is now $head; not publishing $GITHUB_SHA"; exit 0; fi
+
+          cd target/vm-dist
+          tgz=mailcraft-vm-$GITHUB_SHA.tar.gz
+          gh release view vm-latest >/dev/null 2>&1 ||
+            gh release create vm-latest --prerelease --target "$GITHUB_SHA" --title "VM build (rolling)" --notes "building"
+          gh release upload vm-latest "$tgz" "$tgz.sha256" --clobber
+          # keep the tag on the commit the assets were built from
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/vm-latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          # The body is the pointer the VM reads, so it flips last: the assets it names are already there.
+          printf 'sha: %s\nbuilt: %s\nrun: %s/%s/actions/runs/%s\n' "$GITHUB_SHA" "$(date -u +%FT%TZ)" \
+            "$GITHUB_SERVER_URL" "$GH_REPO" "$GITHUB_RUN_ID" | gh release edit vm-latest --prerelease --notes-file -
+          # drop the previous build's assets
+          gh release view vm-latest --json assets --jq '.assets[].name' | { grep -v -F "mailcraft-vm-$GITHUB_SHA." || true; } |
+            while read -r name; do gh release delete-asset vm-latest "$name" --yes; done
