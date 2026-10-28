@@ -19,6 +19,6 @@ const LABEL: Record<string, string> = {
   domain_not_verified: "Domain not verified", transport_missing: "Sender not ready", sender_not_ready: "Sender not ready", transport_not_found: "Sender not ready",
   kill_switch_active: "Kill switch is on", blocked_by_policy: "Blocked by a send policy", forbidden_scope: "This key lacks permission", unauthenticated: "Not signed in",
   template_render_failed: "Template does not render", template_unpublished: "Template not published", empty_audience: "Nobody would receive it", test_key_live_recipient: "Test key can't reach real people",
-  rate_limited: "Rate limited", unreachable: "Can't reach the mailcraft API",
+  rate_limited: "Rate limited", unreachable: "Can't reach the mailcraft API", not_found: "Not found",
 };
 export const errorLabel = (e: ApiErr) => (isGoLive(e) ? "Needs go-live approval" : e.code ? LABEL[e.code] : undefined);

@@ -454,3 +454,23 @@ test("isGoLive is pinned to the wording emails.rs plan() returns today (TODO in 
   expect(isGoLive({ ...real, message: "x", hint: undefined })).toBe(false);
   expect(isGoLive({ code: "blocked_by_policy", message: "x", rule: "go_live" })).toBe(true); // forward compatible
 });
+
+import { describe as describeGet, expect as expectGet, it as itGet } from "vitest";
+import { runTool as runToolForGet } from "@/lib/assistant/tools";
+import { ctx as kitCtx, fakeWorld as kitWorld } from "./assistant-kit";
+
+describeGet("get: a missing contact is a normal result", () => {
+  itGet("reports 'No contact … yet' as done (not an error) and tells the model it can still send", async () => {
+    kitWorld([]); // no routes: every API call answers 404 not_found
+    const r: any = await runToolForGet("get", JSON.stringify({ kind: "contact", id: "new@example.com" }), kitCtx(), new Set() as any);
+    expectGet(r.error).toBeFalsy();
+    expectGet(r.done).toBe("No contact for new@example.com yet");
+    expectGet(r.content).toContain("can still be sent");
+  });
+  itGet("other missing kinds get a readable 'Not found' label", async () => {
+    kitWorld([]);
+    const r: any = await runToolForGet("get", JSON.stringify({ kind: "template", id: "nope" }), kitCtx(), new Set() as any);
+    expectGet(r.error).toBe(true);
+    expectGet(r.done).toBe("Not found");
+  });
+});
