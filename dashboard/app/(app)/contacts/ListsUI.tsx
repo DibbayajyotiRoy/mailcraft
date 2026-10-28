@@ -21,17 +21,18 @@ import { originLabel, pickableLists, type ListItem, type ListRef } from "./util"
 /** The lists a contact is on, as small badges (a source's list reads "from <name>"). At most `max`, then "+N". */
 export function ListBadges({ lists, max = 3 }: { lists?: ListRef[]; max?: number }) {
   if (!lists?.length) return null;
+  // Spans with list roles, not <ul>: the contact page puts these inside the header's <p>, where a <ul> is invalid HTML and breaks hydration.
   return (
-    <ul aria-label="Lists" className="flex flex-wrap gap-1">
+    <span role="list" aria-label="Lists" className="inline-flex flex-wrap gap-1 align-middle">
       {lists.slice(0, max).map((l) => (
-        <li key={l.id}>
+        <span role="listitem" key={l.id}>
           <Link href={`/contacts?list=${encodeURIComponent(l.id)}`} className="rounded-full focus-visible:outline-offset-1">
             <Badge size="sm" tone={l.origin === "source" ? "info" : "neutral"} className="hover:underline">{l.origin === "source" ? `from ${l.name}` : l.name}</Badge>
           </Link>
-        </li>
+        </span>
       ))}
-      {lists.length > max && <li><Tooltip content={lists.slice(max).map((l) => l.name).join(", ")}><span tabIndex={0}><Badge size="sm">+{lists.length - max}</Badge></span></Tooltip></li>}
-    </ul>
+      {lists.length > max && <span role="listitem"><Tooltip content={lists.slice(max).map((l) => l.name).join(", ")}><span tabIndex={0}><Badge size="sm">+{lists.length - max}</Badge></span></Tooltip></span>}
+    </span>
   );
 }
 

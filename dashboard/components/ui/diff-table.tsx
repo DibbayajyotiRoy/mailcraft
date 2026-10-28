@@ -7,7 +7,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "./button";
 import { SegmentedControl } from "./segmented-control";
-import { Table, TBody, TD, TH, THead, TR } from "./table";
+import { TBody, TD, TH, THead, TR } from "./table";
 import { cn } from "@/lib/cn";
 
 export type DiffStatus = "new" | "update" | "unchanged" | "skipped";
@@ -61,7 +61,10 @@ export function DiffTable({ caption, columns, rows, summary, sample, pageSize = 
         options={FILTERS.map(([value, label]) => ({ value, label: `${label} ${count(value)}` }))} /></div>
       <p role="status" className="sr-only">Showing {Math.min(shown, visible.length)} of {visible.length} {visible.length === 1 ? "row" : "rows"}</p>
       {visible.length === 0 ? <p className="rounded-md bg-surface-2 px-3 py-4 text-sm text-muted">No rows in this group.</p> : (
-        <Table caption={caption} stack={false}>
+        // Wide table that scrolls sideways on a phone: the scroll region must be reachable by keyboard (axe: scrollable-region-focusable), so it is its own focusable region rather than <Table>'s plain wrapper.
+        <div role="region" aria-label={`${caption}, scrolls sideways`} tabIndex={0} className="w-full overflow-x-auto rounded-lg border border-border">
+        <table className="w-full border-collapse text-sm">
+          <caption className="sr-only">{caption}</caption>
           <THead><TR><TH>Status</TH>{columns.map((c) => <TH key={c.id} className={c.className}>{c.header}</TH>)}</TR></THead>
           <TBody>
             {visible.slice(0, shown).map((r, i) => (
@@ -76,7 +79,8 @@ export function DiffTable({ caption, columns, rows, summary, sample, pageSize = 
               </TR>
             ))}
           </TBody>
-        </Table>
+        </table>
+        </div>
       )}
       {visible.length > shown && <div><Button variant="secondary" size="sm" onClick={() => setShown((n) => n + pageSize)}>Show {Math.min(pageSize, visible.length - shown)} more</Button></div>}
     </div>

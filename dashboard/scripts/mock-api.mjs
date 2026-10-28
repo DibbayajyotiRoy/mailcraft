@@ -1,4 +1,5 @@
-// Mock of the mailcraft REST API for UI work and QA, covering every route the dashboard calls (lists + detail):
+// Mock of the mailcraft REST API for UI work and QA, covering every route the dashboard calls (lists + detail,
+// contact lists, contact sources, the CSV import dry run):
 //   node scripts/mock-api.mjs [port]          (default 18080)
 //   EMPTY=1 node scripts/mock-api.mjs         every list is empty (empty-state screens)
 //   FAIL=1  node scripts/mock-api.mjs         every route returns 503 (error-state screens)
@@ -162,11 +163,29 @@ const runDetail = (r) => ({ ...r, steps: [
 ] });
 const EVENT_NAMES = [{ name: "signed_up", count: 1204, last_seen_at: ago(4) }, { name: "logged_in", count: 9841, last_seen_at: ago(1) }, { name: "upgraded", count: 88, last_seen_at: ago(300) }, { name: "invoice_paid", count: 310, last_seen_at: ago(900) }];
 
+// Contact lists are manual segments that also know where they came from (origin). Nudged shares its id with the manual segment of the same name.
+const L = (id, name, origin, member_count, o = {}) => ({ id, name, description: null, origin, source_id: null, detached: false, member_count, created_at: ago(60 * 24 * 10), ...o });
+const CONTACT_LISTS = [
+  L("l1", "Acme app users", "source", 1284, { source_id: "src1", created_at: ago(60 * 24 * 21) }),
+  L("l2", "Billing system", "source", 312, { source_id: "src2", created_at: ago(60 * 24 * 12) }),
+  L("l3", "Marketing site signups", "source", 0, { source_id: "src3", created_at: ago(60 * 3) }),
+  L("l4", "Webinar Oct 2026", "import", 87, { description: "Imported from webinar-oct-2026.csv", created_at: ago(60 * 24 * 2) }),
+  L("l5", "Beta testers", "manual", 23, { description: "People who asked for early access.", created_at: ago(60 * 24 * 30) }),
+  L("s2", "Nudged", "manual", 42, { created_at: ago(60 * 24 * 8) }),
+  L("l7", "Old CRM", "source", 156, { detached: true, created_at: ago(60 * 24 * 120) }),
+];
+const sortLists = () => CONTACT_LISTS.sort((a, b) => a.name.localeCompare(b.name));
+sortLists();
+const listBy = (k) => CONTACT_LISTS.find((l) => l.id === k || l.name === k);
+const ref = ({ id, name, origin }) => ({ id, name, origin });
+const refs = (...ks) => ks.map((k) => ref(listBy(k)));
+let nextList = 10, nextContact = 10;
+
 const CONTACTS = [
-  { id: "c1", email: "ana@example.com", first_name: "Ana", last_name: "Silva", timezone: "Europe/Berlin", created_at: ago(500), properties: { plan: "pro", seats: 4, beta: true, tags: ["vip", "eu"] }, suppressed: false, suppression_reason: null },
-  { id: "c2", email: "ben@example.com", first_name: "Ben", created_at: ago(60 * 24), properties: { plan: "free" }, suppressed: false, suppression_reason: null },
-  { id: "c3", email: "bounce@example.com", suppressed: true, suppression_reason: "hard_bounce", created_at: ago(60 * 24 * 9), properties: {} },
-  { id: "c4", email: "cy@example.com", first_name: "Cy", last_name: "Okafor", created_at: ago(60 * 24 * 20), properties: { plan: "pro" }, suppressed: false, suppression_reason: null },
+  { id: "c1", email: "ana@example.com", first_name: "Ana", last_name: "Silva", timezone: "Europe/Berlin", created_at: ago(500), properties: { plan: "pro", seats: 4, beta: true, tags: ["vip", "eu"] }, suppressed: false, suppression_reason: null, lists: refs("l1", "l5", "s2", "l4") },
+  { id: "c2", email: "ben@example.com", first_name: "Ben", created_at: ago(60 * 24), properties: { plan: "free" }, suppressed: false, suppression_reason: null, lists: refs("l1", "l4") },
+  { id: "c3", email: "bounce@example.com", suppressed: true, suppression_reason: "hard_bounce", created_at: ago(60 * 24 * 9), properties: {}, lists: refs("l4") },
+  { id: "c4", email: "cy@example.com", first_name: "Cy", last_name: "Okafor", created_at: ago(60 * 24 * 20), properties: { plan: "pro" }, suppressed: false, suppression_reason: null, lists: refs("l1", "s2") },
 ];
 const ACTIVITY = {
   events: [
@@ -188,6 +207,70 @@ const SEGMENTS = [
   { id: "s2", name: "Nudged", member_count: 42 },
   { id: "s3", name: "EU or UK", member_count: 310, filter: { or: [{ field: "properties.country", op: "in", value: ["DE", "FR"] }, { field: "properties.country", op: "eq", value: "GB" }] } },
 ];
+
+// Contact sources: one that works, one whose last sync failed (and is paused), one that never ran. `list_id` ties a source to its list.
+const SOURCES = [
+  { id: "src1", name: "Acme app", url: "http://acme-api.internal:8080/internal/contacts", enabled: true, interval_minutes: 15, full_sync_hours: 24, last_full_at: ago(60 * 5), watermark: ago(6), last_run_at: ago(6), last_status: "ok", last_error: null,
+    last_counts: { created: 12, updated: 48, skipped: 2, deleted: 1, fetched: 63, reasons: { invalid_email: 2 } }, created_at: ago(60 * 24 * 21), list_id: "l1" },
+  { id: "src2", name: "Billing system", url: "https://billing.example.com/api/customers", enabled: false, interval_minutes: 60, full_sync_hours: 0, last_full_at: null, watermark: null, last_run_at: ago(35), last_status: "error",
+    last_error: "The source answered 401 Unauthorized: it rejected the API key. Rotate the key in Edit, then press Sync now.", last_counts: null, created_at: ago(60 * 24 * 12), list_id: "l2" },
+  { id: "src3", name: "Marketing site", url: "https://www.example.com/api/subscribers", enabled: true, interval_minutes: 1440, full_sync_hours: 24, last_full_at: null, watermark: null, last_run_at: null, last_status: null, last_error: null,
+    last_counts: null, created_at: ago(60 * 3), list_id: "l3" },
+];
+const sourceOut = ({ list_id, ...x }) => { const l = list_id && listBy(list_id); return { ...x, list: l ? { id: l.id, name: l.name } : null }; };
+const findSource = (k) => SOURCES.find((x) => x.id === k);
+const taken = (name, except) => [...CONTACT_LISTS, ...SEGMENTS].some((x) => x.id !== except && x.name.toLowerCase() === name.toLowerCase());
+const tzOk = (t) => { try { new Intl.DateTimeFormat("en", { timeZone: t }); return true; } catch { return false; } };
+
+// What the next sync would do, first page only (rows shaped like POST /v1/contact-sources/{id}/sync?dry_run=true).
+const newRow = (index, email, external_id, first_name, last_name, timezone, properties) => ({ index, email, external_id, status: "new", changes: [], list: "add", values: { first_name, last_name, timezone, properties } });
+const PREVIEW_ROWS = {
+  src1: [
+    newRow(0, "nia@example.com", "u_1041", "Nia", "Okoro", "Africa/Lagos", { plan: "pro", seats: 3 }),
+    { index: 1, email: "ana@example.com", external_id: "u_0007", status: "update", changes: [{ field: "properties.plan", old: "pro", new: "team" }, { field: "properties.seats", old: 4, new: 12 }], list: "already", values: null },
+    { index: 2, email: "ben@example.com", external_id: "u_0012", status: "update", changes: [{ field: "last_name", old: null, new: "Adeyemi" }, { field: "timezone", old: null, new: "Europe/London" }], list: "already", values: null },
+    { index: 3, email: "cy@example.com", external_id: "u_0031", status: "unchanged", changes: [], list: "already", values: null },
+    newRow(4, "dee@example.com", "u_1042", "Dee", null, null, { plan: "free" }),
+    { index: 5, email: "gone@example.com", external_id: "u_0099", status: "update", changes: [{ field: "suppressed", old: false, new: "deleted_at_source" }], list: null, values: null },
+    { index: 6, email: "ana.silva@example.com", external_id: "u_0008", status: "skipped", reason: "duplicate_email" },
+    { index: 7, email: "", external_id: "u_0100", status: "skipped", reason: "malformed" },
+  ],
+  src3: [
+    newRow(0, "kai@example.com", "s_1", "Kai", "Lindqvist", "Europe/Stockholm", {}), newRow(1, "lou@example.com", "s_2", "Lou", null, null, { source: "footer" }),
+    newRow(2, "mia@example.com", "s_3", null, null, null, {}), newRow(3, "noor@example.com", "s_4", "Noor", "Haddad", "Asia/Dubai", { source: "blog" }),
+  ],
+};
+const summarize = (rows) => rows.reduce((a, r) => ({ ...a, [r.status]: a[r.status] + 1 }), { new: 0, update: 0, unchanged: 0, skipped: 0 });
+const syncCounts = { created: 3, updated: 7, skipped: 1, deleted: 0, fetched: 11, reasons: { invalid_email: 1 } };
+
+// POST /v1/contacts/import {dry_run}: what each row would do, mirroring the server (diff of names, time zone and attributes; list membership).
+const changesOf = (c, n) => {
+  const out = [];
+  for (const f of ["first_name", "last_name", "timezone"]) if (n[f] != null && n[f] !== "" && (c[f] ?? null) !== n[f]) out.push({ field: f, old: c[f] ?? null, new: n[f] });
+  for (const [k, v] of Object.entries(n.properties ?? {})) if (JSON.stringify(c.properties?.[k]) !== JSON.stringify(v)) out.push({ field: `properties.${k}`, old: c.properties?.[k] ?? null, new: v });
+  return out;
+};
+function importPlan(b) {
+  let target = null;
+  if (b.list_id) { const l = listBy(b.list_id); if (!l) return { error: { code: "not_found", message: "list not found", field: "list_id" }, status: 404 }; target = { id: l.id, name: l.name, exists: true }; }
+  else if (b.list_name) { const l = CONTACT_LISTS.find((x) => x.name.toLowerCase() === String(b.list_name).trim().toLowerCase()); target = { id: l?.id ?? null, name: l?.name ?? String(b.list_name).trim(), exists: !!l }; }
+  const summary = { new: 0, update: 0, unchanged: 0, skipped: 0, list_adds: 0 };
+  const rows = (b.contacts ?? []).map((c, index) => {
+    const email = String(c.email ?? "").trim().toLowerCase();
+    const skip = (reason, message) => { summary.skipped++; return { index, email, status: "skipped", reason, message }; };
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /^bad@/.test(email)) return skip("invalid_email", `\`${email}\` is not a valid email address`);
+    if (c.properties != null && (typeof c.properties !== "object" || Array.isArray(c.properties))) return skip("invalid_properties", "properties must be a JSON object");
+    if (c.timezone && !tzOk(c.timezone)) return skip("invalid_timezone", `\`${c.timezone}\` is not an IANA timezone (e.g. Europe/Berlin)`);
+    const have = CONTACTS.find((x) => x.email === email), changes = have ? changesOf(have, c) : [];
+    const status = !have ? "new" : changes.length ? "update" : "unchanged";
+    summary[status]++;
+    const list = target ? (have?.lists?.some((x) => x.id === target.id) ? "already" : "add") : null;
+    if (list === "add") summary.list_adds++;
+    return { index, email, status, changes, list, values: status === "new" ? { first_name: c.first_name ?? null, last_name: c.last_name ?? null, timezone: c.timezone ?? null, properties: c.properties ?? null } : null };
+  });
+  return { target, summary, rows };
+}
+
 
 const status = { env: "test", live_enabled: false, name: "Acme", key_prefix: "mc_test_8f3a", scopes: ["read", "send", "manage", "admin"], kill_switch: false, pending_approvals: APPROVALS.length, verified: true };
 const settings = { llm_provider: { kind: "openrouter", model: "nvidia/nemotron-3.5-super-vl:free", base_url: null, api_key_set: true }, delivery_path: { kind: "smtp-relay", detail: "postmark via smtp.postmarkapp.com:587" }, default_from: "Acme <hello@mail.example.com>", reply_to: "support@example.com", custom_instructions: "Be brief and friendly." };
@@ -290,8 +373,104 @@ createServer(async (req, res) => {
   if (req.method !== "GET") {
     if (p === "/v1/contacts/import" || p === "/v1/segments/preview") {
       if (p === "/v1/segments/preview") return body(res, { count: 12, sample: CONTACTS.slice(0, 3).map(({ email, first_name, last_name }) => ({ email, first_name, last_name })) });
+      if (input.list_id && input.list_name) return fail(res, { code: "invalid_request", message: "give list_id or list_name, not both" }, 400);
+      const plan = importPlan(input);
+      if (plan.error) return fail(res, plan.error, plan.status);
+      if (input.dry_run) return body(res, { dry_run: true, summary: plan.summary, list: plan.target, rows: plan.rows });
       const rows = input.contacts ?? [];
-      return body(res, { imported: rows.filter((r) => !/^bad@/.test(r.email)).length, failed: rows.flatMap((r, index) => (/^bad@/.test(r.email) ? [{ index, email: r.email, error: { code: "invalid_request", message: "Rejected by the mock" } }] : [])) });
+      return body(res, { imported: rows.filter((r) => !/^bad@/.test(r.email)).length, failed: rows.flatMap((r, index) => (/^bad@/.test(r.email) ? [{ index, email: r.email, error: { code: "invalid_request", message: "Rejected by the mock" } }] : [])), list_id: plan.target ? plan.target.id ?? "l_import" : null });
+    }
+    if (p === "/v1/lists" && req.method === "POST") {
+      const name = String(b.name ?? "").trim();
+      if (!name) return fail(res, { code: "invalid_request", message: "name is required", field: "name" }, 400);
+      if (taken(name)) return fail(res, { code: "invalid_state", message: `a list or segment named \`${name}\` already exists`, hint: "pick another name", field: "name" }, 409);
+      const l = L(`l${nextList++}`, name, "manual", 0, { description: b.description || null, created_at: ago(0) });
+      CONTACT_LISTS.push(l); sortLists();
+      return body(res, l, {}, 201);
+    }
+    if ((m = p.match(/^\/v1\/(?:lists|segments)\/([^/]+)\/members(\/remove)?$/))) {
+      const l = listBy(decodeURIComponent(m[1])); if (!l) return notFound(res, "list");
+      const ids = b.contact_ids ?? [], emails = (b.emails ?? []).map((e) => String(e).trim().toLowerCase());
+      if (!ids.length && !emails.length) return fail(res, { code: "invalid_request", message: "give contact_ids and/or emails" }, 400);
+      if (m[2]) {
+        let removed = 0;
+        for (const c of CONTACTS) if ((ids.includes(c.id) || emails.includes(c.email)) && c.lists?.some((x) => x.id === l.id)) { c.lists = c.lists.filter((x) => x.id !== l.id); removed++; }
+        l.member_count = Math.max(0, l.member_count - removed);
+        return body(res, { list_id: l.id, removed });
+      }
+      let added = 0, already = 0, missing = 0;
+      const add = (c) => { c.lists ??= []; if (c.lists.some((x) => x.id === l.id)) already++; else { c.lists.push(ref(l)); l.member_count++; added++; } };
+      for (const id of ids) { const c = CONTACTS.find((x) => x.id === id); if (c) add(c); else missing++; }
+      for (const e of emails) {
+        let c = CONTACTS.find((x) => x.email === e);
+        if (!c) { c = { id: `c${nextContact++}`, email: e, created_at: ago(0), properties: {}, suppressed: false, suppression_reason: null, lists: [] }; CONTACTS.push(c); }
+        add(c);
+      }
+      return body(res, { list_id: l.id, added, already_members: already, not_found: missing });
+    }
+    if ((m = p.match(/^\/v1\/lists\/([^/]+)$/))) {
+      const l = listBy(decodeURIComponent(m[1])); if (!l) return notFound(res, "list");
+      if (req.method === "DELETE") {
+        if (l.origin === "source" && !l.detached) return fail(res, { code: "invalid_state", message: "this list is fed by a contact source", hint: "delete the source (optionally with its list) instead" }, 409);
+        CONTACT_LISTS.splice(CONTACT_LISTS.indexOf(l), 1);
+        for (const c of CONTACTS) c.lists = (c.lists ?? []).filter((x) => x.id !== l.id);
+        return body(res, { id: l.id, deleted: true });
+      }
+      if (b.name != null) {
+        const name = String(b.name).trim();
+        if (!name) return fail(res, { code: "invalid_request", message: "name cannot be empty", field: "name" }, 400);
+        if (taken(name, l.id)) return fail(res, { code: "invalid_state", message: `a list or segment named \`${name}\` already exists`, hint: "pick another name", field: "name" }, 409);
+        l.name = name; for (const c of CONTACTS) for (const x of c.lists ?? []) if (x.id === l.id) x.name = name;
+      }
+      if (b.description != null) l.description = b.description || null;
+      sortLists();
+      return body(res, l);
+    }
+    if (p === "/v1/contact-sources/test") {
+      const src = b.id ? findSource(b.id) : null, url = b.url || src?.url || "";
+      if (b.id && !src) return notFound(res, "contact source");
+      if (!url || (!b.key && !src)) return fail(res, { code: "invalid_request", message: "give a url and a key, or the id of a saved source" }, 400);
+      if (src?.id === "src2") return body(res, { ok: false, error: "The source answered 401 Unauthorized: it rejected the API key." });
+      if (/fail|refused/i.test(url)) return body(res, { ok: false, error: `Could not connect to ${url}: connection refused` });
+      if (src?.id === "src3") return body(res, { ok: true, sample_count: 0, has_more: false, fields: [], property_keys: [] });
+      return body(res, { ok: true, sample_count: 1, has_more: true, fields: ["id", "email", "first_name", "last_name", "timezone", "updated_at", "properties"], property_keys: ["plan", "seats"] });
+    }
+    if (p === "/v1/contact-sources" && req.method === "POST") {
+      const name = String(b.name ?? "").trim(), url = String(b.url ?? "").trim(), listName = String(b.list_name || name).trim();
+      if (!name || !b.key) return fail(res, { code: "invalid_request", message: !name ? "name is required" : "key is required", field: !name ? "name" : "key" }, 400);
+      if (!/^https?:\/\/[^/\s@]+(\/|$)/.test(url)) return fail(res, { code: "invalid_request", message: "url must be an http(s) address without credentials", field: "url" }, 400);
+      if (SOURCES.some((x) => x.name.toLowerCase() === name.toLowerCase())) return fail(res, { code: "invalid_state", message: `a contact source named \`${name}\` already exists`, field: "name" }, 409);
+      if (taken(listName)) return fail(res, { code: "invalid_state", message: `a list or segment named \`${listName}\` already exists`, hint: "give the source another list_name", field: "list_name" }, 409);
+      const id = `src${SOURCES.length + 1}`, l = L(`l${nextList++}`, listName, "source", 0, { source_id: id, created_at: ago(0) });
+      CONTACT_LISTS.push(l); sortLists();
+      const x = { id, name, url, enabled: b.enabled !== false, interval_minutes: b.interval_minutes ?? 15, full_sync_hours: b.full_sync_hours ?? 24, last_full_at: null, watermark: null, last_run_at: null, last_status: null, last_error: null, last_counts: null, created_at: ago(0), list_id: l.id };
+      SOURCES.push(x);
+      return body(res, sourceOut(x), {}, 201);
+    }
+    if ((m = p.match(/^\/v1\/contact-sources\/([^/]+)\/sync$/))) {
+      const x = findSource(m[1]); if (!x) return notFound(res, "contact source");
+      const l = listBy(x.list_id);
+      if (q.get("dry_run") === "true") {
+        if (x.last_status === "error") return body(res, { ok: false, error: x.last_error });
+        const rows = PREVIEW_ROWS[x.id] ?? [];
+        return body(res, { ok: true, dry_run: true, sample: true, has_more: x.id === "src1", summary: summarize(rows), list: l ? { id: l.id, name: l.name } : null, rows });
+      }
+      if (x.last_status === "error") return body(res, { id: x.id, ok: false, error: x.last_error, counts: { created: 0, updated: 0, skipped: 0, deleted: 0, fetched: 0, reasons: {} }, watermark: null, duration_ms: 812 });
+      Object.assign(x, { last_run_at: ago(0), last_status: "ok", last_error: null, last_counts: syncCounts, watermark: ago(0) });
+      return body(res, { id: x.id, ok: true, error: null, counts: syncCounts, watermark: x.watermark, duration_ms: 640 });
+    }
+    if ((m = p.match(/^\/v1\/contact-sources\/([^/]+)$/))) {
+      const x = findSource(m[1]); if (!x) return notFound(res, "contact source");
+      if (req.method === "DELETE") {
+        const l = listBy(x.list_id), dropList = q.get("delete_list") === "true";
+        SOURCES.splice(SOURCES.indexOf(x), 1);
+        if (l && dropList) { CONTACT_LISTS.splice(CONTACT_LISTS.indexOf(l), 1); for (const c of CONTACTS) c.lists = (c.lists ?? []).filter((y) => y.id !== l.id); }
+        else if (l) Object.assign(l, { detached: true, source_id: null });
+        return body(res, { id: x.id, deleted: true, list_deleted: !!(l && dropList) });
+      }
+      if (b.url != null && b.url !== x.url) x.watermark = null;
+      for (const k of ["name", "url", "enabled", "interval_minutes", "full_sync_hours"]) if (b[k] != null) x[k] = b[k];
+      return body(res, sourceOut(x));
     }
     if (req.method === "PATCH" && (m = p.match(/^\/v1\/transports\/([^/]+)$/))) {
       const mb = MAILBOXES.find((x) => x.id === m[1]); if (!mb) return fail(res, { code: "invalid_request", message: "only a mailbox relay has aliases and display names" }, 400);
@@ -415,6 +594,16 @@ createServer(async (req, res) => {
   if (p === "/v1/event-definitions") return body(res, process.env.EMPTY ? [] : [{ name: "signed_up" }, { name: "upgraded" }, { name: "login" }]);
   if ((m = p.match(/^\/v1\/contacts\/([^/]+)\/activity$/))) { const c = CONTACTS.find((x) => x.id === m[1] || x.email === decodeURIComponent(m[1])); return c ? body(res, c.id === "c1" ? ACTIVITY : NO_ACTIVITY) : notFound(res, "contact"); }
   if ((m = p.match(/^\/v1\/contacts\/([^/]+)$/))) { const c = CONTACTS.find((x) => x.id === m[1] || x.email === decodeURIComponent(m[1])); return c ? body(res, c) : notFound(res, "contact"); }
+  if (p === "/v1/contacts") {
+    let rows = CONTACTS; const l = q.get("list"), term = (q.get("q") ?? "").toLowerCase();
+    if (l) { const list = listBy(l); if (!list) return notFound(res, "list"); rows = rows.filter((c) => c.lists?.some((x) => x.id === list.id)); }
+    if (term) rows = rows.filter((c) => [c.email, c.first_name, c.last_name].some((v) => v?.toLowerCase().includes(term)));
+    return body(res, rows, { next_cursor: null });
+  }
+  if (p === "/v1/lists") return body(res, process.env.EMPTY ? [] : CONTACT_LISTS);
+  if ((m = p.match(/^\/v1\/lists\/([^/]+)$/))) { const l = listBy(decodeURIComponent(m[1])); return l ? body(res, l) : notFound(res, "list"); }
+  if (p === "/v1/contact-sources") return body(res, process.env.EMPTY ? [] : SOURCES.map(sourceOut));
+  if ((m = p.match(/^\/v1\/contact-sources\/([^/]+)$/))) { const x = findSource(m[1]); return x ? body(res, sourceOut(x)) : notFound(res, "contact source"); }
   if (LISTS[p]) return body(res, LISTS[p]);
   if ((m = p.match(/^\/v1\/emails\/([^/]+)\/events$/))) { const e = EMAILS.find((x) => x.id === m[1]); return e ? body(res, eventsFor(e)) : notFound(res, "email"); }
   if ((m = p.match(/^\/v1\/emails\/([^/]+)$/))) { const e = EMAILS.find((x) => x.id === m[1]); return e ? body(res, e) : notFound(res, "email"); }
