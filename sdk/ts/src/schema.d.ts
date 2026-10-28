@@ -5086,6 +5086,7 @@ export interface operations {
                     "application/json": components["schemas"]["Automation"];
                 };
             };
+            404: components["responses"]["Error"];
             422: components["responses"]["Error"];
         };
     };
