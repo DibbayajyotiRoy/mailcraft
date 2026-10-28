@@ -9,7 +9,7 @@ description: Design and import event-triggered lifecycle automations in mailcraf
 1. `--json` always. Test key only. Never print keys.
 2. Set `"approval": "first_n:5"` (default). `never` needs a human with `admin`. You never approve; exit `4` or `pending_approval` means wait for a human.
 3. The LLM fills template `slot` blocks only; give every slot a `fallback`. No URLs, prices or claims in `instructions`. The step takes a string `instructions` (there is no `llm{}` object).
-4. Dry-run before enabling: `events track ... --dry-run`.
+4. Dry-run before enabling: `events track ... --dry-run`. To watch one contact go through the steps use a test key: `automations test <id> --email ana@example.org`, then poll `automations run <id> <run_id>` (a live key would send for real).
 
 ## Steps
 ```

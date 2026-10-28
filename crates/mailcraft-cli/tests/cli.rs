@@ -886,3 +886,551 @@ fn publish_commands_and_contact_timezone() {
     assert_eq!(seen[1].body, json!({"backfill_suppress": true}));
     assert_eq!(seen[2].body["timezone"], "Europe/Berlin");
 }
+
+// ---- broadcasts, contact import, automation tests/archive/runs, template restore/discard/preview ----
+
+fn last(m: &Mock) -> Req {
+    m.seen.lock().unwrap().last().cloned().expect("no request")
+}
+
+fn write(dir: &std::path::Path, name: &str, body: &str) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    let p = dir.join(name);
+    std::fs::write(&p, body).unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+#[test]
+fn broadcasts_create_from_csv_dry_run_then_pending_approval() {
+    let dry = json!({"queued": 2, "skipped": [{"email": "bad", "reason": "invalid_email", "detail": null}], "schedule": {"daily_cap": null}});
+    let m = mock(vec![("POST", "/v1/broadcasts", 200, env_ok(dry))]);
+    let d = conf_dir("bc");
+    let f = write(
+        &d,
+        "list.csv",
+        "\u{feff}Email,First Name,Plan\r\nana@x.org,Ana,pro\r\n\"bo, b@x.org\",,\r\n",
+    );
+    let o = run(
+        &m,
+        &d,
+        Some("mc_test_K"),
+        &[
+            "broadcasts",
+            "create",
+            "--template",
+            "welcome",
+            "--from",
+            "Acme <hi@x.org>",
+            "--csv",
+            &f,
+            "--subject",
+            "Hi {{ first_name }}",
+            "--max-per-day",
+            "50",
+            "--dry-run",
+            "--idempotency-key",
+            "k1",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    assert_eq!(out(&o)["data"]["skipped"][0]["reason"], "invalid_email");
+    let r = last(&m);
+    assert!(r.headers.contains("idempotency-key: k1"));
+    assert_eq!(
+        r.body,
+        json!({"template_id": "welcome", "from": "Acme <hi@x.org>", "subject": "Hi {{ first_name }}", "max_per_day": 50, "dry_run": true,
+            "recipients": [{"email": "ana@x.org", "first_name": "Ana", "data": {"plan": "pro"}}, {"email": "bo, b@x.org"}]})
+    );
+
+    // --recipients JSON, and a pending_approval result is exit 4 like `send`
+    let m = mock(vec![(
+        "POST",
+        "/v1/broadcasts",
+        202,
+        env_ok(
+            json!({"id": "b1", "status": "pending_approval", "approval_id": "ap1", "queued": 1, "skipped": []}),
+        ),
+    )]);
+    let o = run(
+        &m,
+        &d,
+        Some("mc_test_K"),
+        &[
+            "broadcasts",
+            "create",
+            "--template",
+            "t",
+            "--from",
+            "a@x.org",
+            "--recipients",
+            r#"[{"email":"z@x.org","data":{"n":1}}]"#,
+        ],
+    );
+    assert_eq!(o.status.code(), Some(4));
+    let b = last(&m).body;
+    assert_eq!(b["dry_run"], false);
+    assert_eq!(
+        b["recipients"],
+        json!([{"email": "z@x.org", "data": {"n": 1}}])
+    );
+}
+
+#[test]
+fn broadcasts_create_needs_exactly_one_recipient_source() {
+    let m = mock(vec![]);
+    let d = conf_dir("bc-usage");
+    let base = [
+        "broadcasts",
+        "create",
+        "--template",
+        "t",
+        "--from",
+        "a@x.org",
+    ];
+    let o = run(&m, &d, Some("k"), &base);
+    assert_eq!(o.status.code(), Some(2));
+    let both = [&base[..], &["--csv", "a.csv", "--recipients", "[]"]].concat();
+    assert_eq!(run(&m, &d, Some("k"), &both).status.code(), Some(2));
+    let f = write(&d, "nomail.csv", "name\nAna\n");
+    let o = run(&m, &d, Some("k"), &[&base[..], &["--csv", &f]].concat());
+    assert_eq!(o.status.code(), Some(2));
+    assert!(out(&o)["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("email column"));
+    let o = run(
+        &m,
+        &d,
+        Some("k"),
+        &[&base[..], &["--recipients", r#"{"email":"a"}"#]].concat(),
+    );
+    assert_eq!(o.status.code(), Some(2));
+    assert!(m.seen.lock().unwrap().is_empty());
+}
+
+#[test]
+fn broadcasts_list_get_show_preview() {
+    let m = mock(vec![
+        ("GET", "/v1/broadcasts", 200, env_ok(json!([]))),
+        (
+            "GET",
+            "/v1/broadcasts/b1",
+            200,
+            env_ok(json!({"id": "b1", "recipients": []})),
+        ),
+        (
+            "POST",
+            "/v1/broadcasts/preview",
+            200,
+            env_ok(json!({"subject": "Hi Ana", "html": "<p>Hi</p>", "text": "Hi"})),
+        ),
+    ]);
+    let d = conf_dir("bc-read");
+    let k = Some("mc_test_K");
+    assert_eq!(
+        run(
+            &m,
+            &d,
+            k,
+            &["broadcasts", "list", "--limit", "2", "--cursor", "c"]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    assert_eq!(last(&m).path, "/v1/broadcasts?limit=2&cursor=c");
+    assert_eq!(
+        run(
+            &m,
+            &d,
+            k,
+            &["broadcasts", "get", "b1", "--status", "bounced"]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    assert_eq!(last(&m).path, "/v1/broadcasts/b1?status=bounced");
+    assert_eq!(
+        run(&m, &d, k, &["broadcasts", "show", "b1"]).status.code(),
+        Some(0)
+    );
+    assert_eq!(last(&m).path, "/v1/broadcasts/b1");
+    let o = run(
+        &m,
+        &d,
+        k,
+        &[
+            "broadcasts",
+            "preview",
+            "--template",
+            "welcome",
+            "--email",
+            "ana@x.org",
+            "--first-name",
+            "Ana",
+            "--data",
+            r#"{"plan":"pro"}"#,
+        ],
+    );
+    assert_eq!(out(&o)["data"]["subject"], "Hi Ana");
+    assert_eq!(
+        last(&m).body,
+        json!({"template_id": "welcome", "recipient": {"email": "ana@x.org", "first_name": "Ana", "data": {"plan": "pro"}}})
+    );
+}
+
+#[test]
+fn contacts_import_reads_csv_and_reports_failures() {
+    let m = mock(vec![(
+        "POST",
+        "/v1/contacts/import",
+        200,
+        env_ok(
+            json!({"imported": 1, "failed": [{"index": 1, "email": "nope", "error": {"code": "invalid_request", "message": "bad email"}}]}),
+        ),
+    )]);
+    let d = conf_dir("imp");
+    let f = write(
+        &d,
+        "c.csv",
+        "email,first_name,tz,seats\nana@x.org,Ana,Europe/Berlin,5\nnope,,,\n",
+    );
+    let o = run(
+        &m,
+        &d,
+        Some("mc_test_K"),
+        &["contacts", "import", &f, "--idempotency-key", "imp-1"],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let v = out(&o);
+    assert_eq!(v["data"]["imported"], 1);
+    assert_eq!(v["data"]["failed"][0]["index"], 1);
+    let r = last(&m);
+    assert!(r.headers.contains("idempotency-key: imp-1"));
+    assert_eq!(
+        r.body["contacts"],
+        json!([{"email": "ana@x.org", "first_name": "Ana", "timezone": "Europe/Berlin", "properties": {"seats": 5}}, {"email": "nope"}])
+    );
+}
+
+#[test]
+fn contacts_import_chunks_at_5000_and_offsets_failed_indexes() {
+    let m = mock(vec![(
+        "POST",
+        "/v1/contacts/import",
+        200,
+        env_ok(
+            json!({"imported": 1, "failed": [{"index": 0, "email": "x", "error": {"code": "invalid_request", "message": "m"}}]}),
+        ),
+    )]);
+    let d = conf_dir("imp-big");
+    let f = write(
+        &d,
+        "big.csv",
+        &format!("email\n{}", "a@x.org\n".repeat(5001)),
+    );
+    let o = run(
+        &m,
+        &d,
+        Some("k"),
+        &["contacts", "import", &f, "--idempotency-key", "k"],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let seen = m.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0].body["contacts"].as_array().unwrap().len(), 5000);
+    assert_eq!(seen[1].body["contacts"].as_array().unwrap().len(), 1);
+    assert!(
+        seen[0].headers.contains("idempotency-key: k-0")
+            && seen[1].headers.contains("idempotency-key: k-1")
+    );
+    let v = out(&o);
+    assert_eq!(v["data"]["imported"], 2);
+    assert_eq!(v["data"]["failed"][1]["index"], 5000);
+}
+
+#[test]
+fn automations_test_archive_runs_and_run() {
+    let run_id = "0192f3a0-7b1c-7a10-8000-0000000000f1";
+    let m = mock(vec![
+        ("GET", "/v1/automations", 200, env_ok(json!([]))),
+        (
+            "POST",
+            "/v1/automations/welcome/test",
+            202,
+            env_ok(json!({"run_id": run_id, "status": "started", "env": "test"})),
+        ),
+        (
+            "POST",
+            "/v1/automations/welcome/archive",
+            200,
+            env_ok(json!({"status": "archived"})),
+        ),
+        (
+            "POST",
+            "/v1/automations/welcome/unarchive",
+            200,
+            env_ok(json!({"status": "draft"})),
+        ),
+        (
+            "GET",
+            "/v1/automations/welcome/runs",
+            200,
+            env_ok(json!([])),
+        ),
+        (
+            "GET",
+            "/v1/automations/welcome/runs/0192f3a0-7b1c-7a10-8000-0000000000f1",
+            200,
+            env_ok(json!({"state": "completed", "steps": []})),
+        ),
+        (
+            "POST",
+            "/v1/automations/drafty/archive",
+            409,
+            json!({"ok": false, "error": {"code": "invalid_state", "message": "active"}}),
+        ),
+    ]);
+    let d = conf_dir("auto");
+    let k = Some("mc_test_K");
+    assert_eq!(
+        run(&m, &d, k, &["automations", "list", "--status", "archived"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(last(&m).path, "/v1/automations?status=archived");
+    let o = run(
+        &m,
+        &d,
+        k,
+        &[
+            "automations",
+            "test",
+            "welcome",
+            "--email",
+            "ana@x.org",
+            "--first-name",
+            "Ana",
+            "--data",
+            r#"{"plan":"pro"}"#,
+            "--contact-data",
+            r#"{"vip":true}"#,
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    assert_eq!(out(&o)["data"]["run_id"], run_id);
+    assert_eq!(
+        last(&m).body,
+        json!({"email": "ana@x.org", "first_name": "Ana", "properties": {"plan": "pro"}, "contact_properties": {"vip": true}})
+    );
+    assert_eq!(
+        run(&m, &d, k, &["automations", "archive", "welcome"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        run(&m, &d, k, &["automations", "unarchive", "welcome"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(last(&m).path, "/v1/automations/welcome/unarchive");
+    assert_eq!(
+        run(
+            &m,
+            &d,
+            k,
+            &[
+                "automations",
+                "runs",
+                "welcome",
+                "--status",
+                "failed",
+                "--limit",
+                "3"
+            ]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    assert_eq!(
+        last(&m).path,
+        "/v1/automations/welcome/runs?status=failed&limit=3"
+    );
+    let o = run(&m, &d, k, &["automations", "run", "welcome", run_id]);
+    assert_eq!(out(&o)["data"]["state"], "completed");
+    let o = run(&m, &d, k, &["automations", "archive", "drafty"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(out(&o)["error"]["code"], "invalid_state");
+}
+
+#[test]
+fn templates_versions_restore_discard_draft_and_unsaved_preview() {
+    let m = mock(vec![
+        (
+            "GET",
+            "/v1/templates/welcome/versions",
+            200,
+            env_ok(json!([{"version": 2, "published": true}])),
+        ),
+        (
+            "POST",
+            "/v1/templates/welcome/versions/1/restore",
+            201,
+            env_ok(json!({"version": 3, "restored_from": 1})),
+        ),
+        (
+            "DELETE",
+            "/v1/templates/welcome/draft",
+            200,
+            env_ok(json!({"discarded": 1})),
+        ),
+        (
+            "POST",
+            "/v1/templates/welcome/preview",
+            200,
+            env_ok(json!({"subject": "s", "html": "h", "text": "t", "lint": []})),
+        ),
+    ]);
+    let d = conf_dir("tpl2");
+    let k = Some("mc_test_K");
+    assert_eq!(
+        run(&m, &d, k, &["templates", "versions", "welcome"])
+            .status
+            .code(),
+        Some(0)
+    );
+    let o = run(&m, &d, k, &["templates", "restore", "welcome", "1"]);
+    assert_eq!(out(&o)["data"]["version"], 3);
+    assert_eq!(last(&m).path, "/v1/templates/welcome/versions/1/restore");
+    let o = run(&m, &d, k, &["templates", "discard-draft", "welcome"]);
+    assert_eq!(out(&o)["data"]["discarded"], 1);
+    assert_eq!(last(&m).path, "/v1/templates/welcome/draft");
+
+    // saved version, then unsaved content from a file
+    run(
+        &m,
+        &d,
+        k,
+        &[
+            "templates",
+            "preview",
+            "welcome",
+            "--version",
+            "2",
+            "--data",
+            r#"{"first_name":"Ana"}"#,
+        ],
+    );
+    assert_eq!(
+        last(&m).body,
+        json!({"variables": {"first_name": "Ana"}, "version": 2})
+    );
+    let h = write(&d, "t.html", "<p>{{ first_name }}</p>");
+    run(
+        &m,
+        &d,
+        k,
+        &[
+            "templates",
+            "preview",
+            "welcome",
+            "--file",
+            &h,
+            "--subject",
+            "Hi",
+        ],
+    );
+    assert_eq!(
+        last(&m).body,
+        json!({"variables": {}, "html": "<p>{{ first_name }}</p>", "subject": "Hi"})
+    );
+    let j = write(&d, "t.json", r#"{"blocks": []}"#);
+    run(
+        &m,
+        &d,
+        k,
+        &["templates", "preview", "welcome", "--file", &j],
+    );
+    assert_eq!(
+        last(&m).body,
+        json!({"variables": {}, "format": "json", "content": {"blocks": []}})
+    );
+    // --version and --file together is a usage error
+    let o = run(
+        &m,
+        &d,
+        k,
+        &[
+            "templates",
+            "preview",
+            "welcome",
+            "--version",
+            "1",
+            "--file",
+            &h,
+        ],
+    );
+    assert_eq!(o.status.code(), Some(2));
+}
+
+#[test]
+fn approvals_reason_and_email_list_filters() {
+    let m = mock(vec![
+        (
+            "POST",
+            "/v1/approvals/a1/decide",
+            200,
+            env_ok(json!({"id": "a1", "status": "rejected"})),
+        ),
+        ("GET", "/v1/emails", 200, env_ok(json!([]))),
+    ]);
+    let d = conf_dir("misc2");
+    let k = Some("mc_test_K");
+    assert_eq!(
+        run(
+            &m,
+            &d,
+            k,
+            &["approvals", "reject", "a1", "--reason", "wrong list"]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    assert_eq!(
+        last(&m).body,
+        json!({"decision": "reject", "reason": "wrong list"})
+    );
+    run(&m, &d, k, &["approvals", "approve", "a1"]);
+    assert_eq!(last(&m).body, json!({"decision": "approve"}));
+    run(
+        &m,
+        &d,
+        k,
+        &[
+            "emails",
+            "list",
+            "--q",
+            "ana smith",
+            "--from",
+            "2026-10-01",
+            "--to",
+            "2026-10-31",
+            "--stream",
+            "marketing",
+            "--env",
+            "test",
+            "--limit",
+            "5",
+        ],
+    );
+    assert_eq!(
+        last(&m).path,
+        "/v1/emails?stream=marketing&env=test&q=ana%20smith&from=2026-10-01&to=2026-10-31&limit=5"
+    );
+}

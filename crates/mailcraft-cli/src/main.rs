@@ -2,6 +2,7 @@
 //! JSON document (`--json`, automatic when stdout is not a TTY), stderr is logs, exit codes are
 //! stable (see `client::exit`).
 mod client;
+mod csv;
 mod doctor;
 mod gmail;
 
@@ -90,6 +91,11 @@ enum Cmd {
     Emails {
         #[command(subcommand)]
         cmd: EmailsCmd,
+    },
+    /// Send one template to many recipients (CSV or JSON), paced under the daily cap.
+    Broadcasts {
+        #[command(subcommand)]
+        cmd: BroadcastsCmd,
     },
     Templates {
         #[command(subcommand)]
@@ -201,6 +207,21 @@ enum EmailsCmd {
     List {
         #[arg(long)]
         status: Option<String>,
+        /// transactional | marketing
+        #[arg(long)]
+        stream: Option<String>,
+        /// test | live
+        #[arg(long)]
+        env: Option<String>,
+        /// Substring of to / from / subject (or an exact email id).
+        #[arg(long)]
+        q: Option<String>,
+        /// Created at or after (YYYY-MM-DD or RFC 3339).
+        #[arg(long)]
+        from: Option<String>,
+        /// Created at or before (RFC 3339, or the end of that YYYY-MM-DD day).
+        #[arg(long)]
+        to: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -209,8 +230,90 @@ enum EmailsCmd {
 }
 
 #[derive(Subcommand)]
+enum BroadcastsCmd {
+    /// Mail every recipient (up to 5000). Try --dry-run first: it lists skipped rows and the schedule.
+    Create {
+        /// Template id or alias.
+        #[arg(long)]
+        template: String,
+        /// Sender, on a verified domain (a test key needs none).
+        #[arg(long)]
+        from: String,
+        /// CSV with a header row: email, first_name, last_name; other columns are {{ data.<column> }}.
+        #[arg(long)]
+        csv: Option<String>,
+        /// Recipients as a JSON array (or @file): [{"email", "first_name"?, "last_name"?, "data"?}].
+        #[arg(long, conflicts_with = "csv")]
+        recipients: Option<String>,
+        /// Replaces the template subject; may use the same variables.
+        #[arg(long)]
+        subject: Option<String>,
+        /// transactional | marketing (default marketing).
+        #[arg(long)]
+        stream: Option<String>,
+        /// Upper bound on sends per day (the lowest of this and the transport/key caps applies).
+        #[arg(long)]
+        max_per_day: Option<u32>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        idempotency_key: Option<String>,
+    },
+    List {
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// One broadcast: counts, skipped rows and each recipient's email status.
+    #[command(alias = "show")]
+    Get {
+        id: String,
+        /// Only recipients whose email has this status.
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Render the template for one recipient as it would be sent. Sends nothing.
+    Preview {
+        #[arg(long)]
+        template: String,
+        #[arg(long)]
+        email: String,
+        #[arg(long)]
+        first_name: Option<String>,
+        #[arg(long)]
+        last_name: Option<String>,
+        /// Extra columns ({{ data.<column> }}) as JSON (or @file).
+        #[arg(long)]
+        data: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        stream: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum TemplatesCmd {
     List,
+    /// Version history, newest first (`published` marks the live one).
+    Versions {
+        /// Template id or alias.
+        id: String,
+    },
+    /// Copy an older version into a new draft (history is kept; `publish` it to go live).
+    Restore {
+        id: String,
+        version: i32,
+    },
+    /// Delete the unpublished versions newer than the published one. Cannot be undone.
+    DiscardDraft {
+        id: String,
+    },
     /// Import a .json / .html / .mjml file.
     Import {
         file: String,
@@ -227,10 +330,25 @@ enum TemplatesCmd {
         #[arg(long)]
         out: Option<String>,
     },
+    /// Render with sample data merged with --data. Sends nothing.
     Preview {
         id: String,
+        /// Template variables as JSON (or @file).
         #[arg(long)]
         data: Option<String>,
+        /// Render this saved version (default newest).
+        #[arg(long, conflicts_with = "file")]
+        version: Option<i32>,
+        /// Render unsaved content from a .html / .mjml / .json file; nothing is stored.
+        #[arg(long)]
+        file: Option<String>,
+        /// html | mjml | json (default: the file extension).
+        #[arg(long, requires = "file")]
+        format: Option<String>,
+        #[arg(long, requires = "file")]
+        subject: Option<String>,
+        #[arg(long, requires = "file")]
+        preheader: Option<String>,
     },
     /// Make a template version live (what sends use). Defaults to the newest version.
     Publish {
@@ -248,6 +366,13 @@ enum ContactsCmd {
         limit: Option<u32>,
         #[arg(long)]
         cursor: Option<String>,
+    },
+    /// Upsert contacts from a CSV (header row: email, first_name, last_name, timezone; other columns become properties).
+    Import {
+        /// CSV file.
+        file: String,
+        #[arg(long)]
+        idempotency_key: Option<String>,
     },
     Get {
         email: String,
@@ -285,7 +410,55 @@ enum EventsCmd {
 
 #[derive(Subcommand)]
 enum AutomationsCmd {
-    List,
+    /// Archived automations are hidden unless --status archived.
+    List {
+        /// draft | active | paused | archived
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Archive a draft or paused automation.
+    Archive {
+        id: String,
+    },
+    /// Bring an archived automation back as a draft.
+    Unarchive {
+        id: String,
+    },
+    /// Start a run for one contact now, skipping the entry rule. A test key keeps mail in the sandbox; a live key sends.
+    Test {
+        /// Automation id or name.
+        id: String,
+        #[arg(long)]
+        email: String,
+        #[arg(long)]
+        first_name: Option<String>,
+        /// Properties of the simulated trigger event as JSON (or @file).
+        #[arg(long)]
+        data: Option<String>,
+        /// Contact properties as JSON (or @file).
+        #[arg(long)]
+        contact_data: Option<String>,
+    },
+    /// Runs of an automation, newest first.
+    Runs {
+        id: String,
+        /// active | waiting | completed | exited | failed
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// One run with its step log (poll after `test`).
+    Run {
+        id: String,
+        run: String,
+    },
     /// Resume a paused automation. A draft needs `publish` first.
     Enable {
         id: String,
@@ -347,8 +520,18 @@ enum InstructionsCmd {
 #[derive(Subcommand)]
 enum ApprovalsCmd {
     List,
-    Approve { id: String },
-    Reject { id: String },
+    Approve {
+        id: String,
+        /// Note kept with the decision (max 500 characters).
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    Reject {
+        id: String,
+        /// Note kept with the decision (max 500 characters).
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 /// What a command produced. `exit` is non-zero for ok-but-not-done results (policy, unverified).
@@ -412,27 +595,45 @@ fn enc(s: &str) -> String {
         .collect()
 }
 
+fn query(base: &str, kv: &[(&str, Option<&String>)]) -> String {
+    let q: Vec<String> = kv
+        .iter()
+        .filter_map(|(k, v)| v.map(|v| format!("{k}={}", enc(v))))
+        .collect();
+    if q.is_empty() {
+        base.into()
+    } else {
+        format!("{base}?{}", q.join("&"))
+    }
+}
+
 fn page(
     base: &str,
     status: Option<&String>,
     limit: Option<u32>,
     cursor: Option<&String>,
 ) -> String {
-    let mut q = vec![];
-    if let Some(s) = status {
-        q.push(format!("status={}", enc(s)));
+    query(
+        base,
+        &[
+            ("status", status),
+            ("limit", limit.map(|l| l.to_string()).as_ref()),
+            ("cursor", cursor),
+        ],
+    )
+}
+
+/// Ask before something that mails people or deletes data. `--yes`, `--non-interactive` and a
+/// non-TTY stdin skip the prompt.
+fn confirm(cli: &Cli, q: &str) -> Result<(), CliErr> {
+    if !cli.yes
+        && !cli.non_interactive
+        && std::io::stdin().is_terminal()
+        && prompt(&format!("{q} (yes/no)"), "no", true) != "yes"
+    {
+        return Err(CliErr::usage("aborted"));
     }
-    if let Some(l) = limit {
-        q.push(format!("limit={l}"));
-    }
-    if let Some(c) = cursor {
-        q.push(format!("cursor={}", enc(c)));
-    }
-    if q.is_empty() {
-        base.into()
-    } else {
-        format!("{base}?{}", q.join("&"))
-    }
+    Ok(())
 }
 
 fn require_key(cfg: &Config) -> Result<Api, CliErr> {
@@ -590,20 +791,131 @@ fn run(cli: &Cli) -> R {
                 }
                 EmailsCmd::List {
                     status,
+                    stream,
+                    env,
+                    q,
+                    from,
+                    to,
+                    limit,
+                    cursor,
+                } => ok(api.get(&query(
+                    "/v1/emails",
+                    &[
+                        ("status", status.as_ref()),
+                        ("stream", stream.as_ref()),
+                        ("env", env.as_ref()),
+                        ("q", q.as_ref()),
+                        ("from", from.as_ref()),
+                        ("to", to.as_ref()),
+                        ("limit", limit.map(|l| l.to_string()).as_ref()),
+                        ("cursor", cursor.as_ref()),
+                    ],
+                ))?),
+            }
+        }
+        Cmd::Broadcasts { cmd } => {
+            let api = require_key(&cfg)?;
+            match cmd {
+                BroadcastsCmd::Create {
+                    template,
+                    from,
+                    csv,
+                    recipients,
+                    subject,
+                    stream,
+                    max_per_day,
+                    dry_run,
+                    idempotency_key,
+                } => {
+                    let rows = match (csv, recipients) {
+                        (Some(f), None) => csv::recipients(&read_file(f)?)?,
+                        (None, Some(_)) => match json_arg(recipients, "--recipients")? {
+                            Value::Array(a) => a,
+                            _ => return Err(CliErr::usage("--recipients must be a JSON array")),
+                        },
+                        _ => return Err(CliErr::usage("give --csv <file> or --recipients <json>")),
+                    };
+                    let mut b = json!({"template_id": template, "from": from, "recipients": rows, "dry_run": dry_run});
+                    for (k, v) in [("subject", subject), ("stream", stream)] {
+                        if let Some(v) = v {
+                            b[k] = json!(v);
+                        }
+                    }
+                    if let Some(n) = max_per_day {
+                        b["max_per_day"] = json!(n);
+                    }
+                    if !dry_run {
+                        let n = b["recipients"].as_array().map_or(0, Vec::len);
+                        confirm(cli, &format!("Send `{template}` to {n} recipients?"))?;
+                    }
+                    ok(api.post("/v1/broadcasts", &b, idempotency_key.as_deref())?)
+                }
+                BroadcastsCmd::List { limit, cursor } => {
+                    ok(api.get(&page("/v1/broadcasts", None, *limit, cursor.as_ref()))?)
+                }
+                BroadcastsCmd::Get {
+                    id,
+                    status,
                     limit,
                     cursor,
                 } => ok(api.get(&page(
-                    "/v1/emails",
+                    &format!("/v1/broadcasts/{}", enc(id)),
                     status.as_ref(),
                     *limit,
                     cursor.as_ref(),
                 ))?),
+                BroadcastsCmd::Preview {
+                    template,
+                    email,
+                    first_name,
+                    last_name,
+                    data,
+                    subject,
+                    stream,
+                } => {
+                    let mut r = json!({"email": email});
+                    for (k, v) in [("first_name", first_name), ("last_name", last_name)] {
+                        if let Some(v) = v {
+                            r[k] = json!(v);
+                        }
+                    }
+                    if data.is_some() {
+                        r["data"] = json_arg(data, "--data")?;
+                    }
+                    let mut b = json!({"template_id": template, "recipient": r});
+                    for (k, v) in [("subject", subject), ("stream", stream)] {
+                        if let Some(v) = v {
+                            b[k] = json!(v);
+                        }
+                    }
+                    ok(api.post("/v1/broadcasts/preview", &b, None)?)
+                }
             }
         }
         Cmd::Templates { cmd } => {
             let api = require_key(&cfg)?;
             match cmd {
                 TemplatesCmd::List => ok(api.get("/v1/templates")?),
+                TemplatesCmd::Versions { id } => {
+                    ok(api.get(&format!("/v1/templates/{}/versions", enc(id)))?)
+                }
+                TemplatesCmd::Restore { id, version } => ok(api.post(
+                    &format!("/v1/templates/{}/versions/{version}/restore", enc(id)),
+                    &json!({}),
+                    None,
+                )?),
+                TemplatesCmd::DiscardDraft { id } => {
+                    confirm(
+                        cli,
+                        &format!("Discard the unpublished draft of {id}? This cannot be undone."),
+                    )?;
+                    ok(api.call(
+                        "DELETE",
+                        &format!("/v1/templates/{}/draft", enc(id)),
+                        None,
+                        None,
+                    )?)
+                }
                 TemplatesCmd::Import { file, name, format } => {
                     let ext = std::path::Path::new(file)
                         .extension()
@@ -642,11 +954,47 @@ fn run(cli: &Cli) -> R {
                     };
                     ok(api.post(&format!("/v1/templates/{}/publish", enc(id)), &b, None)?)
                 }
-                TemplatesCmd::Preview { id, data } => ok(api.post(
-                    &format!("/v1/templates/{}/preview", enc(id)),
-                    &json!({"variables": json_arg(data, "--data")?}),
-                    None,
-                )?),
+                TemplatesCmd::Preview {
+                    id,
+                    data,
+                    version,
+                    file,
+                    format,
+                    subject,
+                    preheader,
+                } => {
+                    let mut b = json!({"variables": json_arg(data, "--data")?});
+                    if let Some(v) = version {
+                        b["version"] = json!(v);
+                    }
+                    if let Some(f) = file {
+                        let ext = std::path::Path::new(f)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("json");
+                        let text = read_file(f)?;
+                        match format.as_deref().unwrap_or(ext) {
+                            "html" => b["html"] = json!(text),
+                            "mjml" => b["mjml"] = json!(text),
+                            "json" => {
+                                b["format"] = json!("json");
+                                b["content"] = serde_json::from_str(&text).map_err(|e| {
+                                    CliErr::usage(format!("{f} is not valid JSON: {e}"))
+                                })?;
+                            }
+                            o => {
+                                return Err(CliErr::usage(format!("unknown --format {o}"))
+                                    .hint("html | mjml | json"))
+                            }
+                        }
+                        for (k, v) in [("subject", subject), ("preheader", preheader)] {
+                            if let Some(v) = v {
+                                b[k] = json!(v);
+                            }
+                        }
+                    }
+                    ok(api.post(&format!("/v1/templates/{}/preview", enc(id)), &b, None)?)
+                }
             }
         }
         Cmd::Contacts { cmd } => {
@@ -654,6 +1002,39 @@ fn run(cli: &Cli) -> R {
             match cmd {
                 ContactsCmd::List { limit, cursor } => {
                     ok(api.get(&page("/v1/contacts", None, *limit, cursor.as_ref()))?)
+                }
+                ContactsCmd::Import {
+                    file,
+                    idempotency_key,
+                } => {
+                    let rows = csv::contacts(&read_file(file)?)?;
+                    let (mut imported, mut failed) = (0, vec![]);
+                    let chunks = rows.chunks(csv::MAX_ROWS);
+                    let multi = chunks.len() > 1;
+                    for (n, chunk) in chunks.enumerate() {
+                        // one key per chunk, so a retry replays the finished chunks
+                        let key = idempotency_key.as_ref().map(|k| {
+                            if multi {
+                                format!("{k}-{n}")
+                            } else {
+                                k.clone()
+                            }
+                        });
+                        let r = api.post(
+                            "/v1/contacts/import",
+                            &json!({"contacts": chunk}),
+                            key.as_deref(),
+                        )?;
+                        imported += r.data()["imported"].as_u64().unwrap_or(0);
+                        for mut f in r.data()["failed"].as_array().cloned().unwrap_or_default() {
+                            // index counts data rows of the whole file, not of the chunk
+                            f["index"] = json!(
+                                f["index"].as_u64().unwrap_or(0) + (n * csv::MAX_ROWS) as u64
+                            );
+                            failed.push(f);
+                        }
+                    }
+                    Ok(Out::new(json!({"imported": imported, "failed": failed})))
                 }
                 ContactsCmd::Get { email } => ok(api.get(&format!("/v1/contacts/{}", enc(email)))?),
                 ContactsCmd::Upsert {
@@ -672,13 +1053,7 @@ fn run(cli: &Cli) -> R {
                     ok(api.call("PUT", "/v1/contacts", Some(&b), None)?)
                 }
                 ContactsCmd::Delete { email } => {
-                    if !cli.yes
-                        && !cli.non_interactive
-                        && std::io::stdin().is_terminal()
-                        && prompt(&format!("Delete {email}? (yes/no)"), "no", true) != "yes"
-                    {
-                        return Err(CliErr::usage("aborted"));
-                    }
+                    confirm(cli, &format!("Delete {email}?"))?;
                     ok(api.call(
                         "DELETE",
                         &format!("/v1/contacts/{}", enc(email)),
@@ -705,7 +1080,64 @@ fn run(cli: &Cli) -> R {
         Cmd::Automations { cmd } => {
             let api = require_key(&cfg)?;
             match cmd {
-                AutomationsCmd::List => ok(api.get("/v1/automations")?),
+                AutomationsCmd::List {
+                    status,
+                    limit,
+                    cursor,
+                } => ok(api.get(&page(
+                    "/v1/automations",
+                    status.as_ref(),
+                    *limit,
+                    cursor.as_ref(),
+                ))?),
+                AutomationsCmd::Archive { id } => ok(api.post(
+                    &format!("/v1/automations/{}/archive", enc(id)),
+                    &json!({}),
+                    None,
+                )?),
+                AutomationsCmd::Unarchive { id } => ok(api.post(
+                    &format!("/v1/automations/{}/unarchive", enc(id)),
+                    &json!({}),
+                    None,
+                )?),
+                AutomationsCmd::Test {
+                    id,
+                    email,
+                    first_name,
+                    data,
+                    contact_data,
+                } => {
+                    if cfg.api_key.as_deref().is_some_and(|k| k.starts_with("mc_live_")) {
+                        confirm(cli, &format!("Run `{id}` for {email} with a LIVE key? Its emails are really sent."))?;
+                    }
+                    let mut b = json!({"email": email});
+                    if let Some(f) = first_name {
+                        b["first_name"] = json!(f);
+                    }
+                    if data.is_some() {
+                        b["properties"] = json_arg(data, "--data")?;
+                    }
+                    if contact_data.is_some() {
+                        b["contact_properties"] = json_arg(contact_data, "--contact-data")?;
+                    }
+                    ok(api.post(&format!("/v1/automations/{}/test", enc(id)), &b, None)?)
+                }
+                AutomationsCmd::Runs {
+                    id,
+                    status,
+                    limit,
+                    cursor,
+                } => ok(api.get(&page(
+                    &format!("/v1/automations/{}/runs", enc(id)),
+                    status.as_ref(),
+                    *limit,
+                    cursor.as_ref(),
+                ))?),
+                AutomationsCmd::Run { id, run } => ok(api.get(&format!(
+                    "/v1/automations/{}/runs/{}",
+                    enc(id),
+                    enc(run)
+                ))?),
                 AutomationsCmd::Enable { id } => ok(api
                     .post(
                         &format!("/v1/automations/{}/resume", enc(id)),
@@ -787,17 +1219,17 @@ fn run(cli: &Cli) -> R {
             let api = require_key(&cfg)?;
             match cmd {
                 ApprovalsCmd::List => ok(api.get("/v1/approvals")?),
-                ApprovalsCmd::Approve { id } | ApprovalsCmd::Reject { id } => {
+                ApprovalsCmd::Approve { id, reason } | ApprovalsCmd::Reject { id, reason } => {
                     let d = if matches!(cmd, ApprovalsCmd::Approve { .. }) {
                         "approve"
                     } else {
                         "reject"
                     };
-                    ok(api.post(
-                        &format!("/v1/approvals/{}/decide", enc(id)),
-                        &json!({"decision": d}),
-                        None,
-                    )?)
+                    let mut b = json!({"decision": d});
+                    if let Some(r) = reason {
+                        b["reason"] = json!(r);
+                    }
+                    ok(api.post(&format!("/v1/approvals/{}/decide", enc(id)), &b, None)?)
                 }
             }
         }
