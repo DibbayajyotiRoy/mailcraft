@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useRef, useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -70,9 +70,7 @@ describe("Markdown", () => {
     expect(c.querySelector("a")).toBeNull();
   });
 
-  // KNOWN BUG (Markdown.tsx INLINE regex): the URL part is [^)\s]+, so it ends at the first ")". Wikipedia-style URLs lose their closing paren
-  // and leave a stray ")" in the text. Remove `.fails` when the URL pattern balances parentheses.
-  it.fails("keeps a closing parenthesis that belongs to the URL", () => {
+  it("keeps a closing parenthesis that belongs to the URL", () => {
     const c = html("[Foo](https://en.wikipedia.org/wiki/Foo_(bar))");
     expect(c.querySelector("a")!.getAttribute("href")).toBe("https://en.wikipedia.org/wiki/Foo_(bar)");
     expect(c.textContent).toBe("Foo");
@@ -148,6 +146,15 @@ describe("splitNext", () => {
   it("only treats the final line as the marker", () => {
     const t = "NEXT: a | b\nbut then more text";
     expect(splitNext(t)).toEqual({ body: t, next: [] });
+  });
+  it("does not cut a sentence that merely contains the word NEXT:", () => {
+    const t = "Your NEXT: billing date is May 1";
+    expect(splitNext(t)).toEqual({ body: t, next: [] });
+    expect(splitNext("Done.\nYour NEXT: step is yours")).toEqual({ body: "Done.\nYour NEXT: step is yours", next: [] });
+  });
+  it("holds back a partly streamed marker so the panel never flashes it", () => {
+    for (const tail of ["N", "NE", "NEX", "NEXT"]) expect(splitNext(`Done.\n${tail}`)).toEqual({ body: "Done.", next: [] });
+    expect(splitNext("Done.\nNo more to say")).toEqual({ body: "Done.\nNo more to say", next: [] });
   });
   it("is case sensitive", () => {
     expect(splitNext("x\nnext: a | b")).toEqual({ body: "x\nnext: a | b", next: [] });
@@ -348,6 +355,17 @@ describe("ProposalCard states", () => {
     expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+
+  it("a pending proposal flips to expired on its own when the time comes", () => {
+    vi.useFakeTimers();
+    try {
+      show(proposal({ expires_at: Date.now() + 5000 }));
+      expect(screen.getByRole("button", { name: "Apply" })).toBeTruthy();
+      act(() => { vi.advanceTimersByTime(5100); });
+      expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+      expect(screen.getByText(/This proposal expired/)).toBeTruthy();
+    } finally { vi.useRealTimers(); }
   });
 
   it("a proposal that has not expired offers the buttons and no expired note", () => {

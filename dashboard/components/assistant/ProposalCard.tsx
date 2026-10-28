@@ -3,7 +3,7 @@
 // MIT License, Copyright (c) 2026 Turbo. Restyled to mailcraft's tokens and design system (Button, Badge, AlertDialog).
 import { AlertTriangle, Check, ChevronDown, Loader2, X } from "lucide-react";
 import Link from "next/link";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogContent } from "@/components/ui/dialog";
@@ -76,7 +76,14 @@ export function TaskRow({ r }: { r: ApplyResult }) {
 
 export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; onApply: (confirmed: boolean) => void; onCancel: () => void; onEdit: () => void }) {
   const { proposal: p, state, result } = card;
-  const [ask, setAsk] = useState(false);
+  const [ask, setAsk] = useState(false), [, tick] = useState(0);
+  // Apply must disable on time, not at the next unrelated render.
+  useEffect(() => {
+    const ms = p.expires_at - Date.now();
+    if (state !== "pending" || ms <= 0) return;
+    const t = setTimeout(() => tick((n) => n + 1), Math.min(ms + 50, 2 ** 31 - 1));
+    return () => clearTimeout(t);
+  }, [state, p.expires_at]);
   const expired = state === "pending" && Date.now() > p.expires_at;
   const open = state === "pending" || state === "applying";
   return (

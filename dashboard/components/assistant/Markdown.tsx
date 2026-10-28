@@ -2,14 +2,16 @@ import Link from "next/link";
 import { Fragment, type ReactNode } from "react";
 
 /** Minimal, safe Markdown: paragraphs, lists, code, **bold**, `code`, links. Everything is built as React elements, so there is no raw HTML path. */
-const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^)\s]+\))/g;
+// A link's URL may hold one level of balanced parentheses: https://en.wikipedia.org/wiki/Foo_(bar)
+const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+\))/g;
+const LINK = /^\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)$/;
 const safeHref = (h: string) => (/^https?:\/\//i.test(h) || (h.startsWith("/") && !h.startsWith("//")) ? h : null);
 
 function inline(s: string): ReactNode[] {
   return s.split(INLINE).map((p, i) => {
     if (p.startsWith("`") && p.endsWith("`") && p.length > 2) return <code key={i} className="rounded-sm bg-surface-2 px-1 py-0.5 font-mono text-[0.92em]">{p.slice(1, -1)}</code>;
     if (p.startsWith("**") && p.endsWith("**") && p.length > 4) return <strong key={i} className="font-semibold">{p.slice(2, -2)}</strong>;
-    const m = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(p);
+    const m = LINK.exec(p);
     if (m) {
       const href = safeHref(m[2]);
       if (!href) return <Fragment key={i}>{m[1]}</Fragment>;
@@ -45,9 +47,9 @@ export function Markdown({ text }: { text: string }) {
   return <div className="space-y-2 break-words text-base">{out}</div>;
 }
 
-/** The model may end with `NEXT: a | b | c`: strip it from the text and return the suggestions. */
+/** The model may end with `NEXT: a | b | c` on its own last line: strip it and return the suggestions. A marker still being typed is held back. */
 export function splitNext(text: string): { body: string; next: string[] } {
-  const m = /\n?\s*NEXT:\s*([^\n]*)\s*$/.exec(text);
-  if (!m) return { body: text.replace(/\n?\s*NEXT:?\s*$/, ""), next: [] };
+  const m = /(?:^|\n)[ \t]*NEXT:[ \t]*([^\n]*?)\s*$/.exec(text);
+  if (!m) return { body: text.replace(/(?:^|\n)[ \t]*N(?:E(?:X(?:T)?)?)?$/, ""), next: [] };
   return { body: text.slice(0, m.index).trimEnd(), next: m[1].split("|").map((s) => s.trim().replace(/^["'`]|["'`]$/g, "")).filter(Boolean).slice(0, 3) };
 }
