@@ -90,6 +90,7 @@ async function run(mode, w, h) {
   const ctx = await browser.newContext({ colorScheme: dark ? "dark" : "light", forcedColors: mode === "forced" ? "active" : "none", reducedMotion: mode === "reduced" ? "reduce" : "no-preference", viewport: { width: w, height: h } });
   const theme = { name: "mc_theme", value: dark ? "dark" : "light", url: base };
   const page = await ctx.newPage();
+  page.setDefaultTimeout(Number(process.env.QA_TIMEOUT || 30000)); // raise on a busy machine
   page.on("pageerror", (e) => report(`${mode}@${w} pageerror: ${e.message.slice(0, 120)}`));
   const snap = async (name) => { if (shots && (mode === "light" || mode === "dark")) await page.screenshot({ path: `${dir}/${name}-${mode}-${w}.png`, fullPage: true }); };
   const axe = async (name) => {

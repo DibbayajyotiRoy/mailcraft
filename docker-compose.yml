@@ -56,6 +56,9 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       MAILCRAFT_ASSISTANT_MODEL: ${MAILCRAFT_ASSISTANT_MODEL:-}
       MAILCRAFT_ASSISTANT_BASE_URL: ${MAILCRAFT_ASSISTANT_BASE_URL:-}
+      # shared with the API: the assistant pins this model first when it qualifies (free, open-weight, tools); the fallbacks are not used by the dashboard
+      MAILCRAFT_LLM_MODEL: ${MAILCRAFT_LLM_MODEL:-}
+      MAILCRAFT_LLM_FALLBACK_MODELS: ${MAILCRAFT_LLM_FALLBACK_MODELS:-}
     ports: ["${MAILCRAFT_DASHBOARD_PORT:-3000}:3000"]
     depends_on: [mailcraft]
     restart: unless-stopped

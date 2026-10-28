@@ -60,9 +60,9 @@ browser panel ──POST /api/assistant──▶ dashboard server ──▶ Open
 | `MAILCRAFT_ASSISTANT_MODEL` | unset (automatic) | Pin the first model. Must be in the allowed set below, or chats are refused |
 | `MAILCRAFT_ASSISTANT_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL (models list, key info, completions). For the offline mock below |
 
-If `MAILCRAFT_ASSISTANT_MODEL` is unset, `MAILCRAFT_LLM_MODEL` is used as the pin when it is present in the dashboard's environment and qualifies (compose does not pass it to the dashboard).
+If `MAILCRAFT_ASSISTANT_MODEL` is unset, `MAILCRAFT_LLM_MODEL` is used as the pin when it is present in the dashboard's environment and qualifies (compose passes it through, so on Docker the assistant and email writing start from the same model).
 
-Set them in `.env` and `docker compose up -d dashboard` (compose passes all three through, see [`.env.example`](../.env.example)). On the [VM deploy](DEPLOY-VM.md) put them in `/etc/mailcraft/dashboard.env` (created by `deploy-vm.sh`, 0640 root:mailcraft, read only by `mailcraft-dashboard`) and `sudo systemctl restart mailcraft-dashboard`. The dashboard deliberately does not read `mailcraft.env`: that file holds the database URL and the master secret key. If the API also writes emails with an LLM, put the same `OPENROUTER_API_KEY` in `mailcraft.env` too. The container or host needs outbound HTTPS to `openrouter.ai`.
+Set them in `.env` and `docker compose up -d dashboard` (compose passes these, plus `MAILCRAFT_LLM_MODEL` and `MAILCRAFT_LLM_FALLBACK_MODELS`, through, see [`.env.example`](../.env.example)). On the [VM deploy](DEPLOY-VM.md) put them in `/etc/mailcraft/dashboard.env` (created by `deploy-vm.sh`, 0640 root:mailcraft, read only by `mailcraft-dashboard`) and `sudo systemctl restart mailcraft-dashboard`. The dashboard deliberately does not read `mailcraft.env`: that file holds the database URL and the master secret key. If the API also writes emails with an LLM, put the same `OPENROUTER_API_KEY` in `mailcraft.env` too. The container or host needs outbound HTTPS to `openrouter.ai`.
 
 ## Free, open-source models only
 
