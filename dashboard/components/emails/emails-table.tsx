@@ -21,7 +21,7 @@ export function EmailsTable({ rows, query }: { rows: any[]; query: EmailQuery })
             <TD label="Status"><StatusBadge status={e.status} size="sm" /></TD>
             <TD label="To" className="max-w-[16rem]"><span className="block truncate font-mono text-xs">{e.to_addr}</span></TD>
             <TD label="Subject" className="max-w-[22rem] max-md:text-left">
-              <Link data-ui="link" href={emailsHref(query, { open: e.id })} scroll={false} className="block truncate font-medium hover:underline">{e.subject || "(no subject)"}</Link>
+              <Link href={emailsHref(query, { open: e.id })} scroll={false} className="block truncate font-medium hover:underline">{e.subject || "(no subject)"}</Link>
             </TD>
             <TD label="Stream" className="text-muted">{e.stream ?? ""}</TD>
             <TD label="Created" className="whitespace-nowrap text-muted"><RelativeTime value={e.created_at} /></TD>

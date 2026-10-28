@@ -25,7 +25,7 @@ export function Nav({ pending = 0, onNavigate, label = "Main" }: { pending?: num
               const on = active(href);
               return (
                 <li key={href}>
-                  <Link data-ui="link" href={href} onClick={onNavigate} aria-current={on ? "page" : undefined}
+                  <Link href={href} onClick={onNavigate} aria-current={on ? "page" : undefined}
                     className={cn("relative flex h-8 items-center gap-2.5 rounded-sm px-3 text-sm font-medium text-muted transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 hover:text-fg pointer-coarse:h-11",
                       on && "bg-accent-soft text-fg before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-accent before:content-['']")}>
                     <Icon aria-hidden className="size-4" />

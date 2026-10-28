@@ -3,7 +3,7 @@ import { ArrowDown, CircleStop, Clock, GitBranch, Hourglass, Mail, Sparkles, Tag
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
-import { ruleWords } from "../../_p3/rules";
+import { ruleWords } from "@/lib/rules";
 import { branchLabels, durationWords, flowSteps, triggerWords, type Slot, type Step } from "./steps";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -32,7 +32,7 @@ function SendNode({ s, slots }: { s: Step; slots?: Slot[] }) {
   const c = s.config ?? {}, llm = c.mode === "llm";
   return (
     <Node icon={Mail} tone="accent" type="send_email" id={s.key}>
-      <p>Template <Link href={`/templates/${encodeURIComponent(c.template ?? "")}`} data-ui="link" className="font-mono text-[12.5px] text-accent hover:underline">{c.template}</Link>
+      <p>Template <Link href={`/templates/${encodeURIComponent(c.template ?? "")}`} className="font-mono text-[12.5px] text-accent hover:underline">{c.template}</Link>
         {c.subject && <> · subject “{c.subject}”</>}</p>
       <div className="flex flex-wrap items-center gap-2">
         {llm ? <Badge tone="info"><Sparkles aria-hidden className="size-3" />AI-written</Badge> : <Badge tone="neutral">Static copy</Badge>}

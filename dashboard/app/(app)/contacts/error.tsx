@@ -1,4 +1,4 @@
 "use client";
-import { RouteError } from "../_p3/RouteError";
+import { RouteError } from "@/components/ui/error-state";
 
 export default function Error(p: { error: Error & { digest?: string }; reset: () => void }) { return <RouteError title="Contacts" {...p} />; }

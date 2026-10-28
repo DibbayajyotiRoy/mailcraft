@@ -1,4 +1,4 @@
-import { ruleWords } from "../_p3/rules";
+import { ruleWords } from "@/lib/rules";
 
 export type Contact = {
   id?: string; email: string; name?: string; first_name?: string | null; last_name?: string | null; status?: string; timezone?: string | null;

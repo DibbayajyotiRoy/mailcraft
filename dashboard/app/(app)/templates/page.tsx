@@ -1,7 +1,7 @@
 import { api, get } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";
-import { ApiErrorState } from "../_p3/ApiErrorState";
-import { parseErr } from "../_p3/err";
+import { RetryError } from "@/components/ui/error-state";
+import { parseErr } from "@/lib/err";
 import { ImportTemplate } from "./ImportTemplate";
 import { TemplatesView, type TemplateRow } from "./TemplatesView";
 
@@ -22,8 +22,8 @@ export default async function Templates({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader title="Templates" description="Reusable email layouts. Publish a template to use it in sends and automations." action={<ImportTemplate />} />
-      {e && <div className="mb-4"><ApiErrorState error={e} /></div>}
-      {r.error ? <ApiErrorState error={r.error} /> : <TemplatesView templates={rows} />}
+      {e && <div className="mb-4"><RetryError error={e} /></div>}
+      {r.error ? <RetryError error={r.error} /> : <TemplatesView templates={rows} />}
     </>
   );
 }

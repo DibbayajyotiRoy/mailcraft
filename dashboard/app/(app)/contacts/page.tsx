@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { get } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";
-import { buttonVariants } from "@/components/ui/button";
-import { ApiErrorState } from "../_p3/ApiErrorState";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { RetryError } from "@/components/ui/error-state";
 import { ContactsView, type Contact, type Segment } from "./ContactsView";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ export default async function Contacts({ searchParams }: { searchParams: Promise
   return (
     <>
       <PageHeader title="Contacts" description="People you email, and the segments that group them." />
-      {c.error && s.error ? <ApiErrorState error={c.error} /> : (
+      {c.error && s.error ? <RetryError error={c.error} /> : (
         <>
           <ContactsView contacts={c.error ? null : ((Array.isArray(c.data) ? c.data : []) as Contact[])} segments={s.error ? null : ((Array.isArray(s.data) ? s.data : []) as Segment[])} contactsError={c.error} segmentsError={s.error} tab={tab === "segments" ? "segments" : "contacts"} search={q?.trim() ?? ""} />
           {c.next_cursor && <div className="mt-4"><Link rel="next" href={`/contacts?${new URLSearchParams({ ...(q ? { q } : {}), cursor: c.next_cursor })}`} className={buttonVariants({ variant: "secondary" })}>Next page</Link></div>}

@@ -17,7 +17,7 @@ export function SettingsNav() {
       <ul className="flex gap-1 lg:flex-col">
         {SECTIONS.map(([id, label]) => (
           <li key={id} className="shrink-0">
-            <a data-ui="link" href={`#${id}`} aria-current={cur === id ? "location" : undefined}
+            <a href={`#${id}`} aria-current={cur === id ? "location" : undefined}
               className={cn("flex h-9 items-center whitespace-nowrap rounded-sm px-3 text-sm font-medium text-muted transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 hover:text-fg pointer-coarse:h-11",
                 cur === id && "bg-accent-soft text-fg")}>{label}</a>
           </li>

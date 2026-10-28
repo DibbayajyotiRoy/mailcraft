@@ -1,6 +1,6 @@
 "use client";
-import { Plus, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { LayoutGrid, Plus, Rows3, Trash2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
@@ -12,6 +12,9 @@ import { EnvChip } from "@/components/ui/env-chip";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { EventTimeline } from "@/components/ui/event-timeline";
+import { Meter } from "@/components/ui/meter";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Switch } from "@/components/ui/switch";
 import { KillSwitchPill } from "@/components/ui/kill-switch-pill";
 import { PageHeader } from "@/components/ui/page-header";
 import { RelativeTime } from "@/components/ui/relative-time";
@@ -28,6 +31,18 @@ const S = ({ title, children }: { title: string; children: ReactNode }) => (
 const row = "flex flex-wrap items-center gap-3";
 const STATUSES = ["verified", "delivered", "sent", "pending", "deferred", "queued", "sending", "pending_approval", "failed", "bounced", "revoked", "unknown"];
 const now = Date.now();
+function Controls() {
+  const [v, setV] = useState("grid");
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <div className={row}><label className="flex items-center gap-2 text-sm">Live <Switch aria-label="Live" defaultChecked /></label><label className="flex items-center gap-2 text-sm">Paused <Switch aria-label="Paused" /></label><Switch aria-label="Disabled" disabled /></div>
+      <div className={row}><SegmentedControl iconOnly label="Layout" value={v} onValueChange={setV} options={[{ value: "grid", label: "Grid view", icon: LayoutGrid }, { value: "table", label: "Table view", icon: Rows3 }]} />
+        <SegmentedControl label="Range" value="7d" onValueChange={() => {}} options={[{ value: "24h", label: "24h" }, { value: "7d", label: "7d" }, { value: "30d", label: "30d" }]} /></div>
+      <Meter done={2} total={4} />
+      <CopyField wrap label="DKIM value" value="k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1234567890abcdefMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA" />
+    </div>
+  );
+}
 const iso = (ms: number) => new Date(now - ms).toISOString();
 
 export function Gallery() {
@@ -124,6 +139,9 @@ export function Gallery() {
         <CopyField label="Message ID" value="em_01HZXYK9QF3N8T2W" className="max-w-md" />
         <CodeBlock language="bash" code={'curl https://api.example.com/v1/emails \\\n  -H "Authorization: Bearer mc_test_..."'} />
         <p className="text-sm">Sent <RelativeTime value={iso(7200000)} /> · <RelativeTime value={iso(1000)} /></p>
+      </S>
+      <S title="Switch, segmented control, meter, wrapping copy field">
+        <Controls />
       </S>
       <S title="Skeleton, empty and error states">
         <div className="grid gap-2 max-w-md"><Skeleton className="h-4 w-1/3" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>

@@ -1,10 +1,11 @@
 "use client";
 import { useMemo, useState } from "react";
 import { CircleCheck, CircleX, Download, Monitor, Smartphone, TriangleAlert, Wand2 } from "lucide-react";
-import { ToggleGroup } from "radix-ui";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { ApiError } from "@/lib/api";
 import { Badge, StatusBadge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/copy";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -84,12 +85,7 @@ export function TemplateDetail({ template: t, initial }: { template: any; initia
         <TabsContent value="preview">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <p className="min-w-0 truncate text-sm text-muted">{state.preview?.subject ? <>Rendered subject: <span className="text-fg">{state.preview.subject}</span></> : "Preview renders with the values from the Variables tab."}</p>
-            <ToggleGroup.Root type="single" value={device} onValueChange={(v) => v && setDevice(v as typeof device)} aria-label="Preview device" className="flex gap-1 rounded-md border border-border p-0.5">
-              {DEVICES.map(({ v, label, Icon }) => (
-                <ToggleGroup.Item key={v} value={v} data-ui="toggle" aria-label={label}
-                  className="grid h-7 w-9 place-items-center rounded-sm text-muted transition-colors duration-[var(--dur-fast)] hover:text-fg data-[state=on]:bg-surface-2 data-[state=on]:text-fg pointer-coarse:h-11 pointer-coarse:w-11"><Icon aria-hidden className="size-4" /></ToggleGroup.Item>
-              ))}
-            </ToggleGroup.Root>
+            <SegmentedControl iconOnly label="Preview device" value={device} onValueChange={setDevice} options={DEVICES.map(({ v, label, Icon }) => ({ value: v, label, icon: Icon }))} />
           </div>
           {busy ? <Skeleton className="h-[560px] w-full rounded-lg" /> : state.error ? (
             <div className="grid gap-3">

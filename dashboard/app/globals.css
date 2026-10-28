@@ -64,51 +64,8 @@
   }
 }
 
-/* Compatibility layer: the pre-redesign classes P1-P4 still render with. Elements built from
-   components/ui carry data-ui and are excluded. Remove a rule when the last page stops using it. */
+/* Skip link (app/layout.tsx). Everything else is Tailwind utilities on components/ui. */
 @layer components {
-  main.narrow { max-width: 420px; }
   .skip { position: absolute; left: -999px; top: 8px; background: var(--accent); color: var(--accent-fg); padding: 8px 16px; border-radius: var(--r-sm); z-index: 100; }
   .skip:focus { left: 8px; }
-  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  main h1 { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 12px; }
-  main h2 { font-size: 16px; line-height: 24px; font-weight: 600; margin: 32px 0 8px; }
-  main a:not([data-ui]) { color: var(--accent); text-underline-offset: 2px; }
-  main table:not([data-ui]) { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
-  main table:not([data-ui]) :is(th, td) { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  main table:not([data-ui]) th { color: var(--fg-muted); font-weight: 500; font-size: 12px; }
-  @media (max-width: 767.98px) { main table:not([data-ui]) { display: block; overflow-x: auto; } }
-  .wrap { word-break: break-all; }
-  .muted, .hint { color: var(--fg-muted); }
-  .hint.over { color: var(--bad); font-weight: 600; }
-  main :is(input, select, textarea):not([data-ui]) { font: inherit; font-size: 16px; color: var(--fg); background: var(--bg); border: 1px solid var(--input-border); border-radius: var(--r-sm); padding: 6px 10px; min-height: 32px; }
-  main textarea:not([data-ui]) { width: 100%; resize: vertical; }
-  main button:not([data-ui]) { font: inherit; font-weight: 500; font-size: 13px; background: var(--accent); color: var(--accent-fg); border: 1px solid var(--accent); border-radius: var(--r-sm); padding: 6px 12px; min-height: 32px; transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-fast); }
-  main button:not([data-ui]):active { transform: scale(.97); }
-  main button.secondary:not([data-ui]) { background: var(--bg); color: var(--accent); }
-  main button.danger:not([data-ui]) { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
-  main button.link:not([data-ui]) { background: none; border: 0; color: var(--accent); text-decoration: underline; }
-  main button:disabled:not([data-ui]) { opacity: .6; }
-  @media (pointer: coarse) { main :is(button, input, select):not([data-ui]) { min-height: 44px; } }
-  main label:not([data-ui]) { display: grid; gap: 4px; font-weight: 500; }
-  .stack { display: grid; gap: 14px; max-width: 560px; }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); }
-  .badge.ok { background: var(--ok-bg); color: var(--ok); } .badge.warn { background: var(--warn-bg); color: var(--warn); } .badge.bad { background: var(--bad-bg); color: var(--bad); } .badge.info { background: var(--info-bg); color: var(--info); }
-  .banner { background: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad); border-radius: var(--r-md); padding: 12px 16px; margin: 16px 0; }
-  .banner a { color: inherit; } .banner p { margin: 4px 0 0; }
-  .notice { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok); border-radius: var(--r-md); padding: 12px 16px; }
-  .stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
-  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 12px 20px; min-width: 144px; }
-  .stat dt { color: var(--fg-muted); font-size: 12px; } .stat dd { margin: 0; font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -.02em; }
-  .bars { width: 100%; max-width: 560px; height: auto; } .bars rect { fill: var(--accent); } .bars text { fill: var(--fg-muted); font-size: 9px; }
-  .preview { width: 100%; height: 420px; border: 0; outline: 1px solid rgb(0 0 0 / .1); outline-offset: -1px; border-radius: var(--r-md); background: #fff; }
-  .json { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px; overflow: auto; max-height: 420px; font-size: 12.5px; line-height: 20px; }
-  .timeline { padding-left: 20px; } .timeline li { margin: 4px 0; }
-  .tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--border); } .tabs a[aria-current="page"] { font-weight: 600; color: var(--fg); }
-  .gap { margin-right: 10px; }
-  main section { margin-bottom: 24px; }
-  main pre { overflow: auto; }
 }
-
-/* unlayered on purpose: Tailwind's `.inline` utility (display: inline) would otherwise win over the legacy layout class */
-main .inline { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 8px 0; }

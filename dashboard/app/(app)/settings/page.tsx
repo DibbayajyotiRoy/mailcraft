@@ -1,5 +1,5 @@
 import { get } from "@/lib/api";
-import { ActionError } from "@/components/ui";
+import { parseErr } from "@/lib/err";
 import { ErrorState } from "@/components/ui/error-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { InstructionsForm } from "@/components/Instructions";
@@ -13,6 +13,7 @@ export const metadata = { title: "Settings · mailcraft" };
 
 export default async function Settings({ searchParams }: { searchParams: Promise<{ err?: string }> }) {
   const { err } = await searchParams;
+  const actionErr = parseErr(err);
   const [s, ks, pol, tr, st] = await Promise.all([get("/v1/settings"), get("/v1/kill-switch"), get("/v1/policy"), get("/v1/transports"), get("/v1/account/status")]);
   const d = s.data ?? {};
   const llm = d.llm_provider ?? {};
@@ -23,7 +24,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   return (
     <>
       <PageHeader title="Settings" description="Sender defaults, delivery, AI and safety for this workspace." />
-      <ActionError err={err} />
+      {actionErr && <ErrorState error={actionErr} />}
       <div className="grid gap-6 lg:grid-cols-[200px_minmax(0,720px)] lg:gap-10">
         <SettingsNav />
         <div className="grid gap-6">

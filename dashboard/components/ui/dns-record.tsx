@@ -1,7 +1,5 @@
-import { StatusBadge } from "@/components/ui/badge";
-import { Badge } from "@/components/ui/badge";
-import { CopyButton } from "@/components/ui/copy";
-import { MonoCopy } from "@/components/setup/mono-copy";
+import { Badge, StatusBadge } from "./badge";
+import { CopyButton, CopyField } from "./copy";
 import { cn } from "@/lib/cn";
 
 export type DnsRec = { record?: string; type: string; name: string; value: string; priority?: number; status: string; found?: string; expected?: string };
@@ -27,8 +25,8 @@ export function DnsRecordRow({ r }: { r: DnsRec }) {
       </div>
       {r.record && PURPOSE[r.record] && <p className="mt-1 text-xs text-muted">{PURPOSE[r.record]}</p>}
       <dl className="mt-3 grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <div><dt className="mb-1 text-xs font-medium text-muted">Name / Host</dt><dd><MonoCopy value={r.name} label={`${r.record ?? r.type} name`} /></dd></div>
-        <div><dt className="mb-1 text-xs font-medium text-muted">{r.type === "MX" ? "Points to (priority first)" : "Value"}</dt><dd><MonoCopy value={value} label={`${r.record ?? r.type} value`} /></dd></div>
+        <div><dt className="mb-1 text-xs font-medium text-muted">Name / Host</dt><dd><CopyField wrap value={r.name} label={`${r.record ?? r.type} name`} /></dd></div>
+        <div><dt className="mb-1 text-xs font-medium text-muted">{r.type === "MX" ? "Points to (priority first)" : "Value"}</dt><dd><CopyField wrap value={value} label={`${r.record ?? r.type} value`} /></dd></div>
       </dl>
       {r.status === "failed" && (
         <p className="mt-2 text-sm text-bad">

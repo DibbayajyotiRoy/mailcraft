@@ -1,4 +1,5 @@
 "use client";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Download, LayoutGrid, Mail, MoreHorizontal, Rows3, Search, FileText } from "lucide-react";
@@ -81,10 +82,7 @@ export function TemplatesView({ templates }: { templates: TemplateRow[] }) {
           <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
           <Input type="search" aria-label="Search templates" placeholder="Search by name, alias or subject" className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        <div role="group" aria-label="Layout" className="flex gap-1">
-          <Button variant={view === "grid" ? "secondary" : "ghost"} size="icon" aria-label="Grid view" aria-pressed={view === "grid"} onClick={() => setView("grid")}><LayoutGrid aria-hidden /></Button>
-          <Button variant={view === "table" ? "secondary" : "ghost"} size="icon" aria-label="Table view" aria-pressed={view === "table"} onClick={() => setView("table")}><Rows3 aria-hidden /></Button>
-        </div>
+        <SegmentedControl iconOnly label="Layout" value={view} onValueChange={setView} options={[{ value: "grid", label: "Grid view", icon: LayoutGrid }, { value: "table", label: "Table view", icon: Rows3 }]} />
       </div>
       <p className="sr-only" role="status">{shown.length} of {templates.length} templates</p>
       {!shown.length ? (
@@ -96,7 +94,7 @@ export function TemplatesView({ templates }: { templates: TemplateRow[] }) {
               <Thumb t={t} />
               <div className="flex items-start justify-between gap-2 p-3">
                 <div className="min-w-0">
-                  <Link href={`/templates/${t.id}`} data-ui="link" className="block truncate font-medium after:absolute after:inset-0 after:content-['']">{label(t)}</Link>
+                  <Link href={`/templates/${t.id}`} className="block truncate font-medium after:absolute after:inset-0 after:content-['']">{label(t)}</Link>
                   <p className="truncate text-xs text-muted">{t.subject || <span className="text-subtle">No subject</span>}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {t.status && <StatusBadge status={t.status} size="sm" />}
@@ -114,7 +112,7 @@ export function TemplatesView({ templates }: { templates: TemplateRow[] }) {
           <TBody>
             {shown.map((t) => (
               <TR key={t.id}>
-                <TD label="Name"><Link href={`/templates/${t.id}`} data-ui="link" className={cn("font-medium text-accent hover:underline")}>{label(t)}</Link>{t.alias && t.name && <span className="ml-2 font-mono text-xs text-muted">{t.alias}</span>}</TD>
+                <TD label="Name"><Link href={`/templates/${t.id}`} className={cn("font-medium text-accent hover:underline")}>{label(t)}</Link>{t.alias && t.name && <span className="ml-2 font-mono text-xs text-muted">{t.alias}</span>}</TD>
                 <TD label="Status"><span className="inline-flex items-center gap-2">{t.status && <StatusBadge status={t.status} size="sm" />}<VersionChips t={t} /></span></TD>
                 <TD label="Subject" className="max-w-xs truncate">{t.subject ?? ""}</TD>
                 <TD label="Updated">{t.updated_at ? <RelativeTime value={t.updated_at} className="text-muted" /> : <span className="text-subtle">-</span>}</TD>

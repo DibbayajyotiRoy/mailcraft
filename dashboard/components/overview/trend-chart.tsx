@@ -26,20 +26,20 @@ export function TrendChart({ days, label }: { days: Day[]; label: string }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div role="group" aria-label="Series" className="flex flex-wrap gap-1">
           {SERIES.map((s) => (
-            <button key={s.key} type="button" data-ui="button" aria-pressed={!off.has(s.key)} onClick={() => toggle(s.key)}
+            <button key={s.key} type="button" aria-pressed={!off.has(s.key)} onClick={() => toggle(s.key)}
               className="inline-flex h-7 items-center gap-1.5 rounded-sm border border-border px-2 text-xs font-medium text-muted transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 aria-pressed:text-fg pointer-coarse:h-11">
               <span aria-hidden className={cn("size-2 rounded-full", s.chip, off.has(s.key) && "opacity-30")} />{s.label}
             </button>
           ))}
         </div>
-        <button type="button" data-ui="button" aria-pressed={table} onClick={() => setTable((t) => !t)}
+        <button type="button" aria-pressed={table} onClick={() => setTable((t) => !t)}
           className="h-7 rounded-sm px-2 text-xs font-medium text-muted underline underline-offset-2 hover:text-fg pointer-coarse:h-11">
           {table ? "View as chart" : "View as table"}
         </button>
       </div>
       {table ? (
         <div className="overflow-x-auto">
-          <table data-ui="table" className="w-full text-sm">
+          <table className="w-full text-sm">
             <caption className="sr-only">{label}</caption>
             <thead><tr className="text-left text-xs text-muted"><th scope="col" className="py-1 pr-4 font-medium">Day</th>{SERIES.map((s) => <th key={s.key} scope="col" className="py-1 pr-4 text-right font-medium">{s.label}</th>)}<th scope="col" className="py-1 text-right font-medium">Sent</th></tr></thead>
             <tbody>{rows.map((r) => <tr key={r.date} className="border-t border-border"><th scope="row" className="py-1 pr-4 text-left font-normal">{r.date}</th>{SERIES.map((s) => <td key={s.key} className="py-1 pr-4 text-right tabular-nums">{r[s.key]}</td>)}<td className="py-1 text-right tabular-nums">{r.sent}</td></tr>)}</tbody>

@@ -25,7 +25,7 @@ const pill = cva("inline-flex items-center gap-1.5 rounded-full px-2 text-xs fon
 });
 
 export function Badge({ tone, size, className, children, ...p }: ComponentProps<"span"> & VariantProps<typeof pill>) {
-  return <span data-ui="badge" className={cn(pill({ tone, size }), className)} {...p}>{children}</span>;
+  return <span className={cn(pill({ tone, size }), className)} {...p}>{children}</span>;
 }
 
 /** Colour is never the only signal: dot + the status text. The tone name is also a class (`tone-warn`) for tests/styling hooks. */

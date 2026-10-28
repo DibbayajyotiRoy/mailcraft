@@ -4,9 +4,9 @@ import { useActionState, useEffect, useState } from "react";
 import { createKey } from "@/lib/actions";
 import { Button, SubmitButton } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { CopyField } from "@/components/ui/copy";
 import { Field, Input } from "@/components/ui/field";
 import { ErrorState } from "@/components/ui/error-state";
-import { MonoCopy } from "@/components/setup/mono-copy";
 
 const SCOPES = [["read", "Read emails, domains and settings."], ["send", "Send email."], ["manage", "Create keys, change settings and policy."]] as const;
 const ENVS = [["test", "Test", "Sandboxed. Nothing is delivered."], ["live", "Live", "Sends real email to real people."]] as const;
@@ -20,9 +20,9 @@ function Form({ onSecret, onDone }: { onSecret: () => void; onDone: () => void }
     return (
       <div className="grid gap-4">
         <p className="flex items-start gap-2 text-sm font-medium text-warn"><TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />Copy this key now. You won&apos;t see this again.</p>
-        <MonoCopy value={s.secret} label="API key secret" />
+        <CopyField wrap value={s.secret} label="API key secret" />
         <label className="flex cursor-pointer items-start gap-3 text-sm">
-          <input data-ui="checkbox" type="checkbox" checked={stored} onChange={(e) => setStored(e.target.checked)} className="mt-0.5 size-4 accent-[var(--accent)]" />
+          <input type="checkbox" checked={stored} onChange={(e) => setStored(e.target.checked)} className="mt-0.5 size-4 accent-[var(--accent)]" />
           I&apos;ve stored this key somewhere safe.
         </label>
         <div className="flex justify-end"><Button disabled={!stored} onClick={onDone}>Done</Button></div>
@@ -37,7 +37,7 @@ function Form({ onSecret, onDone }: { onSecret: () => void; onDone: () => void }
         <div className="grid gap-2 sm:grid-cols-2">
           {ENVS.map(([v, t, d]) => (
             <label key={v} className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3 has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
-              <input data-ui="radio" type="radio" name="env" value={v} defaultChecked={v === "test"} className="mt-1 size-4 accent-[var(--accent)]" />
+              <input type="radio" name="env" value={v} defaultChecked={v === "test"} className="mt-1 size-4 accent-[var(--accent)]" />
               <span><span className="flex items-center gap-1.5 text-sm font-medium"><span aria-hidden className={`size-2 rounded-full ${v === "live" ? "bg-live" : "bg-test"}`} />{t}</span><span className="block text-xs text-muted">{d}</span></span>
             </label>
           ))}
@@ -47,7 +47,7 @@ function Form({ onSecret, onDone }: { onSecret: () => void; onDone: () => void }
         <legend className="mb-1.5 text-sm font-medium">Scopes <span className="font-normal text-muted">(least privilege by default)</span></legend>
         {SCOPES.map(([v, d]) => (
           <label key={v} className="flex cursor-pointer items-start gap-3 text-sm">
-            <input data-ui="checkbox" type="checkbox" name="scopes" value={v} defaultChecked={v !== "manage"} className="mt-0.5 size-4 accent-[var(--accent)]" />
+            <input type="checkbox" name="scopes" value={v} defaultChecked={v !== "manage"} className="mt-0.5 size-4 accent-[var(--accent)]" />
             <span><span className="font-mono text-[12.5px]">{v}</span> <span className="text-muted">{d}</span></span>
           </label>
         ))}

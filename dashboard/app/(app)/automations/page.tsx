@@ -1,7 +1,7 @@
 import { get } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";
-import { ApiErrorState } from "../_p3/ApiErrorState";
-import { parseErr } from "../_p3/err";
+import { RetryError } from "@/components/ui/error-state";
+import { parseErr } from "@/lib/err";
 import { AutomationsList, type AutomationRow } from "./AutomationsList";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +14,8 @@ export default async function Automations({ searchParams }: { searchParams: Prom
   return (
     <>
       <PageHeader title="Automations" description="Lifecycle emails that run when a contact does something." />
-      {e && <div className="mb-4"><ApiErrorState error={e} /></div>}
-      {r.error ? <ApiErrorState error={r.error} /> : <AutomationsList automations={(Array.isArray(r.data) ? r.data : []) as AutomationRow[]} />}
+      {e && <div className="mb-4"><RetryError error={e} /></div>}
+      {r.error ? <RetryError error={r.error} /> : <AutomationsList automations={(Array.isArray(r.data) ? r.data : []) as AutomationRow[]} />}
     </>
   );
 }

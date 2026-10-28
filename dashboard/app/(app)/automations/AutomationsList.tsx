@@ -34,7 +34,7 @@ export function AutomationsList({ automations }: { automations: AutomationRow[] 
           const name = a.name ?? a.id, trig = triggerName(a.trigger);
           return (
             <TR key={a.id}>
-              <TD label="Name"><Link href={`/automations/${a.id}`} data-ui="link" className="font-medium text-accent hover:underline">{name}</Link>
+              <TD label="Name"><Link href={`/automations/${a.id}`} className="font-medium text-accent hover:underline">{name}</Link>
                 {a.version != null && <span className="ml-2 text-xs text-muted">v{a.version}</span>}</TD>
               <TD label="Trigger">{trig ? <Badge tone="neutral"><Zap aria-hidden className="size-3" /><code className="text-xs">{trig}</code></Badge> : <span className="text-subtle">-</span>}</TD>
               <TD label="Status"><StatusBadge status={a.status ?? "draft"} /></TD>

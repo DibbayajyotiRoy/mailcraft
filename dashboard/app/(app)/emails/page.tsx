@@ -10,7 +10,7 @@ import { EmailFilters } from "@/components/emails/email-filters";
 import { EmailsTable } from "@/components/emails/emails-table";
 import { Peek } from "@/components/emails/peek";
 import { EmailTrail, PolicyDecisions, type MailEvent } from "@/components/emails/trail";
-import { RetryError } from "@/components/monitor/retry-error";
+import { RetryError } from "@/components/ui/error-state";
 import { MessagePreview } from "@/components/monitor/message-preview";
 import { emailsHref, type EmailQuery } from "@/components/monitor/helpers";
 
@@ -40,11 +40,11 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
       {!rows.length ? (
         filtered || cursor ? (
           <EmptyState variant="no-results" title="No emails match" description="Nothing matches these filters. Try a wider search or date range."
-            action={<Button asChild variant="secondary"><Link data-ui="link" href="/emails">Clear filters</Link></Button>} />
+            action={<Button asChild variant="secondary"><Link href="/emails">Clear filters</Link></Button>} />
         ) : (
           <EmptyState title="No emails yet" description="Send your first email via the API. It appears here within seconds."
             action={<div className="grid w-full max-w-lg gap-3 text-left"><CodeBlock language="bash" code={'curl -X POST $MAILCRAFT_API_URL/v1/emails \\\n  -H "Authorization: Bearer $MAILCRAFT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"from":"you@yourdomain.com","to":"test@example.com","subject":"Hello","text":"It works."}\''} />
-              <Button asChild variant="primary" className="justify-self-center"><Link data-ui="link" href="/keys">Create an API key</Link></Button></div>} />
+              <Button asChild variant="primary" className="justify-self-center"><Link href="/keys">Create an API key</Link></Button></div>} />
         )
       ) : (
         <>
@@ -52,8 +52,8 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
           <nav aria-label="Pagination" className="mt-4 flex items-center justify-between gap-3 text-sm">
             <span className="text-muted">{rows.length} {rows.length === 1 ? "email" : "emails"}</span>
             <span className="flex gap-2">
-              {cursor && <Button asChild variant="secondary"><Link data-ui="link" href={emailsHref(query, { cursor: undefined, open: undefined })}>First page</Link></Button>}
-              {r.next_cursor && <Button asChild variant="secondary"><Link data-ui="link" rel="next" href={emailsHref(query, { cursor: r.next_cursor, open: undefined })}>Next page</Link></Button>}
+              {cursor && <Button asChild variant="secondary"><Link href={emailsHref(query, { cursor: undefined, open: undefined })}>First page</Link></Button>}
+              {r.next_cursor && <Button asChild variant="secondary"><Link rel="next" href={emailsHref(query, { cursor: r.next_cursor, open: undefined })}>Next page</Link></Button>}
             </span>
           </nav>
         </>
@@ -73,7 +73,7 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
                 {peekEv?.error ? <RetryError error={peekEv.error} /> : <EmailTrail events={(peekEv?.data as MailEvent[]) ?? []} status={pe.status} approvalHref="/approvals" label="Delivery timeline (peek)" />}
               </section>
               <section aria-labelledby="pk-p"><h3 id="pk-p" className="mb-3 text-sm font-medium">Policy decisions</h3><PolicyDecisions decisions={pe.policy_decisions ?? []} /></section>
-              <Button asChild variant="primary" className="justify-self-start"><Link data-ui="link" href={`/emails/${encodeURIComponent(pe.id)}`}>Open full page</Link></Button>
+              <Button asChild variant="primary" className="justify-self-start"><Link href={`/emails/${encodeURIComponent(pe.id)}`}>Open full page</Link></Button>
             </div>
           )}
         </Peek>

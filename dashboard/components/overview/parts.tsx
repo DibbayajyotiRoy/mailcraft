@@ -10,7 +10,7 @@ export function RangeSwitch({ active }: { active: string }) {
   return (
     <nav aria-label="Time range" className="inline-flex rounded-sm border border-border-strong bg-surface p-0.5">
       {RANGES.map((r) => (
-        <Link key={r.key} data-ui="link" href={r.key === "7d" ? "/" : `/?range=${r.key}`} replace scroll={false} aria-current={r.key === active ? "true" : undefined}
+        <Link key={r.key} href={r.key === "7d" ? "/" : `/?range=${r.key}`} replace scroll={false} aria-current={r.key === active ? "true" : undefined}
           className={cn("grid h-7 min-w-10 place-items-center rounded-[4px] px-2 text-xs font-medium text-muted transition-colors duration-[var(--dur-fast)] hover:text-fg pointer-coarse:h-10", r.key === active && "bg-accent-soft text-fg")}>
           {r.label}
         </Link>
@@ -31,7 +31,7 @@ export function NeedsAttention({ items }: { items: Attention[] }) {
           <li key={a.id} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-4 py-2.5 text-sm", a.tone === "bad" ? "border-bad/40 bg-bad-bg text-bad" : "border-warn/30 bg-warn-bg text-warn")}>
             <AlertTriangle aria-hidden className="size-4 shrink-0" />
             <span className="min-w-0 flex-1 font-medium">{a.text}</span>
-            <Link data-ui="link" href={a.href} className="inline-flex h-7 items-center gap-1 font-medium underline underline-offset-2 pointer-coarse:h-11">{a.action}<ArrowRight aria-hidden className="size-3.5" /></Link>
+            <Link href={a.href} className="inline-flex h-7 items-center gap-1 font-medium underline underline-offset-2 pointer-coarse:h-11">{a.action}<ArrowRight aria-hidden className="size-3.5" /></Link>
           </li>
         ))}
       </ul>
@@ -63,7 +63,7 @@ export function SetupChecklistSlot({ steps }: { steps: Step[] }) {
                 <p className={cn("text-sm font-medium", s.done && "text-muted line-through")}>{s.title}<span className="sr-only">{s.done ? " (done)" : " (to do)"}</span></p>
                 <p className="text-sm text-muted">{s.why}</p>
               </div>
-              {!s.done && <Button asChild variant="secondary" size="sm"><Link data-ui="link" href={s.href}>{s.cta}</Link></Button>}
+              {!s.done && <Button asChild variant="secondary" size="sm"><Link href={s.href}>{s.cta}</Link></Button>}
             </li>
           ))}
         </ol>

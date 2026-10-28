@@ -1,4 +1,4 @@
-import { ruleWords } from "../../_p3/rules";
+import { ruleWords } from "@/lib/rules";
 
 export type Step = { key: string; type: string; config?: any; next?: string | Record<string, string> | null };
 export type Slot = { name: string; max_len?: number; instructions?: string; fallback?: string };

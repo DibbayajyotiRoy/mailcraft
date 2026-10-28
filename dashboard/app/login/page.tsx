@@ -34,7 +34,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
           <LoginForm err={err} defaultBase={DEFAULT_BASE} />
           <p className="mt-6 text-xs text-muted">
             The key is kept in an httpOnly cookie and only the dashboard server uses it.{" "}
-            <a data-ui="link" href="https://github.com/DibbayajyotiRoy/mailcraft/blob/main/docs/QUICKSTART.md" className="underline underline-offset-2 hover:text-fg">Need a key? Read the quickstart</a>.
+            <a href="https://github.com/DibbayajyotiRoy/mailcraft/blob/main/docs/QUICKSTART.md" className="underline underline-offset-2 hover:text-fg">Need a key? Read the quickstart</a>.
           </p>
         </div>
       </main>

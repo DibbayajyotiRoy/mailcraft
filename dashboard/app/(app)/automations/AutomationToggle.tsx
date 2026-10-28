@@ -2,7 +2,7 @@
 import { useState, useTransition } from "react";
 import { automationState } from "@/lib/actions";
 import { AlertDialog, AlertDialogContent } from "@/components/ui/dialog";
-import { Switch } from "./Switch";
+import { Switch } from "@/components/ui/switch";
 
 export type AutomationAction = "publish" | "pause" | "resume";
 
