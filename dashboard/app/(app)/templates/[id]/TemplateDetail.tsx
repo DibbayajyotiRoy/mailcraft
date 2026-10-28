@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { CircleCheck, CircleX, Download, Monitor, Smartphone, TriangleAlert, Wand2 } from "lucide-react";
+import { CircleCheck, CircleX, Download, Monitor, Pencil, Smartphone, TriangleAlert, Wand2 } from "lucide-react";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { ApiError } from "@/lib/api";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -13,20 +13,22 @@ import { ErrorState } from "@/components/ui/error-state";
 import { Field, Input } from "@/components/ui/field";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { KeyValue } from "@/components/ui/stat-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { Personalization } from "@/components/Personalization";
+import { TemplateEditor } from "./TemplateEditor";
+import { TemplateSettings } from "./TemplateSettings";
+import { VersionsPanel, type VersionRow } from "./VersionsPanel";
 import { PublishButton } from "./PublishButton";
-import { lintSummary, templateVariables, type Lint } from "./util";
+import { lintSummary, sourceOf, templateVariables, type Lint } from "./util";
 
 type Preview = { subject?: string; html?: string; text?: string; lint?: Lint[] };
 type State = { preview?: Preview; error?: ApiError };
 
 const DEVICES = [{ v: "desktop", label: "Desktop", Icon: Monitor, w: "100%" }, { v: "mobile", label: "Mobile", Icon: Smartphone, w: "375px" }] as const;
 
-export function TemplateDetail({ template: t, initial }: { template: any; initial: State }) {
+export function TemplateDetail({ template: t, initial, versions, startEditing }: { template: any; initial: State; versions?: VersionRow[]; startEditing?: boolean }) {
   const id: string = t.id;
   const name: string = t.name ?? t.alias ?? id;
   const vars = useMemo(() => templateVariables(t), [t]);
@@ -35,15 +37,16 @@ export function TemplateDetail({ template: t, initial }: { template: any; initia
   const [values, setValues] = useState<Record<string, string>>({});
   const [state, setState] = useState<State>(initial);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(!!startEditing);
 
-  async function refresh(next = values) {
+  async function refresh(next = values, quiet = false) {
     setBusy(true);
     try {
       const res = await fetch(`/templates/${encodeURIComponent(id)}/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ variables: next }) });
       const j = await res.json();
       setState(j.error ? { error: j.error } : { preview: j.data });
-      if (!j.error) toast.success("Preview updated");
-      setTab("preview");
+      if (!j.error && !quiet) toast.success("Preview updated");
+      if (!quiet) setTab("preview");
     } catch {
       setState({ error: { code: "unreachable", message: "Could not reach the dashboard server.", hint: "Check your connection and try again." } });
     } finally { setBusy(false); }
@@ -58,18 +61,27 @@ export function TemplateDetail({ template: t, initial }: { template: any; initia
   const sum = lintSummary(lint);
   const unpublished = t.version != null && (t.published_version == null || t.version > t.published_version);
   const dev = DEVICES.find((d) => d.v === device)!;
+  function closeEditor() {
+    window.history.replaceState(null, "", window.location.pathname); // drop ?edit=1
+    setEditing(false);
+    refresh(values, true); // the Preview tab shows the draft just saved, not the page as first loaded
+  }
+
+  if (editing) return <TemplateEditor template={t} values={values} onValuesChange={setValues} initial={state} onClose={closeEditor} />;
 
   return (
     <>
       <PageHeader
         breadcrumb={[{ label: "Templates", href: "/templates" }, { label: name }]}
-        title={<span className="inline-flex flex-wrap items-center gap-3">{name}{t.status && <StatusBadge status={t.status} />}</span>}
+        title={<span className="inline-flex flex-wrap items-center gap-3">{name}{t.status && <StatusBadge status={t.status} />}{unpublished && t.status === "published" && <Badge tone="info">Draft v{t.version} unpublished</Badge>}</span>}
         description={t.subject ? <>Subject: <span className="text-fg">{t.subject}</span></> : "No subject set"}
         action={<>
           <Personalization />
           {["json", "html", "mjml"].map((f) => (
             <a key={f} href={`/templates/${id}/export?format=${f}`} download className={cn(buttonVariants({ variant: "secondary" }), "max-sm:hidden")}><Download aria-hidden />{f.toUpperCase()}</a>
           ))}
+          <TemplateSettings template={t} />
+          <Button variant="secondary" onClick={() => setEditing(true)}><Pencil aria-hidden />Edit</Button>
           <PublishButton id={id} name={name} disabled={t.status === "published" && !unpublished} />
         </>}
       />
@@ -146,23 +158,15 @@ export function TemplateDetail({ template: t, initial }: { template: any; initia
         </TabsContent>
 
         <TabsContent value="versions">
-          <Card className="max-w-2xl">
-            <CardHeader title="Versions" description="Sends use the published version. Edits create a new draft version." />
-            <CardBody>
-              <KeyValue items={[
-                ["Draft version", t.version != null ? `v${t.version}` : "-"],
-                ["Published version", t.published_version != null ? `v${t.published_version}` : "Never published"],
-                ["State", unpublished ? <Badge tone="info">unpublished changes</Badge> : <StatusBadge status="published" />],
-                ["Alias", t.alias ? <code>{t.alias}</code> : "-"],
-              ]} />
-              <p className="mt-4 text-sm text-muted">The API exposes the current draft and published version numbers only; a full version history is not available yet.</p>
-            </CardBody>
-          </Card>
+          <VersionsPanel template={t} versions={versions} />
         </TabsContent>
 
         <TabsContent value="source">
-          <p className="mb-3 text-sm text-muted">The stored template definition, for reference. Use Export to download it as JSON, HTML or MJML.</p>
-          <CodeBlock language="json" code={JSON.stringify(t, null, 2)} />
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted">The newest version, as you wrote it. Use Export to download it as JSON, HTML or MJML.</p>
+            <Button variant="secondary" onClick={() => setEditing(true)}><Pencil aria-hidden />Edit source</Button>
+          </div>
+          <CodeBlock language={sourceOf(t).format} code={sourceOf(t).text} />
         </TabsContent>
       </Tabs>
     </>

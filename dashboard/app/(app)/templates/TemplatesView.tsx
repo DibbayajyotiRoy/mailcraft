@@ -72,7 +72,7 @@ export function TemplatesView({ templates }: { templates: TemplateRow[] }) {
 
   if (!templates.length) {
     return (
-      <EmptyState icon={FileText} title="No templates yet" description="Import an HTML, MJML or JSON template, or create one from the CLI. A template must be published before sends can use it." />
+      <EmptyState icon={FileText} title="No templates yet" description="Use New template to write one, or Import template to bring in an HTML, MJML or JSON file. A template must be published before sends can use it." />
     );
   }
   return (

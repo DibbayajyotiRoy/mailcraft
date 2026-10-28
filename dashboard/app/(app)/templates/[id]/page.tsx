@@ -7,11 +7,11 @@ import { TemplateDetail } from "./TemplateDetail";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Template" };
 
-export default async function TemplateDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ err?: string }> }) {
+export default async function TemplateDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ err?: string; edit?: string }> }) {
   const { id } = await params;
-  const { err } = await searchParams;
+  const { err, edit } = await searchParams;
   const e = parseErr(err);
-  const [t, p] = await Promise.all([get(`/v1/templates/${encodeURIComponent(id)}`), api("POST", `/v1/templates/${encodeURIComponent(id)}/preview`, { variables: {} })]);
+  const [t, p, v] = await Promise.all([get(`/v1/templates/${encodeURIComponent(id)}`), api("POST", `/v1/templates/${encodeURIComponent(id)}/preview`, { variables: {} }), get(`/v1/templates/${encodeURIComponent(id)}/versions`)]);
   const shaped = !t.error && t.data && !Array.isArray(t.data) && typeof t.data === "object";
   if (t.error || !shaped) return (
     <>
@@ -22,7 +22,7 @@ export default async function TemplateDetailPage({ params, searchParams }: { par
   return (
     <>
       {e && <div className="mb-4"><RetryError error={e} /></div>}
-      <TemplateDetail template={{ ...t.data, id: t.data.id ?? id }} initial={p.error ? { error: p.error } : { preview: Array.isArray(p.data) ? {} : p.data }} />
+      <TemplateDetail template={{ ...t.data, id: t.data.id ?? id }} initial={p.error ? { error: p.error } : { preview: Array.isArray(p.data) ? {} : p.data }} versions={Array.isArray(v.data) ? v.data : undefined} startEditing={edit === "1"} />
     </>
   );
 }

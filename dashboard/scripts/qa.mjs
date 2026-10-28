@@ -22,6 +22,9 @@ const CSV = "email,first_name,last_name,company\nada@example.com,Ada,Lovelace,An
 const upload = async (p) => { await p.getByLabel("CSV file").setInputFiles({ name: "people.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) }); await p.waitForTimeout(300); };
 const toContent = async (p) => { await upload(p); await p.getByRole("button", { name: /^Content/ }).click(); await p.waitForTimeout(2200); };
 const toReview = async (p) => { await toContent(p); await p.getByRole("button", { name: /^Review/ }).click(); await p.waitForTimeout(1500); };
+const seq = (...acts) => async (p) => { for (const a of acts) await a(p); };
+const edit = (text) => async (p) => { await p.getByRole("textbox", { name: /source$/ }).fill(text); await p.waitForTimeout(1000); }; // past the 600ms preview debounce
+const previewPane = async (p) => { const b = p.getByRole("radio", { name: "Preview", exact: true }); if (await b.isVisible()) await b.click(); }; // the Code/Preview switch exists below 1024px only
 // [name, path, action?]  action = open a dialog/tab before the capture
 const ROUTES = [
   ["overview", "/"], ["overview-30d", "/?range=30d"],
@@ -35,6 +38,14 @@ const ROUTES = [
   ["broadcast-content", "/broadcasts/new", toContent], ["broadcast-review", "/broadcasts/new", toReview],
   ["broadcast-confirm", "/broadcasts/new", async (p) => { await toReview(p); await p.getByRole("button", { name: /^Send to 3/ }).click(); }],
   ["broadcast-detail", "/broadcasts/b1"], ["broadcast-bounced", "/broadcasts/b1?status=bounced"], ["broadcast-pending", "/broadcasts/b3"],
+  ["template-versions", "/templates/t2", click("tab", /Versions/)], ["template-source", "/templates/t2", click("tab", "Source")],
+  ["template-settings", "/templates/t2", click("button", "Template settings")], ["template-discard", "/templates/t2", seq(click("tab", /Versions/), click("button", "Discard draft"))],
+  ["template-new", "/templates", click("button", "New template")], ["template-new-html", "/templates", seq(click("button", "New template"), click("radio", "Paste HTML"))],
+  ["template-edit-html", "/templates/t2?edit=1"], ["template-edit-html-preview", "/templates/t2?edit=1", previewPane],
+  ["template-edit-mjml", "/templates/t1?edit=1"], ["template-edit-json", "/templates/t3?edit=1"],
+  ["template-edit-lint", "/templates/t2?edit=1", seq(edit('<html><body><h1>Hi {{ first_name }}</h1><img src="http://x.test/a.png"><a href="http://x.test">Go</a></body></html>'), previewPane)],
+  ["template-edit-error", "/templates/t2?edit=1", seq(edit("<p>BROKEN</p>"), previewPane)],
+  ["template-edit-guard", "/templates/t2?edit=1", seq(edit("<p>unsaved</p>"), click("link", "Templates"))],
   ["automations", "/automations"], ["automation-confirm", "/automations", click("switch", /.*/)],
   ["automations-archived", "/automations?archived=1"], ["automation-new", "/automations/new"], ["automation-new-welcome", "/automations/new?preset=welcome"], ["automation-new-nudge", "/automations/new?preset=nudge"],
   ["automation-new-errors", "/automations/new?preset=blank", click("button", "Save as draft")], ["automation-add-step", "/automations/new?preset=welcome", click("button", "Add step")],

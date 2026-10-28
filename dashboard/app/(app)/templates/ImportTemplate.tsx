@@ -44,7 +44,7 @@ export function ImportTemplate() {
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button><Upload aria-hidden />Import template</Button></DialogTrigger>
+      <DialogTrigger asChild><Button variant="secondary"><Upload aria-hidden />Import template</Button></DialogTrigger>
       <DialogContent title="Import a template" description="Import creates a draft. Publish it when it looks right." className="max-w-xl">
         <form action={importTemplate} onSubmit={onSubmit} noValidate className="grid gap-4">
           <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
