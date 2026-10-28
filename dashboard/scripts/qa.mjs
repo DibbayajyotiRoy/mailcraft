@@ -18,6 +18,10 @@ const API = process.env.MOCK_API || "http://localhost:18080";
 if (shots) mkdirSync(dir, { recursive: true });
 
 const click = (role, name, nth) => async (p) => { const l = p.getByRole(role, { name }); await (nth ? l.nth(nth) : l.first()).click(); };
+const CSV = "email,first_name,last_name,company\nada@example.com,Ada,Lovelace,Analytical Engines\ngrace@example.com,Grace,Hopper,Navy\nlinus@example.com,,Torvalds,\n";
+const upload = async (p) => { await p.getByLabel("CSV file").setInputFiles({ name: "people.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) }); await p.waitForTimeout(300); };
+const toContent = async (p) => { await upload(p); await p.getByRole("button", { name: /^Content/ }).click(); await p.waitForTimeout(2200); };
+const toReview = async (p) => { await toContent(p); await p.getByRole("button", { name: /^Review/ }).click(); await p.waitForTimeout(1500); };
 // [name, path, action?]  action = open a dialog/tab before the capture
 const ROUTES = [
   ["overview", "/"], ["overview-30d", "/?range=30d"],
@@ -26,6 +30,11 @@ const ROUTES = [
   ["approvals", "/approvals"],
   ["templates", "/templates"], ["template-detail", "/templates/t2"], ["template-lint", "/templates/t2", click("tab", /Lint/)],
   ["template-variables", "/templates/t2", click("tab", /Variables/)], ["template-import", "/templates", click("button", "Import template")],
+  ["personalization", "/templates/t2", click("button", "Personalization")],
+  ["broadcasts", "/broadcasts"], ["broadcast-new", "/broadcasts/new"], ["broadcast-typed", "/broadcasts/new", click("tab", "Type recipients")], ["broadcast-csv", "/broadcasts/new", upload],
+  ["broadcast-content", "/broadcasts/new", toContent], ["broadcast-review", "/broadcasts/new", toReview],
+  ["broadcast-confirm", "/broadcasts/new", async (p) => { await toReview(p); await p.getByRole("button", { name: /^Send to 3/ }).click(); }],
+  ["broadcast-detail", "/broadcasts/b1"], ["broadcast-bounced", "/broadcasts/b1?status=bounced"], ["broadcast-pending", "/broadcasts/b3"],
   ["automations", "/automations"], ["automation-confirm", "/automations", click("switch", /.*/)],
   ["automations-archived", "/automations?archived=1"], ["automation-new", "/automations/new"], ["automation-new-welcome", "/automations/new?preset=welcome"], ["automation-new-nudge", "/automations/new?preset=nudge"],
   ["automation-new-errors", "/automations/new?preset=blank", click("button", "Save as draft")], ["automation-add-step", "/automations/new?preset=welcome", click("button", "Add step")],

@@ -8,7 +8,7 @@ export const DEFAULT_BASE = process.env.MAILCRAFT_API_URL || "http://localhost:8
 
 /** Pure: one call, envelope unwrapped, never throws. */
 export async function request<T = any>(
-  base: string, key: string, method: string, path: string, body?: unknown,
+  base: string, key: string, method: string, path: string, body?: unknown, timeoutMs = 10_000,
 ): Promise<ApiResult<T>> {
   const headers: Record<string, string> = { Authorization: `Bearer ${key}`, Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -18,7 +18,7 @@ export async function request<T = any>(
     res = await fetch(base.replace(/\/+$/, "") + path, {
       method, headers, cache: "no-store",
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     return { data: null, error: { code: "unreachable", message: `Cannot reach ${base}: ${(e as Error).message}`, hint: "Check the API base URL and that the server is running." } };
@@ -44,10 +44,10 @@ export async function session() {
   return key ? { key, base: c.get("mc_base")?.value || DEFAULT_BASE } : null;
 }
 
-export async function api<T = any>(method: string, path: string, body?: unknown): Promise<ApiResult<T>> {
+export async function api<T = any>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<ApiResult<T>> {
   const s = await session();
   if (!s) return { data: null, error: { code: "unauthenticated", message: "Not signed in", hint: "Sign in at /login." } };
-  return request<T>(s.base, s.key, method, path, body);
+  return request<T>(s.base, s.key, method, path, body, timeoutMs);
 }
 
 export const get = <T = any>(path: string) => api<T>("GET", path);

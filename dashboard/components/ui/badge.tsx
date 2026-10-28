@@ -3,7 +3,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/cn";
 
 export const TONE: Record<string, Tone> = {
-  verified: "ok", delivered: "ok", sent: "ok", active: "ok", published: "ok", approved: "ok", pass: "ok", completed: "ok",
+  verified: "ok", delivered: "ok", sent: "ok", done: "ok", active: "ok", published: "ok", approved: "ok", pass: "ok", completed: "ok",
   pending: "warn", expired: "warn", deferred: "warn", draft: "warn", warn: "warn", paused: "warn", not_started: "warn",
   queued: "info", sending: "info", running: "info", pending_approval: "info",
   failed: "bad", bounced: "bad", complained: "bad", rejected: "bad", fail: "bad", cancelled: "bad", suppressed: "bad", revoked: "bad",

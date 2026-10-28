@@ -13,8 +13,8 @@ import { truncateId } from "@/lib/format";
 
 export type Approval = { id: string; kind: string; status: string; requested_by?: string | null; created_at: string; reason?: string | null; payload?: any };
 type Decision = "approve" | "reject";
-const WHY: Record<string, string> = { email: "Policy requires approval", automation_first_send: "First send of an automation", go_live: "Request to go live" };
-const KIND: Record<string, string> = { email: "Email", automation_first_send: "Automation", go_live: "Go live" };
+const WHY: Record<string, string> = { email: "Policy requires approval", broadcast: "Policy requires approval for this broadcast", automation_first_send: "First send of an automation", go_live: "Request to go live" };
+const KIND: Record<string, string> = { email: "Email", broadcast: "Broadcast", automation_first_send: "Automation", go_live: "Go live" };
 
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
