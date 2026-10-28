@@ -126,6 +126,21 @@ const AUTOMATIONS = [
       { key: "trigger", type: "trigger", config: { event: "logged_in" }, next: "quiet" },
       { key: "quiet", type: "wait_for_event", config: { event: "logged_in", timeout: "14d" }, next: { timeout: "miss" } },
       { key: "miss", type: "send_email", config: { template: "winback", mode: "static", stream: "marketing" } }] },
+  // Branches, a wait with both outcomes, a merge, a long edge and a failing step: the showcase for the Flow view.
+  { id: "a5", name: "trial-conversion", status: "active", trigger: { segment: "trial" }, trigger_event: "", current_version: 4, entry_rule: "once", approval: "first_n:5", created_at: ago(60 * 24 * 14),
+    stats: { go: stat(240, 0, 240, 0, 0), hello: stat(240, 6, 228, 0, 6), hold: stat(228, 41, 150, 37, 0), won: stat(37, 0, 37, 0, 0), chk: stat(150, 0, 150, 0, 0), tips: stat(88, 2, 84, 0, 2), offer: stat(62, 0, 55, 0, 7), pause: stat(55, 9, 46, 0, 0), tag: stat(130, 0, 130, 0, 0), pool: stat(130, 0, 130, 0, 0), bye: stat(130, 0, 130, 0, 0) },
+    steps: [
+      { key: "go", type: "trigger", config: { segment: "trial", filter: { field: "contact.plan", op: "eq", value: "trial" } }, next: "hello" },
+      { key: "hello", type: "send_email", config: { template: "trial-welcome", mode: "llm", from: "sales@example.com", custom_instructions: "Mention their workspace name." }, next: "hold" },
+      { key: "hold", type: "wait_for_event", config: { event: "upgraded", timeout: "7d" }, next: { event: "won", timeout: "chk" } },
+      { key: "won", type: "exit", config: { reason: "converted" } },
+      { key: "chk", type: "condition", config: { rule: { and: [{ field: "event_count:feature_used", op: "gte", value: 3 }, { field: "contact.plan", op: "eq", value: "trial" }] } }, next: { true: "tips", false: "offer" } },
+      { key: "tips", type: "send_email", config: { template: "trial-tips", mode: "static" }, next: "tag" },
+      { key: "offer", type: "send_email", config: { template: "trial-offer", mode: "llm" }, next: "pause" },
+      { key: "pause", type: "delay", config: { duration: "1d" }, next: "tag" },
+      { key: "tag", type: "update_contact", config: { set: { trial_stage: "ending", nudged: true } }, next: "pool" },
+      { key: "pool", type: "add_to_segment", config: { segment: "trial-ending" }, next: "bye" },
+      { key: "bye", type: "exit", config: {} }] },
   { id: "a3", name: "onboarding-tips", status: "draft", trigger: { event: "signed_up" }, trigger_event: "signed_up", current_version: 1, entry_rule: "once", approval: "first_n:5", created_at: ago(60 * 5), stats: {}, steps: [] },
   { id: "a4", name: "old-promo", status: "archived", trigger: "promo_viewed", trigger_event: "promo_viewed", current_version: 1, entry_rule: "once", approval: "first_n:5", created_at: ago(60 * 24 * 90), stats: {}, steps: [
       { key: "trigger", type: "trigger", config: { event: "promo_viewed" } }] },

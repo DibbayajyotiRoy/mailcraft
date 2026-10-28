@@ -11,6 +11,7 @@ import { ruleWords } from "@/lib/rules";
 import { AutomationToggle } from "../AutomationToggle";
 import { DetailActions } from "./DetailActions";
 import { RunsTable, type Run } from "./RunsTable";
+import { FlowView } from "../flow/FlowView";
 import { StepFlow } from "./StepFlow";
 import { flowSteps, slotsOf, type Slot } from "./steps";
 
@@ -64,7 +65,7 @@ export default async function AutomationDetail({ params, searchParams }: { param
           <TabsTrigger value="runs">Runs{!runs.error && <span className="ml-1.5 text-xs text-subtle">{runList.length}</span>}</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
-        <TabsContent value="flow"><StepFlow automation={d} slots={slots} stats={d.stats ?? null} /></TabsContent>
+        <TabsContent value="flow"><FlowView automation={{ trigger: d.trigger, steps: d.steps }} stats={d.stats ?? null} steps={<StepFlow automation={d} slots={slots} stats={d.stats ?? null} />} /></TabsContent>
         <TabsContent value="runs">{runs.error ? <RetryError error={runs.error} /> : <RunsTable runs={runList} event={trig?.event ?? trig?.events?.[0]} id={d.id ?? id} types={types} />}</TabsContent>
         <TabsContent value="settings">
           <div className="grid max-w-3xl gap-4">
