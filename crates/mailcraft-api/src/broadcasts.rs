@@ -590,6 +590,14 @@ pub async fn create(
         }
     }
 
+    if rows.is_empty() {
+        return Err(err(
+            "no_deliverable_recipients",
+            422,
+            "no recipient could be saved as a contact",
+        )
+        .field("recipients"));
+    }
     let needs_approval = a.pl.policy == Policy::NeedsApproval;
     let status = if needs_approval {
         "pending_approval"

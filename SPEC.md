@@ -219,7 +219,7 @@ Resource and route summary (full schemas live in `openapi.yaml`; the scaffold sh
 | Events | `POST /events` (track), `POST /event-definitions`, `GET /event-definitions` | manage (send events: `send`) |
 | Automations | `POST /automations`, `GET /automations`, `GET/PATCH /automations/{id}`, `POST /automations/{id}/publish|pause|resume|simulate`, `GET /automations/{id}/runs`, `GET /runs/{id}` | manage |
 | Generation | `POST /llm/preview` (draft with lint, nothing sent) | manage |
-| Broadcasts | `POST /broadcasts`, `POST /broadcasts/{id}/send|cancel`, `GET /broadcasts/{id}` | send |
+| Broadcasts | `POST /broadcasts` (queue one template to a list; `dry_run`), `GET /broadcasts`, `POST /broadcasts/preview`, `GET /broadcasts/{id}` (per-recipient status) | send / read |
 | Webhooks | `POST/GET /webhooks`, `DELETE /webhooks/{id}`, `POST /webhooks/{id}/test`, `POST /webhook-deliveries/{id}/replay` | manage |
 | Suppressions | `GET/POST /suppressions`, `DELETE /suppressions/{email}` | manage |
 | Approvals | `GET /approvals`, `GET /approvals/{id}`, `POST /approvals/{id}/decide` (**not available to agent keys**) | admin |
