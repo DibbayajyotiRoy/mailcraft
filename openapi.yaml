@@ -258,7 +258,7 @@ paths:
         "501": { $ref: "#/components/responses/Error" }
     get:
       operationId: contact_list
-      summary: List contacts (scope manage)
+      summary: List contacts (scope manage). Each item carries `suppressed` and `suppression_reason`.
       parameters:
         - { name: limit, in: query, schema: { type: integer } }
         - { name: cursor, in: query, schema: { type: string } }
@@ -266,13 +266,68 @@ paths:
       responses:
         "200": { description: page of contacts }
         "501": { $ref: "#/components/responses/Error" }
+  /v1/contacts/import:
+    post:
+      operationId: contact_import
+      summary: Upsert up to 5000 contacts in one call (scope manage)
+      description: |
+        Same semantics as `PUT /v1/contacts` per row. A bad row (invalid email or timezone) is skipped and
+        reported in `failed` with its zero-based `index`; the rest are imported. Idempotent by `Idempotency-Key`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contacts]
+              properties:
+                contacts:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [email]
+                    properties:
+                      email: { type: string, format: email }
+                      first_name: { type: string }
+                      last_name: { type: string }
+                      timezone: { type: string }
+                      properties: { type: object }
+      responses:
+        "200": { description: "`{imported, failed: [{index, email, error: {code, message}}]}`" }
+        "400": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
   /v1/contacts/{id}:
     get:
       operationId: contact_get
-      summary: Get a contact by id or email (scope manage)
+      summary: Get a contact by id or email (scope manage). Includes `suppressed` and `suppression_reason`.
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: contact }
+        "501": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: contact_patch
+      summary: Edit a contact by id or email (scope manage)
+      description: |
+        Omitted fields stay. `""` clears `first_name`, `last_name` or `timezone`. `properties` is merged
+        shallowly and a `null` value deletes that key. Audited as `contact.update` (field names only).
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                first_name: { type: string }
+                last_name: { type: string }
+                timezone: { type: string, description: IANA name, e.g. Europe/Berlin }
+                properties: { type: object }
+      responses:
+        "200": { description: contact }
+        "404": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/Error" }
     delete:
       operationId: contact_delete
@@ -281,10 +336,23 @@ paths:
       responses:
         "200": { description: deleted }
         "501": { $ref: "#/components/responses/Error" }
+  /v1/contacts/{id}/activity:
+    get:
+      operationId: contact_activity
+      summary: Recent activity of one contact (scope manage)
+      description: |
+        `{events, emails, runs, topics, segments}`, newest first, at most 25 each. `events` are tracked events,
+        `emails` everything sent to the address, `runs` automation runs, `topics` per-topic opt-in state and
+        `segments` the segments the contact is in.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: activity }
+        "404": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
   /v1/contacts/{id}/suppress:
     post:
       operationId: contact_suppress
-      summary: Suppress a contact (scope manage)
+      summary: Suppress a contact (scope manage). Undo with `DELETE /v1/suppressions/{email}`.
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
         content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } }
@@ -305,8 +373,50 @@ paths:
     get:
       operationId: segment_list
       summary: List segments with `member_count` (scope manage)
+      description: For a segment with a `filter`, `member_count` is who matches right now; a manual list reports its stored members.
       responses:
         "200": { description: segments }
+        "501": { $ref: "#/components/responses/Error" }
+  /v1/segments/preview:
+    post:
+      operationId: segment_preview
+      summary: Who a filter matches right now (scope manage); stores nothing
+      description: |
+        Returns `{count, sample: [{email, first_name, last_name}]}` (5 newest matches). The filter is a rule tree:
+        `{"and":[..]}`, `{"or":[..]}`, `{"not":..}` or `{"field","op","value"}` with op one of
+        `eq neq lt lte gt gte in contains exists`. Fields: `email`, `first_name`, `last_name`, `timezone`,
+        `created_at`, `properties.<key>`, `topic:<key>` (opted in), `event_count:<event>` and
+        `days_since:<event>` (whole days since the contact last tracked it; absent if never).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [filter], properties: { filter: { type: object } } } } }
+      responses:
+        "200": { description: count and sample }
+        "400": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/segments/{id}:
+    put:
+      operationId: segment_update
+      summary: Replace a segment's name and filter (scope manage)
+      description: Full replace. Omit `filter` (or send null) to make it a manual list. 409 when another segment has the name.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string }, filter: { type: object, nullable: true } } } } }
+      responses:
+        "200": { description: segment }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "501": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: segment_delete
+      summary: Delete a segment (scope manage)
+      description: 409 `invalid_state` while an automation still names the segment in a trigger or `add_to_segment` step.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: deleted }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/Error" }
   /v1/segments/{id}/members:
     post:

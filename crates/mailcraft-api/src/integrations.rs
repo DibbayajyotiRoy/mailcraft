@@ -262,7 +262,7 @@ pub async fn segments_create(
         return Err(invalid("name is required").field("name"));
     }
     let ws = auth.0.workspace_id;
-    idempotent!(
+    let r = idempotent!(
         st,
         auth,
         headers,
@@ -270,7 +270,64 @@ pub async fn segments_create(
         b,
         StatusCode::CREATED,
         st.segments.create(ws, &b.name, b.filter.clone())
+    );
+    record(&st, &auth, "segment.create", json!({"name": b.name})).await?;
+    r
+}
+
+/// Full replace: `filter: null` (or absent) makes it a manual list.
+pub async fn segments_update(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+    ApiJson(b): ApiJson<CreateSegment>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    if b.name.trim().is_empty() {
+        return Err(invalid("name is required").field("name"));
+    }
+    let v = st
+        .segments
+        .update(auth.0.workspace_id, id, b.name.trim(), b.filter)
+        .await?;
+    record(
+        &st,
+        &auth,
+        "segment.update",
+        json!({"segment": id, "name": b.name}),
     )
+    .await?;
+    Ok(envelope(StatusCode::OK, v))
+}
+
+pub async fn segments_delete(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    st.segments.delete(auth.0.workspace_id, id).await?;
+    record(&st, &auth, "segment.delete", json!({"segment": id})).await?;
+    Ok(envelope(StatusCode::OK, json!({"id": id, "deleted": true})))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewSegment {
+    pub filter: Value,
+}
+
+/// Who a filter matches right now (count + a few examples). Stores nothing.
+pub async fn segments_preview(
+    State(st): State<AppState>,
+    auth: Auth,
+    ApiJson(b): ApiJson<PreviewSegment>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    Ok(envelope(
+        StatusCode::OK,
+        st.segments.preview(auth.0.workspace_id, b.filter).await?,
+    ))
 }
 
 pub async fn segments_list(State(st): State<AppState>, auth: Auth) -> ApiResult {
@@ -473,13 +530,15 @@ pub async fn dns_sync(
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatchContact {
+    /// `""` clears the name.
     #[serde(default)]
     pub first_name: Option<String>,
     #[serde(default)]
     pub last_name: Option<String>,
+    /// IANA name; `""` clears it.
     #[serde(default)]
     pub timezone: Option<String>,
-    /// Merged shallowly into existing properties.
+    /// Merged shallowly into existing properties; a `null` value deletes that key.
     #[serde(default)]
     pub properties: Option<Value>,
 }
@@ -492,14 +551,24 @@ pub async fn contacts_patch(
 ) -> ApiResult {
     auth.require(Scope::Manage)?;
     let ws = auth.0.workspace_id;
-    let cur = st.contacts.get(ws, &id).await?;
-    let email = cur["email"].as_str().unwrap_or_default().to_string();
+    let mut changed: Vec<&str> = Vec::new();
+    for (k, set) in [
+        ("first_name", b.first_name.is_some()),
+        ("last_name", b.last_name.is_some()),
+        ("timezone", b.timezone.is_some()),
+        ("properties", b.properties.is_some()),
+    ] {
+        if set {
+            changed.push(k);
+        }
+    }
     let v = st
         .contacts
-        .upsert(
+        .update(
             ws,
+            &id,
             UpsertContact {
-                email,
+                email: String::new(),
                 first_name: b.first_name,
                 last_name: b.last_name,
                 timezone: b.timezone,
@@ -507,5 +576,76 @@ pub async fn contacts_patch(
             },
         )
         .await?;
+    // Field names only: values are personal data.
+    record(
+        &st,
+        &auth,
+        "contact.update",
+        json!({"contact": id, "fields": changed}),
+    )
+    .await?;
     Ok(envelope(StatusCode::OK, v))
+}
+
+pub async fn contacts_activity(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    Ok(envelope(
+        StatusCode::OK,
+        st.contacts.activity(auth.0.workspace_id, &id).await?,
+    ))
+}
+
+const IMPORT_MAX: usize = 5000;
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ImportContacts {
+    pub contacts: Vec<UpsertContact>,
+}
+
+/// Upsert up to 5000 contacts in one call. A bad row is reported and skipped, never fatal.
+pub async fn contacts_import(
+    State(st): State<AppState>,
+    auth: Auth,
+    headers: HeaderMap,
+    ApiJson(b): ApiJson<ImportContacts>,
+) -> ApiResult {
+    auth.require(Scope::Manage)?;
+    if b.contacts.is_empty() || b.contacts.len() > IMPORT_MAX {
+        return Err(invalid(format!("contacts needs 1-{IMPORT_MAX} entries")).field("contacts"));
+    }
+    let ws = auth.0.workspace_id;
+    let r = idempotent!(
+        st,
+        auth,
+        headers,
+        "POST /v1/contacts/import",
+        b,
+        StatusCode::OK,
+        async {
+            let (mut imported, mut failed) = (0, Vec::new());
+            for (index, c) in b.contacts.iter().cloned().enumerate() {
+                let email = c.email.clone();
+                match st.contacts.upsert(ws, c).await {
+                Ok(_) => imported += 1,
+                // Infrastructure trouble would repeat for every row: stop and let the caller retry.
+                Err(e) if e.status >= 500 => return Err(e),
+                Err(e) => failed.push(json!({"index": index, "email": email, "error": {"code": e.code, "message": e.message}})),
+            }
+            }
+            Ok::<_, mailcraft_core::Error>(json!({"imported": imported, "failed": failed}))
+        }
+    );
+    record(
+        &st,
+        &auth,
+        "contact.import",
+        json!({"rows": b.contacts.len()}),
+    )
+    .await?;
+    r
 }

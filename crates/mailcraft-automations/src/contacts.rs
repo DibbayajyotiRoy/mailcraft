@@ -118,6 +118,49 @@ pub async fn upsert_contact(
     .await?)
 }
 
+/// Edit a contact. `None` leaves a field alone; an empty string clears a name or the timezone.
+/// `properties` is merged shallowly and a `null` value deletes that key.
+pub async fn patch_contact(
+    db: impl PgExecutor<'_>,
+    workspace_id: Uuid,
+    contact_id: Uuid,
+    input: &ContactInput,
+    now: DateTime<Utc>,
+) -> Result<Contact> {
+    if input.properties.as_ref().is_some_and(|p| !p.is_object()) {
+        return Err(AutomationError::invalid("properties must be a JSON object"));
+    }
+    let tz = input.timezone.as_deref().map(str::trim);
+    if let Some(t) = tz.filter(|t| !t.is_empty()) {
+        t.parse::<chrono_tz::Tz>().map_err(|_| {
+            AutomationError::invalid(format!(
+                "`{t}` is not an IANA timezone (e.g. Europe/Berlin)"
+            ))
+        })?;
+    }
+    sqlx::query_as::<_, Contact>(
+        "UPDATE contacts SET
+           first_name = CASE WHEN $3::text IS NULL THEN first_name ELSE NULLIF(btrim($3), '') END,
+           last_name  = CASE WHEN $4::text IS NULL THEN last_name  ELSE NULLIF(btrim($4), '') END,
+           timezone   = CASE WHEN $5::text IS NULL THEN timezone   ELSE NULLIF($5, '') END,
+           properties = CASE WHEN $6::jsonb IS NULL THEN properties
+                        ELSE (properties || $6) - ARRAY(SELECT k FROM jsonb_each($6) AS e(k, v) WHERE v = 'null'::jsonb) END,
+           updated_at = $7
+         WHERE id = $1 AND workspace_id = $2
+         RETURNING id, workspace_id, email, first_name, last_name, properties, timezone, created_at",
+    )
+    .bind(contact_id)
+    .bind(workspace_id)
+    .bind(&input.first_name)
+    .bind(&input.last_name)
+    .bind(tz)
+    .bind(input.properties.as_ref().map(sqlx::types::Json))
+    .bind(now)
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| AutomationError::not_found(format!("contact {contact_id}")))
+}
+
 pub async fn get_contact(db: impl PgExecutor<'_>, contact_id: Uuid) -> Result<Contact> {
     sqlx::query_as::<_, Contact>(
         "SELECT id, workspace_id, email, first_name, last_name, properties, timezone, created_at FROM contacts WHERE id = $1",
@@ -239,6 +282,48 @@ pub async fn matching_contacts(
     qb.push_bind(workspace_id).push(" AND ");
     filter.push_sql(&mut qb)?;
     Ok(qb.build_query_scalar().fetch_all(db).await?)
+}
+
+/// How many contacts match `filter` right now.
+pub async fn count_matching(
+    db: impl PgExecutor<'_>,
+    workspace_id: Uuid,
+    filter: &Rule,
+) -> Result<i64> {
+    let mut qb = QueryBuilder::new("SELECT count(*) FROM contacts c WHERE c.workspace_id = ");
+    qb.push_bind(workspace_id).push(" AND ");
+    filter.push_sql(&mut qb)?;
+    Ok(qb.build_query_scalar().fetch_one(db).await?)
+}
+
+/// Whether one contact matches `filter` right now.
+pub async fn contact_matches(
+    db: impl PgExecutor<'_>,
+    contact_id: Uuid,
+    filter: &Rule,
+) -> Result<bool> {
+    let mut qb = QueryBuilder::new("SELECT EXISTS (SELECT 1 FROM contacts c WHERE c.id = ");
+    qb.push_bind(contact_id).push(" AND ");
+    filter.push_sql(&mut qb)?;
+    qb.push(")");
+    Ok(qb.build_query_scalar().fetch_one(db).await?)
+}
+
+/// Up to `limit` matching contacts, newest first (segment editor preview).
+pub async fn sample_matching(
+    db: impl PgExecutor<'_>,
+    workspace_id: Uuid,
+    filter: &Rule,
+    limit: i64,
+) -> Result<Vec<(String, Option<String>, Option<String>)>> {
+    let mut qb = QueryBuilder::new(
+        "SELECT c.email, c.first_name, c.last_name FROM contacts c WHERE c.workspace_id = ",
+    );
+    qb.push_bind(workspace_id).push(" AND ");
+    filter.push_sql(&mut qb)?;
+    qb.push(" ORDER BY c.created_at DESC, c.id LIMIT ")
+        .push_bind(limit);
+    Ok(qb.build_query_as().fetch_all(db).await?)
 }
 
 /// Recompute a dynamic segment's membership. Returns the contacts that newly entered.
