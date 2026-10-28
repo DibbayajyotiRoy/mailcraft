@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 
-export const SECTIONS = [["general", "General"], ["senders", "Senders"], ["delivery", "Delivery"], ["llm", "LLM provider"], ["ai-writing", "AI writing"], ["policy", "Send policy"], ["kill-switch", "Kill switch"]] as const;
+export const SECTIONS = [["general", "General"], ["senders", "Senders"], ["delivery", "Delivery"], ["llm", "LLM provider"], ["ai-writing", "AI writing"], ["ai-usage", "AI usage"], ["policy", "Send policy"], ["kill-switch", "Kill switch"]] as const;
 
 /** Sticky left list on desktop, scrolling chip row on mobile. Plain in-page anchors (work without JS); the current section is marked aria-current. */
 export function SettingsNav() {
