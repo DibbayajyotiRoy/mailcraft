@@ -177,6 +177,24 @@ const settings = { llm_provider: { kind: "openrouter", model: "anthropic/claude-
 const policy = { default: { send: "needs_approval" }, keys: [{ key_id: "k1", name: "Production sender", policy: { send: "auto" } }] };
 const transports = [{ id: "tr1", kind: "smtp-relay", name: "postmark", label: "production", is_default: true, status: "active" }];
 
+// Mailbox relays (login + "send as" aliases, each with a display name) are what GET /v1/senders is derived from.
+const MAILBOXES = [
+  { id: "tr2", login: "dev@example.com", names: { "dev@example.com": "Acme Developers", "partner@example.com": "Acme Partnerships" }, aliases: ["partner@example.com", "support@example.com"] },
+  { id: "tr3", login: "hello@other.test", names: {}, aliases: [] },
+];
+for (const mb of MAILBOXES) transports.push({ id: mb.id, kind: "smtp-relay", name: mb.login, label: "production", is_default: false, status: "active" });
+DOMAINS.push({ id: "d3", name: "example.com", status: "not_started", stream: "transactional", last_checked_at: null, records: [{ record: "SPF", type: "TXT", name: "example.com", value: "v=spf1 include:spf.mailcraft.dev ~all", status: "not_started" }] });
+const relayAddrs = (name) => MAILBOXES.flatMap((mb) => [mb.login, ...mb.aliases]).filter((a) => a.endsWith("@" + name));
+const withRelay = () => DOMAINS.forEach((d) => { const a = relayAddrs(d.name); if (a.length) { d.relay_sender = a[0]; d.relay_senders = a; } });
+withRelay();
+const sendersList = () => {
+  const via = (id) => transports.find((t) => t.id === id)?.name ?? null;
+  const rows = MAILBOXES.flatMap((mb) => [mb.login, ...mb.aliases].map((address, i) => ({ address, display_name: mb.names[address] ?? null, kind: i ? "alias" : "login", transport_id: mb.id, transport: via(mb.id), status: "ready" })));
+  const def = /<([^>]+)>/.exec(settings.default_from ?? "")?.[1] ?? settings.default_from;
+  if (def && !rows.some((r) => r.address === def)) rows.push({ address: def, display_name: null, kind: "domain", transport_id: "tr1", transport: via("tr1"), status: "ready" });
+  return rows.map((r) => ({ ...r, is_default: r.address === def }));
+};
+
 const NOW = Date.now();
 const BROADCASTS = [
   { id: "b1", template_id: "t1", template_name: "Welcome", from: "Dev <dev@spicrawl.com>", subject: "Spring launch, {{ first_name }}", stream: "marketing", env: "live", status: "sending", total: 120, created_at: ago(95),
@@ -212,6 +230,22 @@ createServer(async (req, res) => {
       if (p === "/v1/segments/preview") return body(res, { count: 12, sample: CONTACTS.slice(0, 3).map(({ email, first_name, last_name }) => ({ email, first_name, last_name })) });
       const rows = input.contacts ?? [];
       return body(res, { imported: rows.filter((r) => !/^bad@/.test(r.email)).length, failed: rows.flatMap((r, index) => (/^bad@/.test(r.email) ? [{ index, email: r.email, error: { code: "invalid_request", message: "Rejected by the mock" } }] : [])) });
+    }
+    if (req.method === "PATCH" && (m = p.match(/^\/v1\/transports\/([^/]+)$/))) {
+      const mb = MAILBOXES.find((x) => x.id === m[1]); if (!mb) return fail(res, { code: "invalid_request", message: "only a mailbox relay has aliases and display names" }, 400);
+      mb.aliases = b.aliases ?? mb.aliases; mb.names = b.display_names ?? mb.names; withRelay();
+      return body(res, { id: mb.id, aliases: mb.aliases, display_names: mb.names });
+    }
+    if (req.method === "POST" && p === "/v1/transports" && b.config?.mailbox_sender) {
+      const id = "tr" + (transports.length + 1), login = b.config.username;
+      MAILBOXES.push({ id, login, names: b.config.display_names ?? {}, aliases: b.config.aliases ?? [] });
+      transports.push({ id, kind: "smtp-relay", name: b.name || login, label: "production", is_default: false, status: "active" }); withRelay();
+      return body(res, { id, kind: "smtp-relay", name: b.name || login, status: "ready" }, {}, 201);
+    }
+    if (req.method === "PUT" && p === "/v1/settings") { if (b.default_from !== undefined) settings.default_from = b.default_from || null; if (b.reply_to !== undefined) settings.reply_to = b.reply_to; return body(res, settings); }
+    if (req.method === "PATCH" && (m = p.match(/^\/v1\/domains\/([^/]+)$/))) {
+      const d = DOMAINS.find((x) => x.id === m[1]); if (!d) return notFound(res, "domain");
+      d.transport_id = b.transport_id ?? null; return body(res, d);
     }
     if (p === "/v1/events") return body(res, { event_id: "ev9", duplicate: false, triggered_automations: [{ id: "a1", run_id: "run_9" }] }, {}, 202);
     if (p === "/v1/automations") {
@@ -297,6 +331,7 @@ createServer(async (req, res) => {
   if (p === "/v1/kill-switch") return body(res, { on: false });
   if (p === "/v1/account/status") return body(res, process.env.EMPTY ? { ...status, pending_approvals: 0 } : status);
   if (p === "/v1/settings") return body(res, settings);
+  if (p === "/v1/senders") return body(res, process.env.EMPTY ? [] : sendersList());
   if (p === "/v1/policy") return body(res, policy);
   if (p === "/v1/stats/overview") {
     const n = Number(q.get("days") || 14);

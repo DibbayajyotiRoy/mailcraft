@@ -3,6 +3,7 @@
 // can show its own result and the write-only secrets never travel through a URL.
 import { revalidatePath } from "next/cache";
 import { api, type ApiResult } from "@/lib/api";
+import { mailboxFields } from "./addresses";
 
 export type Result = { ok?: string; error?: string; url?: string };
 const f = (d: FormData, k: string) => String(d.get(k) ?? "").trim();
@@ -16,7 +17,7 @@ async function put(path: string, body: unknown, ok: string): Promise<Result> {
 }
 
 export async function saveGeneral(_p: Result, d: FormData) {
-  return put("/v1/settings", { default_from: f(d, "default_from"), reply_to: f(d, "reply_to") }, "Sender defaults saved.");
+  return put("/v1/settings", { reply_to: f(d, "reply_to") }, "Sender defaults saved."); // the default From lives in the Senders card
 }
 
 export async function saveProvider(_p: Result, d: FormData) {
@@ -31,12 +32,20 @@ export async function savePolicy(_p: Result, d: FormData) {
 
 export async function addRelay(_p: Result, d: FormData): Promise<Result> {
   const preset = f(d, "preset");
-  const config: Record<string, string | number | boolean> = { password: f(d, "password") };
+  const config: Record<string, unknown> = { password: f(d, "password") };
   if (f(d, "username")) config.username = f(d, "username");
   if (f(d, "region")) config.region = f(d, "region");
   // `custom` is not an API preset: host/port go in config instead.
-  if (preset === "custom") Object.assign(config, { host: f(d, "host"), port: Number(f(d, "port")), mailbox_sender: d.get("mailbox_sender") === "on" });
-  const r = await api("POST", "/v1/transports", { kind: "smtp-relay", preset: preset === "custom" ? undefined : preset, name: f(d, "name") || preset, config });
+  if (preset === "custom") {
+    const mailbox = d.get("mailbox_sender") === "on";
+    Object.assign(config, { host: f(d, "host"), port: Number(f(d, "port")), mailbox_sender: mailbox });
+    if (mailbox) { // the login's own display name and the "send as" aliases
+      const m = mailboxFields(d, f(d, "username"));
+      if (m.aliases.length) config.aliases = m.aliases;
+      if (Object.keys(m.display_names).length) config.display_names = m.display_names;
+    }
+  }
+  const r = await api("POST", "/v1/transports", { kind: "smtp-relay", preset: preset === "custom" ? undefined : preset, name: f(d, "name") || (config.mailbox_sender ? f(d, "username") : preset), config }); // a mailbox is named by its login
   if (r.error) return fail(r);
   revalidatePath("/settings");
   return { ok: `${preset} relay added. Run the test to confirm the credentials.` };

@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import type { ApiError } from "@/lib/api";
 import { askableVars, composeBody, type Compose, type Errors, type Mode } from "@/lib/compose";
+import type { Sender } from "@/lib/senders";
+import { FromPicker } from "./from-picker";
 
 export type ComposeTemplate = { id: string; name?: string; alias?: string; variables?: unknown };
 type Send = (body: Record<string, unknown>) => Promise<{ id?: string; status?: string; error?: ApiError }>;
@@ -18,7 +20,7 @@ type Send = (body: Record<string, unknown>) => Promise<{ id?: string; status?: s
 const blank = (from: string): Compose => ({ from, to: "", subject: "", stream: "transactional", mode: "text", text: "", html: "", template: "", vars: {} });
 
 /** "New email" on the Emails page: one message through POST /v1/emails. The API judges everything beyond the basic checks, and its error (code, message, hint) is shown as is. */
-export function ComposeEmail({ defaultFrom, templates, send }: { defaultFrom: string; templates: ComposeTemplate[]; send: Send }) {
+export function ComposeEmail({ defaultFrom, senders, templates, send }: { defaultFrom: string; senders?: Sender[]; templates: ComposeTemplate[]; send: Send }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [c, setC] = useState<Compose>(blank(defaultFrom));
@@ -53,7 +55,7 @@ export function ComposeEmail({ defaultFrom, templates, send }: { defaultFrom: st
       <DialogTrigger asChild><Button><SquarePen aria-hidden />New email</Button></DialogTrigger>
       <DialogContent title="New email" description="Sends one message now, through your delivery settings." className="max-h-[calc(100dvh-32px)] max-w-xl overflow-y-auto">
         <form onSubmit={submit} noValidate className="grid gap-4">
-          <Field label="From" error={errors.from}>{(a) => <Input {...a} inputMode="email" autoComplete="off" value={c.from} onChange={(e) => set({ from: e.target.value })} placeholder="you@yourdomain.com" />}</Field>
+          <Field label="From" error={errors.from}>{(a) => <FromPicker {...a} senders={senders} value={c.from} onChange={(from) => set({ from })} />}</Field>
           <Field label="To" description="Separate several addresses with commas." error={errors.to}>{(a) => <Input {...a} autoComplete="off" value={c.to} onChange={(e) => set({ to: e.target.value })} placeholder="ada@example.com, grace@example.com" />}</Field>
           <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
             <Field label="Subject" description={c.mode === "template" ? "Optional: blank uses the template’s subject." : undefined} error={errors.subject}>{(a) => <Input {...a} value={c.subject} onChange={(e) => set({ subject: e.target.value })} />}</Field>

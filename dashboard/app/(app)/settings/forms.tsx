@@ -41,12 +41,9 @@ export function SettingsForm({ id, title, description, action, canEdit = true, c
   );
 }
 
-export function GeneralCard({ from, replyTo, canEdit }: { from: string; replyTo: string; canEdit: boolean }) {
+export function GeneralCard({ replyTo, canEdit }: { replyTo: string; canEdit: boolean }) {
   return (
-    <SettingsForm id="general" title="General" description="Defaults for emails that do not set their own sender." action={saveGeneral} canEdit={canEdit}>
-      <Field label="Default From" description="Must be on a verified domain, e.g. Acme <hello@mail.acme.com>.">
-        {(a) => <Input {...a} name="default_from" defaultValue={from} placeholder="Acme <hello@mail.example.com>" autoComplete="off" />}
-      </Field>
+    <SettingsForm id="general" title="General" description="Defaults for emails that do not set their own reply address. The default From is in Senders." action={saveGeneral} canEdit={canEdit}>
       <Field label="Default Reply-To" description="Where replies go. Leave empty to reply to the From address.">
         {(a) => <Input {...a} name="reply_to" type="email" defaultValue={replyTo} placeholder="support@example.com" autoComplete="off" />}
       </Field>

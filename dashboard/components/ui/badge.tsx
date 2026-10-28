@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 export const TONE: Record<string, Tone> = {
   verified: "ok", delivered: "ok", sent: "ok", done: "ok", active: "ok", published: "ok", approved: "ok", pass: "ok", completed: "ok",
   pending: "warn", expired: "warn", deferred: "warn", draft: "warn", warn: "warn", paused: "warn", not_started: "warn",
+  ready: "ok", needs_domain: "warn", transport_missing: "bad",
   queued: "info", sending: "info", running: "info", pending_approval: "info",
   failed: "bad", bounced: "bad", complained: "bad", rejected: "bad", fail: "bad", cancelled: "bad", suppressed: "bad", revoked: "bad",
 };
@@ -13,7 +14,9 @@ type Tone = "ok" | "warn" | "info" | "bad" | "neutral";
 /** What the status means, shown as the pill's tooltip. */
 const MEANING: Record<string, string> = {
   bounced: "Recipient server rejected permanently", deferred: "Recipient server asked us to retry later", complained: "Recipient marked it as spam",
-  suppressed: "Not sent: address is on the suppression list", pending_approval: "Waiting for a human to approve", not_started: "Verification has not started",
+  suppressed: "Not sent: address is on the suppression list",
+  ready: "Can send: a connected mailbox or a verified domain covers this address", needs_domain: "Add and verify this address's domain before sending from it",
+  transport_missing: "No delivery path to send through: add a relay", pending_approval: "Waiting for a human to approve", not_started: "Verification has not started",
 };
 
 const pill = cva("inline-flex items-center gap-1.5 rounded-full px-2 text-xs font-medium whitespace-nowrap", {

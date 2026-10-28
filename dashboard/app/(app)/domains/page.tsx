@@ -7,14 +7,17 @@ import { ErrorState, RetryError } from "@/components/ui/error-state";
 import { AddDomain } from "./add-domain";
 import { DomainCard, type Domain } from "./domain-card";
 import { Tips } from "./tips";
+import { sendersOf } from "@/lib/senders";
 
 export const dynamic = "force-dynamic";
 
 export default async function Domains({ searchParams }: { searchParams: Promise<{ err?: string }> }) {
   const { err } = await searchParams;
   const actionErr = parseErr(err);
-  const [r, k] = await Promise.all([get("/v1/domains"), get("/v1/keys")]);
+  const [r, k, tr, snd] = await Promise.all([get("/v1/domains"), get("/v1/keys"), get("/v1/transports"), get("/v1/senders")]);
   const list: Domain[] = r.data ?? [];
+  const transports = Array.isArray(tr.data) ? tr.data : [];
+  const senders = sendersOf(snd);
   return (
     <>
       <PageHeader title="Domains" description="Verify the domains you send from. Receivers trust mail that proves it comes from you." action={list.length ? <AddDomain /> : undefined} />
@@ -30,7 +33,7 @@ export default async function Domains({ searchParams }: { searchParams: Promise<
           </>
         ) : (
           <>
-            {list.map((d) => <DomainCard key={d.id} d={d} />)}
+            {list.map((d) => <DomainCard key={d.id} d={d} transports={transports} senders={senders} />)}
             <Tips />
           </>
         )}

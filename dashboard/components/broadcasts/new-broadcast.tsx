@@ -20,6 +20,8 @@ import { cn } from "@/lib/cn";
 import { every, REASON } from "@/lib/broadcast";
 import { varsOf, type Parsed, type Recipient } from "@/lib/csv";
 import type { Draft, Out } from "@/app/(app)/broadcasts/actions";
+import { FromPicker } from "@/components/emails/from-picker";
+import type { Sender } from "@/lib/senders";
 import { RecipientsStep } from "./recipients";
 
 export type Tpl = { id: string; name?: string; alias?: string; subject?: string; status?: string };
@@ -33,7 +35,7 @@ type Plan = { queued: number; skipped: { email: string; reason: string; detail?:
 const STEPS = ["Recipients", "Content", "Review"] as const;
 const when = (iso: string) => new Date(iso).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" });
 
-export function NewBroadcast({ templates, defaultFrom, actions }: { templates: Tpl[]; defaultFrom: string; actions: Actions }) {
+export function NewBroadcast({ templates, defaultFrom, senders, actions }: { templates: Tpl[]; defaultFrom: string; senders?: Sender[]; actions: Actions }) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [list, setList] = useState<Parsed | null>(null);
@@ -74,7 +76,7 @@ export function NewBroadcast({ templates, defaultFrom, actions }: { templates: T
                 <div className="grid content-start gap-4">
                   <Field label="Template">{(a) => <Select {...a} value={d.template_id} onChange={(e) => setD({ ...d, template_id: e.target.value })}>{published.map((t) => <option key={t.id} value={t.id}>{t.name ?? t.alias ?? t.id}</option>)}</Select>}</Field>
                   <Field label="Subject" description="Optional. Blank uses the template’s subject. Same {{ }} values work here.">{(a) => <Input {...a} value={d.subject ?? ""} onChange={(e) => setD({ ...d, subject: e.target.value })} placeholder={published.find((t) => t.id === d.template_id)?.subject} />}</Field>
-                  <Field label="From" description="An address on a verified domain.">{(a) => <Input {...a} inputMode="email" autoComplete="off" value={d.from} onChange={(e) => setD({ ...d, from: e.target.value })} placeholder="you@yourdomain.com" />}</Field>
+                  <Field label="From" description="A connected mailbox, or an address on a verified domain.">{(a) => <FromPicker {...a} senders={senders} value={d.from} onChange={(from) => setD({ ...d, from })} />}</Field>
                   <Field label="Stream" description="Marketing adds the unsubscribe footer and honours opt-outs.">{(a) => <Select {...a} value={d.stream} onChange={(e) => setD({ ...d, stream: e.target.value as Draft["stream"] })}><option value="marketing">Marketing</option><option value="transactional">Transactional</option></Select>}</Field>
                 </div>
                 <PreviewPane draft={d} recipients={recipients} preview={actions.preview} />

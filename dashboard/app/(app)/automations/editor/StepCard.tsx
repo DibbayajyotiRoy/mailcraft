@@ -6,12 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
+import { FromPicker } from "@/components/emails/from-picker";
 import { cn } from "@/lib/cn";
+import type { Sender } from "@/lib/senders";
 import { DURATION_UNITS, EDGE_LABEL, MAX_INSTRUCTIONS, splitDuration, stepSummary, typeLabel, type Action, type EStep, type StepType } from "./model";
 import { RuleEditor } from "./RuleEditor";
 import { StepStats, type StepStat } from "./StepStats";
 
-export type Options = { templates: { id: string; alias: string; name: string; published: boolean }[]; segments: string[]; events: string[]; senders: string[] };
+export type Options = { templates: { id: string; alias: string; name: string; published: boolean }[]; segments: string[]; events: string[]; senders: Sender[] };
 
 export const STEP_ICON: Record<StepType, typeof Mail> = { send_email: Mail, delay: Clock, wait_for_event: Hourglass, condition: GitBranch, update_contact: UserPen, add_to_segment: Users, exit: CircleStop };
 
@@ -67,8 +69,8 @@ function SendFields({ s, opts, p, e }: { s: EStep; opts: Options; p: (c: Record<
           <Select {...a} value={c.stream ?? ""} onChange={(ev) => p({ stream: ev.target.value })}><option value="">Template default</option><option value="transactional">Transactional</option><option value="marketing">Marketing</option></Select>
         )}</Field>
       </div>
-      <Field label="From" error={e.from} description="Leave empty to use the first verified domain for the stream.">
-        {(a) => <><Input {...a} list={`${id}-from`} placeholder="hello@yourdomain.com" value={c.from ?? ""} onChange={(ev) => p({ from: ev.target.value })} /><datalist id={`${id}-from`}>{opts.senders.map((x) => <option key={x} value={x} />)}</datalist></>}
+      <Field label="From" error={e.from} description="A connected mailbox, or an address on a verified domain. Leave on the first option to use the first verified domain for the stream.">
+        {(a) => <FromPicker {...a} senders={opts.senders} emptyLabel="First verified domain" placeholder="hello@yourdomain.com" value={c.from ?? ""} onChange={(from) => p({ from })} />}
       </Field>
       <div className="rounded-md border border-border p-3">
         <div className="flex items-start justify-between gap-3">
