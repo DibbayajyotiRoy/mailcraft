@@ -21,7 +21,7 @@ const click = (role, name, nth) => async (p) => { const l = p.getByRole(role, { 
 // [name, path, action?]  action = open a dialog/tab before the capture
 const ROUTES = [
   ["overview", "/"], ["overview-30d", "/?range=30d"],
-  ["emails", "/emails"], ["emails-bounced", "/emails?status=bounced"], ["emails-nomatch", "/emails?q=zzzz"], ["emails-peek", "/emails?open=em_02"],
+  ["emails", "/emails"], ["email-compose", "/emails", click("button", "New email")], ["emails-bounced", "/emails?status=bounced"], ["emails-nomatch", "/emails?q=zzzz"], ["emails-peek", "/emails?open=em_02"],
   ["email-detail", "/emails/em_00"], ["email-bounce", "/emails/em_02"], ["email-pending", "/emails/em_07"],
   ["approvals", "/approvals"],
   ["templates", "/templates"], ["template-detail", "/templates/t2"], ["template-lint", "/templates/t2", click("tab", /Lint/)],

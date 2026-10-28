@@ -174,6 +174,7 @@ createServer((req, res) => {
       const t = TEMPLATES.find((x) => x.id === m[1] || x.alias === m[1]);
       return body(res, { subject: t?.subject, html: html(t?.name ?? "Template"), text: "", lint: t?.id === "t1" ? [] : [{ rule: "missing-alt", severity: "warning", message: "Image has no alt text", path: "blocks[2]" }, { rule: "no-unsubscribe", severity: "error", message: "Marketing email needs an unsubscribe link", path: "footer" }] });
     }
+    if (p === "/v1/emails") return body(res, { id: "em_00", status: "queued", recipients: [{ email: "ana@example.com", id: "em_00" }] }, {}, 202);
     return body(res, p.endsWith("/test") ? { ok: false, detail: "535 authentication failed" } : {});
   }
   if (p === "/v1/kill-switch") return body(res, { on: false });
