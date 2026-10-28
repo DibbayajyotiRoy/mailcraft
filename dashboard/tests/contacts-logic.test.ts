@@ -140,3 +140,19 @@ describe("parseEmails", () => {
     expect(parseEmails("a@x.co, B@y.org\nA@X.co;nope  c@z.io")).toEqual({ emails: ["a@x.co", "B@y.org", "c@z.io"], bad: ["nope"] });
   });
 });
+
+import { tzGroups, tzOffset } from "@/app/(app)/contacts/attrs";
+describe("time zone options", () => {
+  it("puts the current and browser zones first and groups the rest by region", () => {
+    const g = tzGroups(["Asia/Kolkata", "Europe/Berlin", "America/New_York"], ["Asia/Kolkata", "nope/zone"]);
+    expect(g[0][0]).toBe("Suggested");
+    expect(g[0][1][0][0]).toBe("Asia/Kolkata");
+    expect(g[0][1].some(([z]) => z === "nope/zone")).toBe(false);
+    expect(g.slice(1).map(([r]) => r)).toEqual(["America", "Asia", "Europe"]);
+    expect(g[2][1][0][1]).toMatch(/^Asia\/Kolkata \(GMT\+5:30\)$/);
+  });
+  it("labels offsets and survives bad zones", () => {
+    expect(tzOffset("UTC")).toMatch(/GMT|UTC/);
+    expect(tzOffset("not/a-zone")).toBe("");
+  });
+});

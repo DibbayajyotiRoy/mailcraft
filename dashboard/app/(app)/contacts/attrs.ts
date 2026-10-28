@@ -25,6 +25,28 @@ export function isTimeZone(tz: string): boolean {
   try { new Intl.DateTimeFormat("en", { timeZone: tz }); return true; } catch { return false; }
 }
 
+/** "GMT+5:30" for a zone, "" when the runtime can't say. */
+export function tzOffset(tz: string, at = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat("en", { timeZone: tz, timeZoneName: "shortOffset" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value ?? "";
+  } catch { return ""; }
+}
+
+const COMMON_TZ = ["UTC", "Asia/Kolkata", "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles", "Asia/Singapore", "Australia/Sydney"];
+
+/** Options for the time zone <select>: a Suggested group (current value, the browser's zone, a few common ones),
+ *  then every IANA zone grouped by region. Each entry is [zone, label]. */
+export function tzGroups(zones: string[], first: (string | null | undefined)[]): [string, [string, string][]][] {
+  const label = (z: string) => { const o = tzOffset(z); return [z, `${z.replace(/_/g, " ")}${o ? ` (${o})` : ""}`] as [string, string]; };
+  const suggested = [...new Set([...first, ...COMMON_TZ].filter((z): z is string => !!z && isTimeZone(z)))];
+  const regions = new Map<string, string[]>();
+  for (const z of zones.length ? zones : COMMON_TZ) {
+    const r = z.includes("/") ? z.slice(0, z.indexOf("/")) : "Other";
+    regions.set(r, [...(regions.get(r) ?? []), z]);
+  }
+  return [["Suggested", suggested.map(label)], ...[...regions].sort(([a], [b]) => a.localeCompare(b)).map(([r, zs]) => [r, zs.map(label)] as [string, [string, string][]])];
+}
+
 export function coerce(value: string, type: AttrType): { value: unknown } | { error: string } {
   if (type === "text") return { value };
   if (type === "boolean") return value === "true" || value === "false" ? { value: value === "true" } : { error: "Choose yes or no." };

@@ -10,7 +10,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { Field, Input, Select } from "@/components/ui/field";
 import { toast } from "@/components/ui/toast";
 import { saveContact, type FormState } from "./actions";
-import { ATTR_TYPES, EMAIL_RE, buildProps, isTimeZone, rowsFromProps, type AttrRow, type AttrType } from "./attrs";
+import { ATTR_TYPES, EMAIL_RE, buildProps, isTimeZone, rowsFromProps, tzGroups, type AttrRow, type AttrType } from "./attrs";
 import type { Contact } from "./util";
 
 type Errs = Partial<Record<"email" | "timezone", string>>;
@@ -60,7 +60,7 @@ function Body({ contact, close }: { contact?: Contact; close: () => void }) {
   const [state, act] = useActionState<FormState, FormData>(saveContact, {});
   const [rows, setRows] = useState<AttrRow[]>(() => rowsFromProps(contact?.properties));
   const [local, setLocal] = useState<{ errs: Errs; attrs: Record<number, string> }>({ errs: {}, attrs: {} });
-  const zones = useMemo(() => (Intl as any).supportedValuesOf?.("timeZone") as string[] | undefined ?? [], []);
+  const tz = useMemo(() => tzGroups((Intl as any).supportedValuesOf?.("timeZone") ?? [], [contact?.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone]), [contact?.timezone]);
   const initial = useMemo(() => Object.keys(contact?.properties ?? {}), [contact]);
 
   useEffect(() => {
@@ -96,7 +96,10 @@ function Body({ contact, close }: { contact?: Contact; close: () => void }) {
         <Field label="Last name">{(a) => <Input {...a} name="last_name" defaultValue={contact?.last_name ?? ""} autoComplete="off" />}</Field>
       </div>
       <Field label="Time zone" description="Used for quiet hours. Optional." error={local.errs.timezone ?? serverErr("timezone")}>
-        {(a) => <><Input {...a} name="timezone" list="contact-tz" defaultValue={contact?.timezone ?? ""} placeholder="Europe/Berlin" autoComplete="off" spellCheck={false} /><datalist id="contact-tz">{zones.map((z) => <option key={z} value={z} />)}</datalist></>}
+        {(a) => <Select {...a} name="timezone" defaultValue={contact?.timezone ?? ""}>
+          <option value="">Not set</option>
+          {tz.map(([group, zs]) => <optgroup key={group} label={group}>{zs.map(([z, l]) => <option key={group + z} value={z}>{l}</option>)}</optgroup>)}
+        </Select>}
       </Field>
       <AttributeRows rows={rows} setRows={setRows} errors={attrErrors} />
       {state.error && !mapped && <ErrorState error={state.error} />}

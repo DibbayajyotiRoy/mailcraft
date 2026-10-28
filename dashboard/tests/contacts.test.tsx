@@ -23,18 +23,20 @@ const open = (name: string | RegExp) => fireEvent.click(screen.getByRole("button
 beforeEach(() => { vi.clearAllMocks(); A.saveContact.mockResolvedValue({}); A.saveSegment.mockResolvedValue({}); A.trackEvent.mockResolvedValue({}); });
 
 describe("contact form", () => {
-  it("validates email, time zone and attributes before calling the server", async () => {
+  it("validates email and attributes before calling the server; time zone is a grouped select", async () => {
     render(<ContactDialog><Button>Add contact</Button></ContactDialog>);
     open("Add contact");
     fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "not-an-email" } });
-    fireEvent.change(screen.getByLabelText("Time zone"), { target: { value: "Mars/Base" } });
+    const tz = screen.getByLabelText("Time zone") as HTMLSelectElement;
+    expect(tz.tagName).toBe("SELECT");
+    expect([...tz.querySelectorAll("optgroup")].map((g) => g.label)[0]).toBe("Suggested");
+    expect(tz.querySelector('option[value="Asia/Kolkata"]')).toBeTruthy();
     open("Add attribute");
     fireEvent.change(screen.getByLabelText("Attribute 1 name"), { target: { value: "seats" } });
     fireEvent.change(screen.getByLabelText("Attribute 1 type"), { target: { value: "number" } });
     fireEvent.change(screen.getByLabelText("Attribute 1 value"), { target: { value: "lots" } });
     fireEvent.click(screen.getByRole("button", { name: "Add contact", description: "" }) ?? screen.getAllByRole("button", { name: "Add contact" })[1]);
     expect(await screen.findByText("Enter an email address like ana@example.com.")).toBeTruthy();
-    expect(screen.getByText("Use a time zone name like Europe/Berlin.")).toBeTruthy();
     expect(screen.getByText("Enter a number.")).toBeTruthy();
     expect(screen.getByLabelText("Email").getAttribute("aria-invalid")).toBe("true");
     expect(A.saveContact).not.toHaveBeenCalled();
