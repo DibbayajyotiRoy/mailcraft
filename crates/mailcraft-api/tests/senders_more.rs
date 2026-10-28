@@ -781,33 +781,31 @@ async fn a_test_key_never_pins_a_transport() {
     assert_eq!(s, StatusCode::OK, "{d}");
 }
 
-/// Installs a one-step automation sending through `transport` and starts a sandbox test run for it.
-/// Returns the run, or `None` when the install itself refused the transport.
-async fn sandbox_run(e: &Env, transport: Uuid) -> Option<Uuid> {
-    let (s, b) = e
-        .c(
-            "POST",
-            "/v1/automations",
-            Some(json!({"name": format!("via-{transport}"), "trigger": "go", "steps": [
-                {"key": "mail", "type": "send_email",
-                 "config": {"template": "welcome", "from": "news@one.com", "transport_id": transport}}]})),
-        )
-        .await;
-    if s != StatusCode::CREATED {
-        assert!(s.is_client_error(), "{s} {b}");
-        return None;
-    }
+/// Installs a one-step automation whose send step names `transport`.
+async fn install_via(e: &Env, transport: Uuid) -> (StatusCode, Value) {
+    e.c(
+        "POST",
+        "/v1/automations",
+        Some(json!({"name": format!("via-{transport}"), "trigger": "go", "steps": [
+            {"key": "mail", "type": "send_email",
+             "config": {"template": "welcome", "from": "news@one.com", "transport_id": transport}}]})),
+    )
+    .await
+}
+
+/// Starts a sandbox test run of an installed automation and ticks the journeys engine once, the way
+/// `wiring::serve` does every second (same router). Returns the run.
+async fn sandbox_run(e: &Env, automation: Uuid) -> Uuid {
     let test_key = e.key("test", &["send", "read"], None).await;
     let (s, r) = call(
         &e.app,
         "POST",
-        &format!("/v1/automations/{}/test", id_of(&b)),
+        &format!("/v1/automations/{automation}/test"),
         Some(&test_key),
         Some(json!({"email": "delivered@test.mailcraft.local"})),
     )
     .await;
     assert_eq!(s, StatusCode::ACCEPTED, "{r}");
-    // what `wiring::serve` runs every second, with the same router
     Engine::new(
         e.db.clone(),
         Arc::new(NoopPersonalizer),
@@ -817,7 +815,7 @@ async fn sandbox_run(e: &Env, transport: Uuid) -> Option<Uuid> {
     .tick(Utc::now())
     .await
     .unwrap();
-    Some(r["data"]["run_id"].as_str().unwrap().parse().unwrap())
+    r["data"]["run_id"].as_str().unwrap().parse().unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -825,7 +823,9 @@ async fn an_automation_test_run_sends_through_the_step_transport_in_the_sandbox(
     let Some(e) = env(false).await else { return };
     let zoho = e.mailbox("zoho", "news@one.com", json!({})).await;
     e.template("welcome", "transactional").await;
-    let run = sandbox_run(&e, zoho).await.expect("own transport installs");
+    let (s, a) = install_via(&e, zoho).await;
+    assert_eq!(s, StatusCode::CREATED, "{a}");
+    let run = sandbox_run(&e, id_of(&a)).await;
     let (state, n): (String, i64) = sqlx::query_as(
         "SELECT r.state, (SELECT count(*) FROM emails WHERE automation_run_id = r.id) FROM automation_runs r WHERE r.id = $1",
     )
@@ -846,12 +846,13 @@ async fn an_automation_test_run_sends_through_the_step_transport_in_the_sandbox(
 /// A sandbox email reaches no transport, so none should be pinned on it (the API send path and the
 /// broadcast path both leave `transport_id` NULL for test keys).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "bug: automations engine pins the routed transport on env='test' rows (crates/mailcraft-automations/src/engine.rs:1309); a sandbox automation email then makes DELETE /v1/transports/{id} answer 409 transport_in_use"]
 async fn an_automation_sandbox_email_pins_no_transport() {
     let Some(e) = env(false).await else { return };
     let zoho = e.mailbox("zoho", "news@one.com", json!({})).await;
     e.template("welcome", "transactional").await;
-    let run = sandbox_run(&e, zoho).await.expect("own transport installs");
+    let (s, a) = install_via(&e, zoho).await;
+    assert_eq!(s, StatusCode::CREATED, "{a}");
+    let run = sandbox_run(&e, id_of(&a)).await;
     let (env, pinned): (String, Option<Uuid>) =
         sqlx::query_as("SELECT env, transport_id FROM emails WHERE automation_run_id = $1")
             .bind(run)
@@ -898,6 +899,46 @@ async fn a_transport_of_another_workspace_is_not_found_on_emails_and_broadcasts(
     assert_eq!(b["data"][0]["ok"], false, "{b}");
     assert_eq!(b["data"][0]["error"]["code"], "not_found", "{b}");
 
+    // a test key gets the same answer: the sandbox pins nothing, but the id must still be ours
+    let test_key = e.key("test", &["send", "read"], None).await;
+    let magic = "delivered@test.mailcraft.local";
+    let (s, b) = send_as(
+        &e,
+        &test_key,
+        json!({"to": [magic], "transport_id": foreign}),
+    )
+    .await;
+    not_found(s, &b);
+    let (s, b) = send_as(
+        &e,
+        &test_key,
+        json!({"to": [magic], "transport_id": foreign, "dry_run": true}),
+    )
+    .await;
+    not_found(s, &b);
+    let (s, b) = call(
+        &e.app,
+        "POST",
+        "/v1/emails/batch",
+        Some(&test_key),
+        Some(json!({"emails": [{"to": [magic], "subject": "s", "text": "t", "transport_id": foreign}]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::ACCEPTED, "{b}");
+    assert_eq!(b["data"][0]["error"]["code"], "not_found", "{b}");
+    let (s, b) = call(
+        &e.app,
+        "POST",
+        "/v1/broadcasts",
+        Some(&test_key),
+        Some(
+            json!({"template_id": "news", "from": "noreply@test.mailcraft.local",
+                    "transport_id": foreign, "recipients": [{"email": magic}]}),
+        ),
+    )
+    .await;
+    not_found(s, &b);
+
     for dry_run in [false, true] {
         let (s, b) = e
             .c(
@@ -921,17 +962,21 @@ async fn a_transport_of_another_workspace_is_not_found_on_emails_and_broadcasts(
     assert_eq!((emails, broadcasts), (0, 0));
 }
 
-/// The step is only checked when it runs: the router (`SendRouter for AppState`) refuses a transport
-/// that is not the workspace's, the run fails with that reason and no email is created.
+/// Defence in depth: should a step's transport stop being the workspace's after install (here: deleted),
+/// the router (`SendRouter for AppState`) refuses it, the run fails with that reason and no mail is made.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_automation_step_naming_another_workspaces_transport_never_sends() {
+async fn an_automation_step_whose_transport_is_gone_fails_the_run_and_sends_nothing() {
     let Some(e) = env(false).await else { return };
     e.mailbox("zoho", "news@one.com", json!({})).await;
+    let scratch = e.transport("scratch", json!({})).await;
     e.template("welcome", "transactional").await;
-    let (_, foreign) = e.other_workspace().await;
-    let Some(run) = sandbox_run(&e, foreign).await else {
-        return; // the install refused it up front: nothing to run
-    };
+    let (s, a) = install_via(&e, scratch).await;
+    assert_eq!(s, StatusCode::CREATED, "{a}");
+    let (s, d) = e
+        .c("DELETE", &format!("/v1/transports/{scratch}"), None)
+        .await;
+    assert_eq!(s, StatusCode::OK, "{d}");
+    let run = sandbox_run(&e, id_of(&a)).await;
     let state: String = sqlx::query_scalar("SELECT state FROM automation_runs WHERE id = $1")
         .bind(run)
         .fetch_one(&e.db)
@@ -957,28 +1002,21 @@ async fn an_automation_step_naming_another_workspaces_transport_never_sends() {
     assert_eq!(n, 0);
 }
 
-/// Emails, broadcasts and `PATCH /v1/domains` all answer 404 for a transport of another workspace
-/// when the request is made; an automation send step is only checked when a run reaches it.
+/// Same answer as on emails and broadcasts, at install time rather than when a run reaches the step.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "bug: installing an automation whose send step names another workspace's transport_id answers 201 (crates/mailcraft-automations/src/def.rs:519 `install` checks the template, never the transport); the run fails later instead"]
-async fn installing_a_send_step_with_another_workspaces_transport_is_rejected() {
+async fn installing_a_send_step_with_another_workspaces_transport_is_not_found() {
     let Some(e) = env(false).await else { return };
     e.mailbox("zoho", "news@one.com", json!({})).await;
     e.template("welcome", "transactional").await;
     let (_, foreign) = e.other_workspace().await;
-    let (s, b) = e
-        .c(
-            "POST",
-            "/v1/automations",
-            Some(json!({"name": "foreign", "trigger": "go", "steps": [
-                {"key": "mail", "type": "send_email",
-                 "config": {"template": "welcome", "from": "news@one.com", "transport_id": foreign}}]})),
-        )
-        .await;
-    assert!(
-        s == StatusCode::NOT_FOUND || s == StatusCode::UNPROCESSABLE_ENTITY,
-        "{s} {b}"
+    let (s, b) = install_via(&e, foreign).await;
+    assert_eq!(
+        (s, code(&b), b["error"]["field"].as_str()),
+        (StatusCode::NOT_FOUND, "not_found", Some("transport_id")),
+        "{b}"
     );
+    let (s, b) = install_via(&e, Uuid::new_v4()).await;
+    assert_eq!((s, code(&b)), (StatusCode::NOT_FOUND, "not_found"), "{b}");
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM automations")
         .fetch_one(&e.db)
         .await

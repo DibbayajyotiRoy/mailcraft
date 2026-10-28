@@ -9,7 +9,9 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use chrono::{DateTime, Utc};
-use mailcraft_automations::{ContactInput, Definition, Engine, EngineConfig, NoopPersonalizer};
+use mailcraft_automations::{
+    ContactInput, Definition, Engine, EngineConfig, NoopPersonalizer, StepKind,
+};
 use mailcraft_core::auth::Scope;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -96,6 +98,24 @@ pub async fn install(
     auth.require(Scope::Manage)?;
     let def = definition(raw)?;
     let ws = auth.0.workspace_id;
+    // A send step may force a transport; it must be one of this workspace (as on POST /v1/emails).
+    for t in def.steps.iter().filter_map(|s| match &s.kind {
+        StepKind::SendEmail(c) => c.transport_id,
+        _ => None,
+    }) {
+        let ok: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM transports WHERE id = $1 AND workspace_id = $2)",
+        )
+        .bind(t)
+        .bind(ws)
+        .fetch_one(&st.db)
+        .await?;
+        if !ok {
+            return Err(err("not_found", 404, "transport not found")
+                .field("transport_id")
+                .hint_in("list them with GET /v1/transports"));
+        }
+    }
     let mut g = begin!(st, auth, headers, "POST /v1/automations", def);
     // `install` validates and writes on the pool; the idempotency claim commits with the response.
     let (id, version) = mailcraft_automations::install(&st.db, ws, &def)

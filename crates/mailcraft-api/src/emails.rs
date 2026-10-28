@@ -352,6 +352,21 @@ pub(crate) async fn plan(
             transport = route.transport;
         }
         KeyEnv::Test => {
+            // Sandbox sends pin no transport, but a named one must still be this workspace's.
+            if let Some(t) = p.transport_id {
+                let ok: bool = sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM transports WHERE id = $1 AND workspace_id = $2)",
+                )
+                .bind(t)
+                .bind(key.workspace_id)
+                .fetch_one(&st.db)
+                .await?;
+                if !ok {
+                    return Err(err("not_found", 404, "transport not found")
+                        .field("transport_id")
+                        .hint_in("list them with GET /v1/transports"));
+                }
+            }
             let al = key.allowlist.as_deref().unwrap_or(&[]);
             if let Some(bad) =
                 p.to.iter()
