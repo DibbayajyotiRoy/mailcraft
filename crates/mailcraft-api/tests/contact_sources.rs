@@ -1634,6 +1634,11 @@ async fn import_dry_run_classifies_every_row_and_writes_nothing() {
             {"field": "properties.plan", "old": "free", "new": "pro"},
         ])
     );
+    assert_eq!(
+        rows[2]["values"]["first_name"], "Fresh",
+        "a new row says what it would be created with"
+    );
+    assert_eq!(rows[0]["values"], Value::Null);
     assert_eq!(rows[3]["reason"], "invalid_email");
     assert_eq!(rows[4]["reason"], "invalid_timezone");
     assert_eq!(

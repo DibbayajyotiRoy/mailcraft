@@ -1210,7 +1210,10 @@ async fn preview(st: &AppState, s: &Source) -> ApiResult {
                 "add"
             }
         });
-        rows.push(json!({"index": index, "email": email, "external_id": ext, "status": status, "changes": changes, "list": list}));
+        let values = (status == "new").then(|| {
+            json!({"first_name": clean(r.first_name.clone()), "last_name": clean(r.last_name.clone()), "timezone": tz, "properties": props})
+        });
+        rows.push(json!({"index": index, "email": email, "external_id": ext, "status": status, "changes": changes, "list": list, "values": values}));
     }
     Ok(envelope(
         StatusCode::OK,

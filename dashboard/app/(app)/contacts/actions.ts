@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { api, type ApiError } from "@/lib/api";
 import { withFlash } from "@/lib/flash";
 import { EMAIL_RE, buildProps, type AttrRow, type AttrType } from "./attrs";
+import type { PreviewRow } from "./ContactDiff";
 import type { ImportRow } from "./csv";
 import { parseEmails } from "./segmentRules";
 
@@ -88,13 +89,25 @@ export async function trackEvent(_p: TrackState, d: FormData): Promise<TrackStat
 }
 
 export type ImportResult = { imported: number; failed: { index: number; email: string; message: string }[]; error?: ApiError };
+/** Where an import puts its contacts: an existing list, or a new one by display name (the server finds or creates it). */
+export type ListTarget = { id?: string; name?: string } | null;
+const targetBody = (t: ListTarget) => (t?.id ? { list_id: t.id } : t?.name ? { list_name: t.name } : {});
 
 /** One chunk of an import (the dialog sends 500 at a time and shows progress). */
-export async function importContactsChunk(contacts: ImportRow[]): Promise<ImportResult> {
-  const r = await api("POST", "/v1/contacts/import", { contacts });
+export async function importContactsChunk(contacts: ImportRow[], list: ListTarget = null): Promise<ImportResult> {
+  const r = await api("POST", "/v1/contacts/import", { contacts, ...targetBody(list) });
   if (r.error) return { imported: 0, failed: [], error: r.error };
   refresh();
   return { imported: r.data.imported, failed: (r.data.failed ?? []).map((x: any) => ({ index: x.index, email: x.email, message: x.error?.message ?? "Rejected" })) };
+}
+
+export type PreviewChunk = { rows: PreviewRow[]; list: { id: string | null; name: string; exists: boolean } | null; error?: ApiError };
+
+/** Dry run of one chunk: what each row would do (new / update / unchanged / skipped). Writes nothing, not even the list. */
+export async function previewImportChunk(contacts: ImportRow[], list: ListTarget = null): Promise<PreviewChunk> {
+  const r = await api("POST", "/v1/contacts/import", { contacts, dry_run: true, ...targetBody(list) });
+  if (r.error) return { rows: [], list: null, error: r.error };
+  return { rows: r.data.rows ?? [], list: r.data.list ?? null };
 }
 
 // ------------------------------------------------------------------ segments
@@ -140,4 +153,61 @@ export async function addSegmentMembers(_p: FormState, d: FormData): Promise<For
   }
   refresh();
   return { ok: `Added ${added}${already ? `, ${already} already in the segment` : ""}` };
+}
+
+// ------------------------------------------------------------------ lists
+
+const names = (d: FormData) => ({ name: f(d, "name"), description: f(d, "description") });
+
+/** Create (no id) or edit (id) a list: its display name and description. */
+export async function saveList(_p: FormState, d: FormData): Promise<FormState> {
+  const id = f(d, "id"), { name, description } = names(d);
+  if (!name) return bad("Give the list a name.", "name");
+  const r = id ? await api("PATCH", `/v1/lists/${enc(id)}`, { name, description }) : await api("POST", "/v1/lists", { name, description: description || undefined });
+  if (r.error) return { error: r.error };
+  refresh();
+  return { ok: id ? `Saved ${name}` : `Created ${name}`, id: r.data?.id };
+}
+
+/** Deleting a list never deletes its contacts. */
+export async function deleteList(d: FormData) {
+  const r = await api("DELETE", `/v1/lists/${enc(f(d, "id"))}`);
+  if (r.error) back("/contacts?tab=lists", r.error);
+  refresh();
+  redirect(withFlash("/contacts?tab=lists", `Deleted ${f(d, "name")}; its contacts are untouched`));
+}
+
+/** Add contacts (`id` fields) to an existing list (`list_id`) or to a new one (`new_name`). */
+export async function addToList(_p: FormState, d: FormData): Promise<FormState> {
+  const ids = d.getAll("id").map(String).filter(Boolean), newName = f(d, "new_name");
+  let listId = f(d, "list_id"), label = f(d, "list_label");
+  if (!ids.length) return bad("Pick at least one contact.");
+  if (listId === "new" || (!listId && newName)) {
+    if (!newName) return bad("Give the new list a name.", "new_name");
+    const made = await api("POST", "/v1/lists", { name: newName });
+    if (made.error) return { error: { ...made.error, field: made.error.field === "name" ? "new_name" : made.error.field } };
+    listId = made.data.id; label = newName;
+  }
+  if (!listId) return bad("Pick a list.", "list_id");
+  let added = 0;
+  for (let i = 0; i < ids.length; i += 1000) {
+    const r = await api("POST", `/v1/lists/${enc(listId)}/members`, { contact_ids: ids.slice(i, i + 1000) });
+    if (r.error) return { error: r.error };
+    added += r.data.added;
+  }
+  refresh();
+  return { ok: `Added ${added} ${added === 1 ? "contact" : "contacts"}${label ? ` to ${label}` : ""}`, id: listId };
+}
+
+/** Take contacts (`id` fields) off a list. The contacts stay. */
+export async function removeFromList(_p: FormState, d: FormData): Promise<FormState> {
+  const ids = d.getAll("id").map(String).filter(Boolean), listId = f(d, "list_id");
+  let removed = 0;
+  for (let i = 0; i < ids.length; i += 1000) {
+    const r = await api("POST", `/v1/lists/${enc(listId)}/members/remove`, { contact_ids: ids.slice(i, i + 1000) });
+    if (r.error) return { error: r.error };
+    removed += r.data.removed;
+  }
+  refresh();
+  return { ok: `Removed ${removed} ${removed === 1 ? "contact" : "contacts"} from ${f(d, "list_label") || "the list"}` };
 }

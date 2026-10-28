@@ -819,7 +819,11 @@ async fn import_preview(st: &AppState, ws: Uuid, b: &ImportContacts) -> ApiResul
             }
         });
         list_adds += usize::from(list == Some("add"));
-        rows.push(json!({"index": index, "email": email, "status": status, "changes": changes, "list": list}));
+        // A new contact has nothing to compare with: say what it would be created with.
+        let values = (status == "new").then(|| {
+            json!({"first_name": c.first_name, "last_name": c.last_name, "timezone": tz, "properties": c.properties})
+        });
+        rows.push(json!({"index": index, "email": email, "status": status, "changes": changes, "list": list, "values": values}));
     }
     Ok(envelope(
         StatusCode::OK,

@@ -10,6 +10,7 @@ import { sendersOf } from "@/lib/senders";
 import { SettingsNav } from "./nav";
 import { SendersCard } from "./senders";
 import { KillSwitchCard } from "./safety";
+import { SourcesCard, type Source } from "./sources";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings · mailcraft" };
@@ -17,7 +18,7 @@ export const metadata = { title: "Settings · mailcraft" };
 export default async function Settings({ searchParams }: { searchParams: Promise<{ err?: string }> }) {
   const { err } = await searchParams;
   const actionErr = parseErr(err);
-  const [s, ks, pol, tr, st, snd] = await Promise.all([get("/v1/settings"), get("/v1/kill-switch"), get("/v1/policy"), get("/v1/transports"), get("/v1/account/status"), get("/v1/senders")]);
+  const [s, ks, pol, tr, st, snd, src] = await Promise.all([get("/v1/settings"), get("/v1/kill-switch"), get("/v1/policy"), get("/v1/transports"), get("/v1/account/status"), get("/v1/senders"), get("/v1/contact-sources")]);
   const d = s.data ?? {};
   const llm = d.llm_provider ?? {};
   // Admin-only actions: if the API does not report scopes, do not guess a lock; the server still enforces it.
@@ -36,6 +37,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               <GeneralCard replyTo={d.reply_to ?? ""} canEdit={admin} />
               <SendersCard senders={sendersOf(snd)} defaultFrom={d.default_from ?? ""} canEdit={admin} />
               <DeliveryCard path={d.delivery_path} transports={Array.isArray(tr.data) ? tr.data : []} canEdit />
+              {src.error ? e(src, "contact sources") : <SourcesCard sources={(Array.isArray(src.data) ? src.data : []) as Source[]} />}
               <ProviderCard kind={llm.kind ?? ""} model={llm.model ?? ""} baseUrl={llm.base_url ?? ""} keySet={!!llm.api_key_set} canEdit />
               <InstructionsForm initial={d.custom_instructions ?? ""} />
             </>
