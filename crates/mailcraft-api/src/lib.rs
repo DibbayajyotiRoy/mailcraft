@@ -18,6 +18,7 @@ pub mod caps;
 pub mod emails;
 pub mod error;
 pub mod idem;
+pub mod ingest;
 pub mod integrations;
 pub mod keys;
 pub mod metrics;
@@ -26,6 +27,7 @@ pub mod page;
 pub mod public;
 pub mod resolver;
 pub mod services;
+pub mod smtp_in;
 pub mod ssrf;
 pub mod state;
 pub mod templates;
@@ -101,6 +103,8 @@ pub fn router(st: AppState) -> Router {
             "/u/{token}",
             get(public::unsubscribe).post(public::unsubscribe),
         )
+        .route("/ingest/raw", post(ingest::raw))
+        .route("/ingest/ses", post(ingest::ses))
         .route("/v1/setup", post(admin::setup))
         // ops
         .route("/v1/doctor", get(admin::doctor))

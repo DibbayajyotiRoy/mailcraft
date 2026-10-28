@@ -234,6 +234,8 @@ async fn every_openapi_route_is_mounted() {
                 "/metrics",
                 "/openapi.yaml",
                 "/u/{token}",
+                "/ingest/raw",
+                "/ingest/ses",
                 "/v1/setup",
             ]
             .contains(&path.as_str())

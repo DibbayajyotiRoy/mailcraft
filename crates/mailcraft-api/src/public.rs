@@ -13,7 +13,7 @@ use crate::state::AppState;
 
 /// `PreferenceStore` is sync; collect the unsubscribes and write them after `handle` returns.
 #[derive(Default)]
-struct Collect(Mutex<Vec<(String, String, Category)>>);
+pub(crate) struct Collect(pub(crate) Mutex<Vec<(String, String, Category)>>);
 
 impl PreferenceStore for Collect {
     fn unsubscribe(&self, tenant: &str, contact: &str, category: Category, _now: u64) {
@@ -60,7 +60,7 @@ pub async fn unsubscribe(
     (status, [(header::CONTENT_TYPE, r.content_type)], r.body).into_response()
 }
 
-async fn apply(
+pub(crate) async fn apply(
     st: &AppState,
     tenant: &str,
     contact: &str,

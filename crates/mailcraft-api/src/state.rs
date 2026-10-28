@@ -25,6 +25,10 @@ pub struct Config {
     pub unsub_secret: Vec<u8>,
     /// Gmail OAuth client (`MAILCRAFT_GOOGLE_CLIENT_ID` / `_SECRET`); self-hosters bring their own.
     pub google_oauth: Option<GoogleOauth>,
+    /// `MAILCRAFT_INGEST_TOKEN`: authenticates `/ingest/raw` and `/ingest/ses`; unset = both disabled.
+    pub ingest_token: Option<String>,
+    /// `MAILCRAFT_SES_TOPIC_ARNS` (comma separated): SNS topics `/ingest/ses` accepts.
+    pub ses_topic_arns: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -55,6 +59,10 @@ impl Config {
                 .or_else(|| env("MAILCRAFT_SECRET_KEY").map(|k| format!("unsub:{k}")))
                 .unwrap_or_default()
                 .into_bytes(),
+            ingest_token: env("MAILCRAFT_INGEST_TOKEN"),
+            ses_topic_arns: env("MAILCRAFT_SES_TOPIC_ARNS")
+                .map(|v| v.split(',').map(|a| a.trim().to_string()).collect())
+                .unwrap_or_default(),
             google_oauth: env("MAILCRAFT_GOOGLE_CLIENT_ID").map(|client_id| GoogleOauth {
                 client_id,
                 client_secret: env("MAILCRAFT_GOOGLE_CLIENT_SECRET"),

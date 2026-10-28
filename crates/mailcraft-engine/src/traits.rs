@@ -68,6 +68,10 @@ pub struct FinalizeCtx {
 /// Takes the assembled RFC 5322 bytes, returns the bytes to send.
 #[async_trait]
 pub trait Finalizer: Send + Sync {
+    /// Envelope sender (VERP) for `email_id`; the inbound receiver must be able to verify it.
+    fn return_path(&self, email_id: Uuid, host: &str) -> String {
+        crate::verp_mail_from(email_id, host)
+    }
     async fn finalize(&self, ctx: &FinalizeCtx, raw: Vec<u8>) -> Result<Vec<u8>>;
 }
 
