@@ -488,6 +488,13 @@ createServer(async (req, res) => {
       const d = DOMAINS.find((x) => x.id === m[1]); if (!d) return notFound(res, "domain");
       d.transport_id = b.transport_id ?? null; return body(res, d);
     }
+    if (req.method === "PUT" && p === "/v1/contacts") {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(b.email ?? "")) return fail(res, { code: "invalid_request", message: "email is not valid", field: "email" }, 400);
+      let c = CONTACTS.find((x) => x.email === b.email.toLowerCase());
+      if (!c) CONTACTS.push((c = { id: "c" + (CONTACTS.length + 1), email: b.email.toLowerCase(), created_at: ago(0), properties: {}, suppressed: false, suppression_reason: null }));
+      for (const k of ["first_name", "last_name", "timezone"]) if (b[k] !== undefined) c[k] = b[k];
+      return body(res, c);
+    }
     if (p === "/v1/events") return body(res, { event_id: "ev9", duplicate: false, triggered_automations: [{ id: "a1", run_id: "run_9" }] }, {}, 202);
     if (p === "/v1/automations") {
       const def = input, bad = (def.steps ?? []).find((s) => s.config?.template === "missing");
@@ -598,6 +605,7 @@ createServer(async (req, res) => {
     let rows = CONTACTS; const l = q.get("list"), term = (q.get("q") ?? "").toLowerCase();
     if (l) { const list = listBy(l); if (!list) return notFound(res, "list"); rows = rows.filter((c) => c.lists?.some((x) => x.id === list.id)); }
     if (term) rows = rows.filter((c) => [c.email, c.first_name, c.last_name].some((v) => v?.toLowerCase().includes(term)));
+    const lim = Number(q.get("limit")) || 0; if (lim > 0) rows = rows.slice(0, lim);
     return body(res, rows, { next_cursor: null });
   }
   if (p === "/v1/lists") return body(res, process.env.EMPTY ? [] : CONTACT_LISTS);
