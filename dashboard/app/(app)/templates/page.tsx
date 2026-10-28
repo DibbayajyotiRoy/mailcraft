@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { RetryError } from "@/components/ui/error-state";
 import { parseErr } from "@/lib/err";
 import { ImportTemplate } from "./ImportTemplate";
+import { NewTemplate } from "./NewTemplate";
 import { TemplatesView, type TemplateRow } from "./TemplatesView";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ export default async function Templates({ searchParams }: { searchParams: Promis
   }
   return (
     <>
-      <PageHeader title="Templates" description="Reusable email layouts. Publish a template to use it in sends and automations." action={<ImportTemplate />} />
+      <PageHeader title="Templates" description="Reusable email layouts. Write one here or import it, edit it, then publish it to use it in sends and automations." action={<><ImportTemplate /><NewTemplate /></>} />
       {e && <div className="mb-4"><RetryError error={e} /></div>}
       {r.error ? <RetryError error={r.error} /> : <TemplatesView templates={rows} />}
     </>
