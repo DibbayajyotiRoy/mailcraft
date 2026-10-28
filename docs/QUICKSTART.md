@@ -109,6 +109,6 @@ being tracked by mailcraft, and the provider's daily sending cap applies:
 
 ```sh
 export MAILCRAFT_SMTP_PASSWORD='<app password>'
-mailcraft connect relay custom --host smtppro.zoho.in --port 587 \
+mailcraft connect relay custom --host smtp.zoho.in --port 587 \
   --username dev@example.com --mailbox-sender
 ```
