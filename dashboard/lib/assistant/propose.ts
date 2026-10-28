@@ -3,8 +3,11 @@
 import type { Schema } from "./catalogue";
 import { clip, compactLint } from "./compact";
 import { apiErr, fail, read, type Ctx, type Out } from "./core";
-import { putProposal, type Step } from "./proposals";
+import { createHash } from "node:crypto";
+import { GO_LIVE_SUMMARY, GO_LIVE_TITLE, goLiveNext, isGoLive } from "./errors";
+import { goLivePending, putProposal, type Step } from "./proposals";
 import type { Proposal } from "./types";
+import { findPlaceholders, plainValues, varNames, type Val } from "./variables";
 
 const enc = encodeURIComponent;
 type Builder = (a: any, ctx: Ctx) => Promise<Out>;
@@ -12,6 +15,7 @@ const isStr = (v: unknown): v is string => typeof v === "string" && v.trim() !==
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const lines = (s: string) => s.split("\n").length;
+const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s); // for text a person reads (clip() adds a "[+N]" marker for the model)
 
 type Draft = Omit<Proposal, "id" | "expires_at" | "warnings"> & { warnings?: string[]; calls: Step[]; link?: string; linkKind?: string };
 /** Stores the proposal and returns the short note the model gets: it must not claim anything was changed. */
@@ -140,7 +144,48 @@ async function senderWarning(ctx: Ctx, from: string): Promise<string[]> {
   return row && row.status && row.status !== "ready" ? [`Sender ${addr} is "${String(row.status).replace(/_/g, " ")}": ${row.status === "needs_domain" ? "verify its domain first" : "connect a transport for it"} or the send will fail.`] : [];
 }
 
+// ---- template variables the assistant drafted ------------------------------------------------------------------------
+const hash = (x: string) => createHash("sha1").update(x).digest("hex").slice(0, 8);
+type Drafted = NonNullable<Proposal["variables"]>;
+/** The card's variable list: each variable the template reads (worker-injected ones excluded) with the value drafted for it. One that is
+ *  absent, or still a stand-in ("[add signup link]"), is flagged and blocks Apply; values the template never reads are dropped (one
+ *  warning). `extra` fields (subject, from, text, html) are scanned for stand-ins too and listed only when they hold one. */
+function draftedVariables(names: string[], given: Record<string, Val>, extra: Record<string, unknown> = {}) {
+  const variables: Drafted = names.map((name) => {
+    if (!(name in given)) return { name, value: "", placeholder: true as const };
+    const v = String(given[name]);
+    return { name, value: v, ...(typeof given[name] === "string" && findPlaceholders(v).length > 0 && { placeholder: true as const }) };
+  });
+  for (const [name, v] of Object.entries(extra)) { const f = typeof v === "string" ? findPlaceholders(v) : []; if (f.length) variables.push({ name, value: f.join(", "), placeholder: true }); }
+  variables.sort((x, y) => Number(!!y.placeholder) - Number(!!x.placeholder)); // gaps first: the list folds after 8
+  const unused = names.length ? Object.keys(given).filter((k) => !names.includes(k)) : [];
+  return { variables, placeholders: variables.filter((v) => v.placeholder).map((v) => v.name), unused, warnings: unused.length ? [`The template does not use: ${unused.join(", ")}.`] : [] };
+}
+/** The model is told what the card shows, so it can answer "make it shorter" by proposing again with new values. */
+const varNote = (v: { name: string; value: string }[], stuck: string[]) => ({
+  variables: Object.fromEntries(v.slice(0, 30).map((x) => [x.name, clip(x.value, 60)])), needs_a_value: stuck.length ? stuck : undefined,
+  hint: "The card shows the filled preview. If the user asks for changes, propose again with new values; never ask them to fill variables." + (stuck.length ? ` Ask only for what needs a real value (${stuck.join(", ")}).` : ""),
+});
+
 // ---- broadcasts and single emails ----------------------------------------------------------------------------------
+/** The send was refused because the workspace is not approved for live sending. That is not a failure to report: the way forward
+ *  is a go-live request a person approves. Proposes it (keeping what the user wanted as `pending`), or says one is already waiting. */
+async function goLive(ctx: Ctx, kind: "email" | "broadcast", what: string): Promise<Out> {
+  const pending = { kind, what }, key = `go_live:${kind}:${hash(what)}`;
+  const next = goLiveNext(kind), tell = `Never suggest test keys. End with NEXT: Send it now.`;
+  if (await goLivePending(ctx)) return propose(ctx, {
+    kind: "go_live", risk: "safe", warnings: [], calls: [], link: "/approvals", pending, waiting: true, items: [what], key,
+    title: "Waiting for go-live approval", summary: "A go-live request is already waiting for a person to approve it in Approvals. There is nothing more to apply.",
+  }, { reason: "go_live_request_already_pending", note: `A go-live request is already waiting in Approvals; there is nothing to Apply and no second request is made. Say so in one sentence (do not say Apply asks for approval), mention ${what}, then say: ${next} ${tell}` });
+  const st = await read(ctx, "GET", "/v1/account/status");
+  if (!st.error && Array.isArray(st.data?.scopes) && !st.data.scopes.includes("manage"))
+    return fail("forbidden_scope", "This key can't request go-live: it needs the manage scope.", "Say so and that someone with a manage key requests it and an admin approves it in Approvals. Never suggest test keys.");
+  return propose(ctx, {
+    kind: "go_live", risk: "safe", warnings: [], pending, link: "/approvals", items: [what], key,
+    calls: [{ method: "POST", path: "/v1/go-live-requests", body: { note: cut(`Requested from the dashboard assistant. The user wants to send ${what}.`, 400) }, label: GO_LIVE_TITLE }],
+    title: GO_LIVE_TITLE, summary: GO_LIVE_SUMMARY,
+  }, { reason: "go_live_required", note: `Nothing has changed yet; the user must press Apply to request go-live approval. Do not say it was done. Say in one sentence that the workspace needs a person's go-live approval before it can send real mail; mention ${what}. Then say: ${next} ${tell}` });
+}
 const skippedTally = (skipped: any[] = []) => Object.entries(skipped.reduce((m: any, s) => ((m[s.reason] = (m[s.reason] ?? 0) + 1), m), {})).map(([reason, n]) => ({ reason, n: n as number }));
 const proposeBroadcast: Builder = async (a, ctx) => {
   if (!isStr(a?.template)) return fail("invalid_request", "template (id or alias) is required.");
@@ -154,46 +199,79 @@ const proposeBroadcast: Builder = async (a, ctx) => {
   if (!from) { const s = await read(ctx, "GET", "/v1/settings"); from = s.data?.default_from || undefined; }
   if (!from) return fail("missing_sender", "No from address given and no default sender is set.", "Ask the user which sender to use.");
   const base = { template_id: t.data.id ?? a.template, from, stream: "marketing", ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.max_per_day > 0 && { max_per_day: Math.floor(a.max_per_day) }) };
-  const body = { ...base, ...(list ? { list_id: list } : { recipients: emails.map((email) => ({ email })) }) };
+  const dcols = plainValues(a.data, "data");
+  if ("error" in dcols) return fail("invalid_request", dcols.error, "Give each column text, a number or true/false (an empty string hides an optional one).");
+  const data = dcols.ok, hasData = !list && Object.keys(data).length > 0; // shared columns for explicit recipients: {{ data.x }}
+  const body = { ...base, ...(list ? { list_id: list } : { recipients: emails.map((email) => ({ email, ...(hasData && { data }) })) }) };
   const dry = await read(ctx, "POST", "/v1/broadcasts", { ...body, dry_run: true }, 0);
+  if (isGoLive(dry.error)) return goLive(ctx, "broadcast", `broadcast of "${cut(a.template, 40)}" to ${list ? `list "${cut(list, 40)}"` : plural(emails.length, "address")}`);
   if (dry.error) return apiErr(dry.error);
   const n: number = dry.data.queued ?? 0, sk = skippedTally(dry.data.skipped);
   if (!n) return fail("empty_audience", "Nobody would receive this.", sk.map((s) => `${s.n} ${s.reason}`).join(", ") || "The audience is empty.");
-  let recipient: any = emails.length ? { email: emails[0] } : undefined, sample = false;
+  let recipient: any = emails.length ? { email: emails[0], ...(hasData && { data }) } : undefined, sample = false;
   if (!recipient) { const c = await read(ctx, "GET", `/v1/contacts?list=${enc(list!)}&limit=1`); recipient = c.data?.[0] && { email: c.data[0].email, first_name: c.data[0].first_name, last_name: c.data[0].last_name }; }
   if (!recipient) { recipient = { email: "preview@example.com", first_name: "Alex" }; sample = true; }
   const pv = await read(ctx, "POST", "/v1/broadcasts/preview", { template_id: base.template_id, ...(base.subject && { subject: base.subject }), stream: "marketing", recipient });
   const sch = dry.data.schedule, when = sch?.first_at ? `${String(sch.first_at).slice(0, 16).replace("T", " ")} to ${String(sch.last_at).slice(0, 16).replace("T", " ")}` : "";
+  const dv = draftedVariables(hasData ? Object.keys(data).map((k) => `data.${k}`) : [], Object.fromEntries(Object.entries(hasData ? data : {}).map(([k, v]) => [`data.${k}`, v])), { subject: a.subject, from });
   const warnings = [...(await senderWarning(ctx, from)), ...(pv.error ? [`Preview failed: ${pv.error.message}`] : []), ...(sample ? ["Preview uses a sample recipient."] : []), ...sandbox(ctx),
-    ...(sch?.daily_cap ? [`Paced at ${sch.daily_cap} per day.`] : [])];
+    ...(sch?.daily_cap ? [`Paced at ${sch.daily_cap} per day.`] : []), ...dv.warnings];
   return propose(ctx, {
-    kind: "broadcast", risk: "sends", warnings, link: undefined, linkKind: "broadcasts",
+    kind: "broadcast", risk: "sends", warnings, link: undefined, linkKind: "broadcasts", variables: dv.variables.length ? dv.variables : undefined, key: `send:broadcast:${a.template}:${from.toLowerCase()}:${list ? `list:${list}` : emails.map((e) => e.toLowerCase()).sort().join(",")}`,
     confirm: liveConfirm(ctx, `This will email ${plural(n, "real person").replace("persons", "people")}.`),
     calls: [{ method: "POST", path: "/v1/broadcasts", body: { ...body, dry_run: false }, label: "Send broadcast" }],
     title: `Broadcast "${t.data.name ?? t.data.alias}" to ${list ? `list "${list}"` : plural(emails.length, "address")}`,
     summary: `Sends from ${from} to ${plural(n, "recipient")}${when ? `, spread over ${when}` : ""}. Approvals, go-live and the kill switch still apply.`,
     audience: { count: n, skipped: sk, schedule: when || undefined },
     preview: pv.error ? undefined : { subject: pv.data.subject, html: pv.data.html },
-  }, { audience: n, skipped: sk, schedule: when || undefined });
+  }, { audience: n, skipped: sk, schedule: when || undefined, ...(dv.variables.length && varNote(dv.variables, dv.placeholders)) });
 };
 
 const proposeEmail: Builder = async (a, ctx) => {
   const to: string[] = Array.isArray(a?.to) ? a.to.map(String) : [];
   if (!to.length || to.length > 5 || to.some((e) => !EMAIL.test(e))) return fail("invalid_request", "to must be 1-5 valid addresses (use propose_broadcast for more).");
   if (!a.template && !a.html && !a.text) return fail("invalid_request", "Give template, html or text.");
-  const body: Record<string, unknown> = { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.template && { template: a.template }), ...(isStr(a.html) && { html: a.html }), ...(isStr(a.text) && { text: a.text }) };
+  const tid: string | undefined = typeof a.template === "string" ? a.template : a.template?.id;
+  if (a.template && !isStr(tid)) return fail("invalid_request", "template needs an id and the variables you drafted: {id, variables}.");
+  const vals = plainValues(typeof a.template === "object" ? a.template?.variables : undefined, "template.variables");
+  if ("error" in vals) return fail("invalid_request", vals.error, "Give each variable text, a number or true/false (an empty string hides an optional one).");
+  const given: Record<string, Val> = { ...vals.ok };
+  let names: string[] = [];
+  if (tid) {
+    const t = await read(ctx, "GET", `/v1/templates/${enc(tid)}`);
+    if (t.error) return apiErr(t.error);
+    names = varNames(t.data?.variables);
+    if (to.length === 1) { // what the recipient's own record answers is filled from it, never left to a guess
+      if (names.includes("email") && !("email" in given)) given.email = to[0];
+      const need = ["first_name", "last_name"].filter((k) => names.includes(k) && !(k in given));
+      if (need.length) { const c = await read(ctx, "GET", `/v1/contacts/${enc(to[0])}`); for (const k of need) if (isStr(c.data?.[k])) given[k] = c.data[k]; }
+    }
+  }
+  const used = names.length ? Object.fromEntries(Object.entries(given).filter(([k]) => names.includes(k))) : given; // values the template never reads are not sent
+  const tref = tid ? { id: tid, ...(Object.keys(used).length && { variables: used }) } : undefined;
+  const body: Record<string, unknown> = { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(tref && { template: tref }), ...(isStr(a.html) && { html: a.html }), ...(isStr(a.text) && { text: a.text }) };
   const dry = await read(ctx, "POST", "/v1/emails", { ...body, dry_run: true }, 0);
+  if (isGoLive(dry.error)) return goLive(ctx, "email", `email to ${cut(to.join(", "), 80)}${isStr(a.from) ? ` from ${cut(a.from, 60)}` : ""}${isStr(a.subject) ? ` ("${cut(a.subject, 50)}")` : ""}`);
   if (dry.error) return apiErr(dry.error);
-  const d = dry.data ?? {}, html = d.html ?? d.rendered?.html ?? d.preview?.html ?? (isStr(a.html) ? a.html : ""), subject = d.subject ?? d.rendered?.subject ?? a.subject ?? "";
+  let d = dry.data ?? {};
+  if (tid) { // a dry run does not render templates (the worker does, at send time): render with the drafted variables, as the recipient will see it
+    const r = await read(ctx, "POST", `/v1/templates/${enc(tid)}/preview`, { variables: used }, 0);
+    if (r.error) return fail(r.error.code, `The template does not render with these variables: ${r.error.message}`, "Give every variable a value (an empty string hides an optional one), then propose again.");
+    d = { ...d, ...r.data, rendered: undefined };
+    if (!names.length) names = varNames(r.data?.variables);
+  }
+  const html = d.html ?? d.rendered?.html ?? d.preview?.html ?? (isStr(a.html) ? a.html : ""), subject = (isStr(a.subject) ? a.subject : undefined) ?? d.subject ?? d.rendered?.subject ?? "";
   const lint = (d.lint ?? d.rendered?.lint ?? []).map((l: any) => ({ sev: l.severity, msg: `${l.rule}: ${l.message}` }));
+  const dv = draftedVariables(names, given, { subject: a.subject, from: a.from, text: a.text, html: a.html });
   return propose(ctx, {
-    kind: "email", risk: "sends", lint, warnings: [...(isStr(a.from) ? await senderWarning(ctx, a.from) : []), ...sandbox(ctx)], link: undefined,
+    kind: "email", risk: "sends", lint, warnings: [...(isStr(a.from) ? await senderWarning(ctx, a.from) : []), ...sandbox(ctx), ...dv.warnings], link: undefined,
+    variables: dv.variables.length ? dv.variables : undefined, key: `send:email:${tid ?? hash(subject)}:${isStr(a.from) ? a.from.toLowerCase() : ""}:${to.map((e) => e.toLowerCase()).sort().join(",")}`,
     confirm: liveConfirm(ctx, `This will email ${to.length === 1 ? "1 real person" : `${to.length} real people`}.`),
     calls: [{ method: "POST", path: "/v1/emails", body, label: "Send email" }],
     title: `Send "${clip(subject || "(template subject)", 50)}" to ${to[0]}${to.length > 1 ? ` and ${to.length - 1} more` : ""}`,
     summary: "Sends one email now. Approvals, go-live and the kill switch still apply.",
     preview: html ? { subject, html } : undefined, items: to,
-  }, { lint_issues: lint.length });
+  }, { lint_issues: lint.length, ...(dv.variables.length && varNote(dv.variables, dv.placeholders)) });
 };
 
 // ---- lists and contacts --------------------------------------------------------------------------------------------
@@ -253,8 +331,8 @@ export const PROPOSE_SCHEMAS = {
   propose_automation: T("propose_automation", "Propose creating/updating an automation (draft, not activated). Send the full definition; trigger is an event name.",
     o({ definition: o({ name: s("string"), trigger: s("string"), entry_rule: s("string"), goal: s("object"), approval: s("string"), steps: s("array", { items: o({ key: s("string"), type: s("string"), config: s("object"), next: {} }, ["key", "type"]) }) }, ["name", "steps"]) }, ["definition"])),
   propose_automation_state: T("propose_automation_state", "Propose activating, pausing or resuming an automation.", o({ id: s("string"), action: s("string", { enum: ["activate", "pause", "resume"] }), backfill_suppress: s("boolean") }, ["id", "action"])),
-  propose_broadcast: T("propose_broadcast", "Propose sending a published template to a list or emails (dry run shown first). from: an address from list kind=sender.", o({ template: s("string"), from: s("string"), transport_id: s("string"), subject: s("string"), list: s("string"), emails: strs, max_per_day: s("integer") }, ["template"])),
-  propose_email: T("propose_email", "Propose sending one email to 1-5 addresses. from: an address from list kind=sender.", o({ to: strs, from: s("string"), transport_id: s("string"), subject: s("string"), template: o({ id: s("string"), variables: s("object") }), html: s("string"), text: s("string") }, ["to"])),
+  propose_broadcast: T("propose_broadcast", "Propose sending a published template to a list or emails (dry run shown first). from: an address from list kind=sender. data: extra columns for emails, used as {{ data.x }}.", o({ template: s("string"), from: s("string"), transport_id: s("string"), subject: s("string"), list: s("string"), emails: strs, data: s("object"), max_per_day: s("integer") }, ["template"])),
+  propose_email: T("propose_email", "Propose sending one email to 1-5 addresses. from: an address from list kind=sender. For a template give template.variables with a value for every variable.", o({ to: strs, from: s("string"), transport_id: s("string"), subject: s("string"), template: o({ id: s("string"), variables: s("object") }), html: s("string"), text: s("string") }, ["to"])),
   propose_list: T("propose_list", "Propose creating/updating a contact list or rule segment, optionally adding emails.", o({ id: s("string"), name: s("string"), filter: s("object"), emails: strs })),
   propose_contacts: T("propose_contacts", "Propose creating/updating up to 50 contacts by email.", o({ contacts: s("array", { items: o({ email: s("string"), first_name: s("string"), last_name: s("string"), timezone: s("string"), properties: s("object") }, ["email"]) }) }, ["contacts"])),
 };

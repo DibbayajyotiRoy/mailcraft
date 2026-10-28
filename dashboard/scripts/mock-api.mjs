@@ -3,6 +3,9 @@
 //   node scripts/mock-api.mjs [port]          (default 18080)
 //   EMPTY=1 node scripts/mock-api.mjs         every list is empty (empty-state screens)
 //   FAIL=1  node scripts/mock-api.mjs         every route returns 503 (error-state screens)
+//   NOT_LIVE=1 node scripts/mock-api.mjs      the workspace is not approved for live sending: POST /v1/emails and /v1/broadcasts
+//                                             answer 403 blocked_by_policy (emails.rs rule go_live), as the real API does for a live key.
+//                                             Change it at runtime with POST /__mock/go-live?live=0|1&pending=0|1 (pending = a go_live approval is waiting).
 import { createServer } from "node:http";
 
 const ago = (m) => new Date(Date.now() - m * 6e4).toISOString();
@@ -84,7 +87,7 @@ const TEMPLATES = [
   { id: "t1", alias: "welcome", name: "Welcome", stream: "transactional", subject: "Welcome {{ first_name }}", preheader: "Your account is ready", status: "published", version: 3, published_version: 3, updated_at: ago(300), variables: ["first_name"], source_format: "mjml", source: MJML_SRC },
   { id: "t2", alias: "receipt", name: "Receipt", stream: "transactional", subject: "Your receipt", status: "published", version: 5, published_version: 4, updated_at: ago(60 * 30), variables: ["first_name", "amount"], source_format: "html", source: HTML_SRC },
   { id: "t3", alias: "winback", name: "Win-back", stream: "marketing", subject: "We miss you", status: "draft", version: 1, published_version: null, updated_at: ago(60 * 24 * 3), variables: ["first_name"], source_format: "json", source: JSON.stringify({ version: 1, subject: "We miss you", blocks: [{ type: "heading", text: "Come back, {{ first_name }}" }] }, null, 2) },
-  { id: "t4", alias: "promo", name: "Promo", stream: "marketing", subject: "", status: "published", version: 1, published_version: 1, updated_at: ago(60 * 12), variables: ["first_name"], source_format: "html", source: `<!doctype html>\n<html>\n  <body>\n    <h1>Big autumn sale, {{ first_name }}</h1>\n    <img src="https://example.com/sale.png">\n    <p>Everything is 20% off this week.</p>\n    <a href="http://example.com/sale">Shop the sale</a>\n  </body>\n</html>\n` },
+  { id: "t4", alias: "promo", name: "Promo", stream: "marketing", subject: "Big autumn sale, {{ first_name }}", status: "published", version: 1, published_version: 1, updated_at: ago(60 * 12), variables: ["first_name", "signup_link"], source_format: "html", source: `<!doctype html>\n<html>\n  <body>\n    <h1>Big autumn sale, {{ first_name }}</h1>\n    <img src="https://example.com/sale.png">\n    <p>Everything is 20% off this week.</p>\n    <a href="http://example.com/sale">Shop the sale</a>\n    <p><a href="{{ signup_link }}">Sign up for early access</a></p>\n  </body>\n</html>\n` },
 ];
 const llm = { version: 1, subject: "Welcome", blocks: [{ type: "heading", text: "Hi" }, { type: "slot", name: "intro", max_len: 240, instructions: "One warm sentence", fallback: "Thanks for signing up." }] };
 // Version history per template (newest first): t2 has a live v4 and an unpublished draft v5.
@@ -318,6 +321,12 @@ const body = (res, data, extra = {}, code = 200) => { res.statusCode = code; res
 const fail = (res, e, code) => { res.statusCode = code; res.end(JSON.stringify({ ok: false, error: e })); };
 const notFound = (res, what) => fail(res, { code: "not_found", message: `No such ${what}` }, 404);
 
+// ---- Go-live gate (emails.rs plan()) --------------------------------------------------------------------------------------
+let notLive = !!process.env.NOT_LIVE;
+if (notLive) APPROVALS.splice(APPROVALS.findIndex((x) => x.id === "ap_3"), 1); // start with no go-live request waiting
+const goLiveApproval = (note) => ({ id: `ap_gl${Date.now().toString(36)}`, kind: "go_live", status: "pending", requested_by: "key_1c2d3e4f5a6b", created_at: ago(0), payload: { note: note ?? null } });
+const goLiveBlock = (res) => fail(res, { code: "blocked_by_policy", message: "this workspace is not approved for live sending", hint: "request go-live (POST /v1/go-live-requests); a human approves it. Use a mc_test_ key meanwhile", retryable: false }, 403);
+
 const readBody = async (req) => { let t = ""; for await (const c of req) t += c; try { return t ? JSON.parse(t) : {}; } catch { return {}; } };
 
 
@@ -332,6 +341,18 @@ function scripted(messages) {
   const after = messages.slice(messages.findLastIndex((m) => m.role === "user") + 1).filter((m) => m.role === "tool");
   const sys = messages[0]?.content ?? "";
   const call = (name, args) => ({ tool: { name, args } });
+  if (/promo template|signup_link/i.test(lastUser)) { // a template send: the assistant drafts every variable itself and marks the one it must not invent
+    const fixed = /change signup_link to/i.test(lastUser);
+    if (!after.length) return call("propose_email", { to: ["ana@example.com"], from: "Acme <hello@mail.example.com>", template: { id: "promo", variables: { first_name: "Ana", signup_link: fixed ? "https://example.com/start" : "[add signup link]" } } });
+    return { text: fixed ? "Updated: the signup link is now https://example.com/start. Review it and press Apply." : "I drafted the promo email for Ana. I can't invent a signup URL, so I left a placeholder: tell me which link to use.\nNEXT: Change signup_link to https://example.com/start" };
+  }
+  if (/bipul|go.?live|send it now/i.test(lastUser)) { // a single email: a normal proposal when the workspace is live, the go-live request when it is not
+    if (!after.length) return call("propose_email", { to: ["bipul@example.com"], from: "partner@example.com", subject: "Hello from Acme", text: "Hi Bipul,\n\nHere is the note we talked about.\n\nAcme" });
+    if (after.some((m) => /go_live_request_already_pending/.test(m.content))) return { text: "A go-live request is already waiting for approval in Approvals, so there is nothing to apply. Approve it there, then say \"send it now\" and I'll prepare the email again.\nNEXT: Send it now" };
+    return after.some((m) => /go_live/.test(m.content))
+      ? { text: "This workspace can't send real mail until a person approves going live. Apply asks for that approval. Approve it in Approvals, then say \"send it now\" and I'll prepare the email again.\nNEXT: Send it now" }
+      : { text: "The email to bipul@example.com is ready. Press Apply to send it." };
+  }
   if (/fix|lint/i.test(lastUser) && /promo|template/i.test(lastUser + sys)) {
     if (!after.length && !/Current page \(template/.test(sys)) return call("get", { kind: "template", id: "t4", source: true });
     if (after.length < 2 && !after.some((m) => /proposal_shown/.test(m.content)))
@@ -412,8 +433,15 @@ createServer(async (req, res) => {
   const input = req.method === "GET" ? {} : await readBody(req), b = input; // `input` and `b` are the same parsed JSON body
   if (p.startsWith("/openrouter/") && (await openrouter(req, res, p, input))) return;
   res.setHeader("content-type", "application/json");
+  if (p === "/__mock/go-live") { // QA scene control, not an API route
+    if (q.has("live")) notLive = q.get("live") === "0";
+    if (q.has("pending")) { for (let i = APPROVALS.length; i--;) if (APPROVALS[i].kind === "go_live") APPROVALS.splice(i, 1); if (q.get("pending") === "1") APPROVALS.unshift(goLiveApproval("Ready to send to real customers")); }
+    return body(res, { not_live: notLive, go_live_pending: APPROVALS.filter((x) => x.kind === "go_live").length });
+  }
   if (process.env.FAIL) return fail(res, { code: "unreachable", message: "Cannot reach the database", hint: "Check the server" }, 503);
   if (req.method !== "GET") {
+    if (p === "/v1/go-live-requests") { const a = goLiveApproval(input.note); APPROVALS.unshift(a); return body(res, { approval_id: a.id, status: "pending" }, {}, 202); }
+    if (notLive && (p === "/v1/emails" || p === "/v1/broadcasts")) return goLiveBlock(res);
     if (p === "/v1/contacts/import" || p === "/v1/segments/preview") {
       if (p === "/v1/segments/preview") return body(res, { count: 12, sample: CONTACTS.slice(0, 3).map(({ email, first_name, last_name }) => ({ email, first_name, last_name })) });
       if (input.list_id && input.list_name) return fail(res, { code: "invalid_request", message: "give list_id or list_name, not both" }, 400);
@@ -560,7 +588,7 @@ createServer(async (req, res) => {
     if ((m = p.match(/^\/v1\/templates\/([^/]+)\/preview$/))) {
       const t = findTemplate(m[1]);
       if (!t) return notFound(res, "template");
-      if (t.id === "t4" && b.content == null && b.html == null && b.mjml == null) return body(res, renderInline({ content: t.source, format: "html", subject: t.subject }).data);
+      if (t.id === "t4" && b.content == null && b.html == null && b.mjml == null) return body(res, renderInline({ content: t.source, format: "html", subject: t.subject, variables: b.variables }).data);
       if (b.content != null || b.html != null || b.mjml != null) {
         const r = renderInline({ ...b, content: b.content ?? b.html ?? b.mjml, format: b.format ?? (b.mjml != null ? "mjml" : "html") });
         return r.error ? fail(res, r.error, r.status) : body(res, r.data);
@@ -640,7 +668,7 @@ createServer(async (req, res) => {
     const lim = Number(q.get("limit") || 25), start = Number(q.get("cursor") || 0), out = rows.slice(start, start + lim);
     return body(res, out, { next_cursor: start + lim < rows.length ? String(start + lim) : null });
   }
-  if (p === "/v1/approvals") return body(res, APPROVALS);
+  if (p === "/v1/approvals") return body(res, q.get("status") ? APPROVALS.filter((x) => x.status === q.get("status")) : APPROVALS);
   if (p === "/v1/event-definitions") return body(res, process.env.EMPTY ? [] : [{ name: "signed_up" }, { name: "upgraded" }, { name: "login" }]);
   if ((m = p.match(/^\/v1\/contacts\/([^/]+)\/activity$/))) { const c = CONTACTS.find((x) => x.id === m[1] || x.email === decodeURIComponent(m[1])); return c ? body(res, c.id === "c1" ? ACTIVITY : NO_ACTIVITY) : notFound(res, "contact"); }
   if ((m = p.match(/^\/v1\/contacts\/([^/]+)$/))) { const c = CONTACTS.find((x) => x.id === m[1] || x.email === decodeURIComponent(m[1])); return c ? body(res, c) : notFound(res, "contact"); }

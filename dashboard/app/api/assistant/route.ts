@@ -7,6 +7,7 @@ import { apiKey } from "@/lib/assistant/usage";
 import type { ChatMsg } from "@/lib/assistant/types";
 
 export const dynamic = "force-dynamic";
+const MAX_MESSAGE = 8000;
 
 export async function POST(req: Request) {
   const a = await auth();
@@ -16,6 +17,7 @@ export async function POST(req: Request) {
   try { body = await req.json(); } catch { return json(400, { code: "invalid_request", message: "Expected JSON." }); }
   const history = (Array.isArray(body.messages) ? body.messages : []).filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string").slice(-60);
   if (history.at(-1)?.role !== "user" || !history.at(-1)!.content.trim()) return json(400, { code: "invalid_request", message: "The last message must be from the user." });
+  if (history.at(-1)!.content.length > MAX_MESSAGE) return json(400, { code: "message_too_long", message: `Messages can be at most ${MAX_MESSAGE} characters.`, hint: "Shorten it, or paste long text into a template instead." });
 
   const models = resolveModels(process.env, await allowedModels());
   if (!models.ok) return json(400, models);

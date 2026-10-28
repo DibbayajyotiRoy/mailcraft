@@ -9,10 +9,12 @@ import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogContent } from "@/components/ui/dialog";
 import { cn } from "@/lib/cn";
 import { diffLines, diffStat } from "@/lib/assistant/diff";
+import { goLiveNext } from "@/lib/assistant/errors";
 import type { ApplyResult, Proposal } from "@/lib/assistant/types";
 import type { Card } from "./useAssistant";
+import { hasPlaceholders, VariablesSection } from "./VariablesSection";
 
-const KIND: Record<Proposal["kind"], string> = { template: "Template draft", automation: "Automation draft", automation_state: "Automation", broadcast: "Broadcast", email: "Email", list: "List", contacts: "Contacts" };
+const KIND: Record<Proposal["kind"], string> = { template: "Template draft", automation: "Automation draft", automation_state: "Automation", broadcast: "Broadcast", email: "Email", list: "List", contacts: "Contacts", go_live: "Go-live approval" };
 const PILL: Record<ApplyResult["status"], [string, "ok" | "info" | "warn" | "bad"]> = { completed: ["Completed", "ok"], queued: ["Queued", "info"], pending_approval: ["Waiting for approval", "warn"], failed: ["Failed", "bad"] };
 const FOLD = 14;
 
@@ -67,14 +69,14 @@ export function TaskRow({ r }: { r: ApplyResult }) {
         <p className="font-medium">{r.label}</p>
         {r.detail && <p className="text-muted">{r.detail}</p>}
         {r.error && <p className="text-bad">{r.error.message}{r.error.hint ? ` ${r.error.hint}` : ""}</p>}
-        {r.href && <Link href={r.href} className="mt-1 inline-block text-accent underline underline-offset-2">Open</Link>}
+        {r.href && <Link href={r.href} className="mt-1 inline-block text-accent underline underline-offset-2">{r.hrefLabel ?? "Open"}</Link>}
       </div>
       <Badge tone={tone} size="sm">{label}</Badge>
     </div>
   );
 }
 
-export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; onApply: (confirmed: boolean) => void; onCancel: () => void; onEdit: () => void }) {
+export function ProposalCard({ card, onApply, onCancel, onEdit, onTweak }: { card: Card; onApply: (confirmed: boolean) => void; onCancel: () => void; onEdit: () => void; onTweak?: (draft: string) => void }) {
   const { proposal: p, state, result } = card;
   const [ask, setAsk] = useState(false), [, tick] = useState(0);
   // Apply must disable on time, not at the next unrelated render.
@@ -84,8 +86,10 @@ export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; 
     const t = setTimeout(() => tick((n) => n + 1), Math.min(ms + 50, 2 ** 31 - 1));
     return () => clearTimeout(t);
   }, [state, p.expires_at]);
-  const expired = state === "pending" && Date.now() > p.expires_at;
+  const waiting = !!p.waiting && state === "pending"; // a go-live request is already in Approvals: nothing to apply, so no buttons and no expiry
+  const expired = state === "pending" && !waiting && Date.now() > p.expires_at;
   const open = state === "pending" || state === "applying";
+  const gap = hasPlaceholders(p.variables) && state === "pending", gapId = useId(); // Apply stays focusable but inert while a stand-in value is left, and points at the reason
   return (
     <section aria-label={p.title} className="overflow-hidden rounded-lg border border-border bg-surface">
       <div className="space-y-3 p-3">
@@ -112,18 +116,22 @@ export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; 
             {p.lint.slice(0, 6).map((l, i) => <li key={i} className="flex items-start gap-2"><Badge size="sm" tone={l.sev === "error" ? "bad" : "warn"}>{l.sev}</Badge><span className="min-w-0 break-words">{l.msg}</span></li>)}
           </ul>
         )}
+        {p.variables && p.variables.length > 0 && <VariablesSection variables={p.variables} onTweak={state === "pending" ? onTweak : undefined} gapId={gapId} showGap={state === "pending"} />}
         {p.diff && <Diff d={p.diff} />}
         {p.preview && <Preview p={p.preview} />}
       </div>
       <footer className="border-t border-border bg-bg px-3 py-2.5">
-        {open && !expired && (
+        {waiting && <TaskRow r={{ status: "pending_approval", label: "A go-live request is already waiting", detail: goLiveNext(p.pending?.kind), href: "/approvals", hrefLabel: "Open Approvals" }} />}
+        {open && !expired && !waiting && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button loading={state === "applying"} onClick={() => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
+            <Button loading={state === "applying"} aria-disabled={gap || undefined} aria-describedby={gap ? gapId : undefined} className={gap ? "cursor-not-allowed opacity-50" : undefined} onClick={gap ? undefined : () => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
             <Button variant="secondary" disabled={state === "applying"} onClick={onEdit}>Edit</Button>
             <Button variant="ghost" disabled={state === "applying"} onClick={onCancel}>Cancel</Button>
             <span className="ml-auto text-xs text-muted">Nothing changes until you apply.</span>
           </div>
         )}
+        {open && !expired && !waiting && p.variables && <p className="mt-2 text-xs text-muted">Want changes? Just say what to change.</p>}
+        {state === "replaced" && <p className="text-sm text-muted">Replaced by a newer proposal.</p>}
         {expired && <p className="text-sm text-muted">This proposal expired. Ask the assistant to prepare it again.</p>}
         {state === "cancelled" && <p className="text-sm text-muted">Cancelled. Nothing was changed.</p>}
         {(state === "applied" || state === "failed") && result && <TaskRow r={result} />}

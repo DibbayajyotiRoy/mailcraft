@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApplyResult, ChatEvent, ChatMsg, DoneStats, Phase, Proposal } from "@/lib/assistant/types";
 
 export type Step = { id: string; name: string; label: string; status: "running" | "done" | "error"; detail?: string };
-export type CardState = "pending" | "applying" | "applied" | "failed" | "cancelled";
+export type CardState = "pending" | "applying" | "applied" | "failed" | "cancelled" | "replaced";
 export type Card = { proposal: Proposal; state: CardState; result?: ApplyResult };
 export type Msg = {
   id: string; role: "user" | "assistant"; text: string; steps: Step[]; cards: Card[];
@@ -29,12 +29,23 @@ export function reduce(m: Msg, e: ChatEvent): Msg {
   }
 }
 
+/** A newer proposal with the same `key` (the assistant re-proposed after "make it friendlier") replaces the older pending cards. */
+export function supersede(msgs: Msg[], p: Proposal): Msg[] {
+  if (!p.key || !msgs.some((m) => m.cards.some((c) => c.state === "pending" && c.proposal.key === p.key && c.proposal.id !== p.id))) return msgs;
+  return msgs.map((m) => ({ ...m, cards: m.cards.map((c) => (c.state === "pending" && c.proposal.key === p.key && c.proposal.id !== p.id ? { ...c, state: "replaced" as const } : c)) }));
+}
+
 /** What the server sees of earlier turns: text plus a one-line note of tools used and changes applied (never raw tool output). */
 export function toHistory(msgs: Msg[]): ChatMsg[] {
   return msgs.map((m) => {
     const notes = [
       m.steps.length ? `tools: ${m.steps.map((s) => s.label).slice(0, 6).join("; ")}` : "",
-      ...m.cards.map((c) => (c.state === "applied" ? `applied: ${c.proposal.title}` : c.state === "cancelled" ? `cancelled: ${c.proposal.title}` : c.state === "pending" ? `proposed (not applied): ${c.proposal.title}` : "")),
+      ...m.cards.map((c) => {
+        const t = c.proposal.title, redo = c.proposal.pending ? ` (once a person approves go-live, prepare it again: ${c.proposal.pending.what})` : "";
+        // names only, never values: those can come from contact records and must not sit unwrapped in an assistant-role message
+        const vars = c.proposal.variables?.length ? ` [variables: ${c.proposal.variables.map((v) => v.name + (v.placeholder ? " (needs a value)" : "")).join(", ").slice(0, 200)}]` : "";
+        return c.state === "applied" ? `applied: ${t}${redo}` : c.state === "cancelled" ? `cancelled: ${t}` : c.state === "replaced" ? `replaced by a newer proposal: ${t}` : c.state === "pending" ? `proposed (not applied): ${t}${redo}${vars}` : "";
+      }),
     ].filter(Boolean).join("; ");
     return { role: m.role, content: m.text, ...(notes && { note: notes }) };
   });
@@ -84,7 +95,8 @@ export function useAssistant(path: string, onApplied?: () => void) {
           if (!line) continue;
           let e: ChatEvent;
           try { e = JSON.parse(line); } catch { continue; }
-          if (e.type === "phase") setPhase({ phase: e.phase, label: e.label }); else patch(bot.id, (m) => reduce(m, e));
+          if (e.type === "phase") setPhase({ phase: e.phase, label: e.label });
+          else { patch(bot.id, (m) => reduce(m, e)); if (e.type === "proposal") setMsgs((all) => supersede(all, e.proposal)); }
         }
       }
     } catch (e) {

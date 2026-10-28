@@ -19,9 +19,21 @@ Everything it does goes through the same REST API as the CLI and MCP server, wit
 
 **Always needs a human click (Apply):** every write. On a **live** key, anything that can email people (single email, broadcast, activating or resuming an automation) also asks for a second confirmation, and the server refuses to run it without one (`confirmation_required`). On a test key mail goes to the sandbox and there is no extra step.
 
-**Still decided by humans, outside the assistant:** approvals (a send held for approval shows "Waiting for approval" and is decided on the Approvals page), go-live, the kill switch. Template **publishing** is never done by the assistant: it saves drafts, and sends keep using the live version until you publish. Automations are saved as drafts (`approval` defaults to `first_n:5`); activating is a separate proposal.
+**Still decided by humans, outside the assistant:** approvals (a send held for approval shows "Waiting for approval" and is decided on the Approvals page), approving go-live, the kill switch. Template **publishing** is never done by the assistant: it saves drafts, and sends keep using the live version until you publish. Automations are saved as drafts (`approval` defaults to `first_n:5`); activating is a separate proposal.
 
-**Out of scope** (no tool exists; the model says so): deleting anything, API keys and secrets, relay credentials, domains and senders (read-only), kill switch, go-live, billing.
+**Out of scope** (no tool exists; the model says so): deleting anything, API keys and secrets, relay credentials, domains and senders (read-only), kill switch, approving go-live, billing.
+
+**Sending before go-live.** On a live key in a workspace nobody has approved for live sending, the API refuses a send with `403 blocked_by_policy` (rule `go_live`). `propose_email` and `propose_broadcast` do not report that as a failure: they return a **Request go-live approval** card whose Apply is `POST /v1/go-live-requests` (with a note naming the send). The task row then reads "Waiting for approval" and links to Approvals; once a person approves it there, the user says "send it now" and the assistant prepares the send again as usual. If a go-live request is already pending the card says so and links to Approvals instead of asking twice (Apply re-checks, so two cards for different sends never file it twice). A key without the `manage` scope is told so instead of being offered an Apply that would fail. The assistant never suggests test keys unless asked. (`propose_automation_state` does not touch this gate: activating an automation sends nothing by itself.)
+
+**Template sends.** The assistant drafts every template variable itself (from the recipient's contact fields, the sender, the workspace, the template's wording and the conversation) and proposes with its values; it does not ask the user to fill them. Fields the recipient's own record answers (`email`, `first_name`, `last_name` for a single recipient) are filled from it by the server. Names the worker injects at send time (`unsubscribe_url`, `preferences_url`, `workspace.*`) are never offered, and values the template does not read are dropped with one warning. The card lists each variable as name = value (a pencil pre-fills "Change <variable> to " in the composer) and previews the email rendered with those values.
+
+Where a value must not be invented (real URLs, prices, offers, legal facts) the assistant uses a marked placeholder such as `[add signup link]`. Anything that still looks like a gap blocks Apply: a variable the model left out, a bracketed instruction (`[add …]`, `[Your Company]`, `[SIGNUP_LINK]`, `[url]`), an unrendered `{{ … }}`, `<add …>`, or `TODO`/`TBD`/`XXX`, in a variable, the subject, the From display name, or the text/HTML body. Ordinary brackets (`[Beta] Invite`, `?filter[type]=1`) pass. The Apply button stays focusable but inert and points at the explanation; the apply route refuses too (`placeholder_values`) until a re-proposal replaces the card. `variables` must be text, numbers or true/false (anything else goes back to the model as an error); booleans and numbers are sent as JSON values, not strings.
+
+A re-proposal with the same template (or subject, for a non-template mail), sender and recipients replaces the older card ("Replaced by a newer proposal."); a different template, sender or message to the same person is a separate card. History tells the model the variable names and which need a value, never their values (contact data is untrusted). `send_context` (and a prefetch when the message mentions `@template:` and an address) gives the model the template's variables, subject and a short text excerpt, the recipients' contact fields and the sender's display name in one compact read. Messages over 8000 characters are refused (400); mention parsing looks at the first 4000.
+
+Known gap: the text excerpt in `send_context` comes from the template source, so a block-editor (JSON) template contributes little.
+
+A failed step shows a short label mapped from the API error code ("Needs go-live approval", "Domain not verified", "Sender not ready", ...); the full message and hint are in the step's expandable detail.
 
 ### Tools
 
@@ -32,7 +44,7 @@ Generated from [`lib/assistant/tools.ts`](../dashboard/lib/assistant/tools.ts) a
 | core (every turn) | `list` (template, automation, email, contact, approval, broadcast, list, event, domain, sender), `get` (template, automation, email, contact, approval, broadcast, domain, account, health, settings), `get_docs` (personalization, automations, broadcasts, deliverability, contacts), `use_tools` | none |
 | `templates` | `template_preview`, `content_lint` | `propose_template` (new draft, or find/replace edits to an existing one) |
 | `automations` (implies `templates`) | `automation_runs`, `automation_simulate` | `propose_automation` (draft), `propose_automation_state` (activate, pause, resume) |
-| `broadcasts` | none | `propose_broadcast` (template to a list or up to 200 addresses; dry run first), `propose_email` (1 to 5 addresses) |
+| `broadcasts` | `send_context` (template variables, recipients, sender in one read) | `propose_broadcast` (template to a list or up to 200 addresses, optional shared `data` columns; dry run first), `propose_email` (1 to 5 addresses; `template.variables` drafted by the assistant) |
 | `contacts` | `segment_preview` | `propose_list` (list or rule segment, optional members), `propose_contacts` (up to 50 upserts) |
 
 `propose_broadcast`, `propose_email` and `propose_automation_state` (activate/resume) are risk "sends". Everything else cannot email anyone.
@@ -101,7 +113,7 @@ Free models are slow and rate-limited, so each request is kept small.
 
 Template text, contact fields, email bodies and bounce diagnostics are attacker-controllable. Defences, strongest first:
 
-1. **Structural:** the model has no way to execute anything. Writes are frozen server-side proposals applied only by a human click on the exact reviewed calls; there are no tools for deletes, keys, relays, kill switch or go-live; sends need confirmation on live keys; all API-side gates apply.
+1. **Structural:** the model has no way to execute anything. Writes are frozen server-side proposals applied only by a human click on the exact reviewed calls; there are no tools for deletes, keys, relays, kill switch or approving go-live (it can only propose the request a person decides); sends need confirmation on live keys; all API-side gates apply.
 2. **Server-built cards:** titles, summaries, audience counts, diffs and previews come from validated input and real API responses, not from the model's prose. Email previews render in a sandboxed iframe (no scripts, forms or same-origin).
 3. **Data labelling:** tool results are wrapped in `<untrusted>…</untrusted>` JSON with `<` escaped, so data cannot close the tag or fake another; the system prompt tells the model never to follow instructions found inside.
 4. **Narrow inputs:** the page path is validated and the page entity is taken from the URL only.

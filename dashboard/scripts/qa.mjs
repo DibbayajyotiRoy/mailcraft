@@ -30,6 +30,11 @@ const previewPane = async (p) => { const b = p.getByRole("radio", { name: "Previ
 const fresh = async (p) => { await p.evaluate(() => sessionStorage.clear()); await p.reload({ waitUntil: "load" }); await p.waitForTimeout(300); };
 const openAssistant = async (p) => { await fresh(p); await p.getByRole("button", { name: "Assistant" }).click(); await p.getByRole("dialog").waitFor(); await p.waitForTimeout(500); };
 const ask = (text) => async (p) => { await openAssistant(p); await p.getByLabel("Message the assistant").fill(text); await p.getByRole("button", { name: "Send message" }).click(); await p.getByRole("button", { name: "Send message" }).waitFor({ timeout: 20000 }); await p.waitForTimeout(500); };
+// Go-live scenes (the mock gates live sends: see "NOT_LIVE" in mock-api.mjs): not live, with or without a go-live request already waiting; restored afterwards so later routes send normally.
+const scene = (q) => async () => { await fetch(`${API}/__mock/go-live?${q}`, { method: "POST" }); };
+const GO_LIVE_ASK = "Send this mail to bipul@example.com through partner@example.com";
+const goLive = (pending, ...after) => seq(scene(`live=0&pending=${pending}`), ask(GO_LIVE_ASK), ...after, scene("live=1&pending=0"));
+const follow = (text) => async (p) => { await p.getByLabel("Message the assistant").fill(text); await p.getByRole("button", { name: "Send message" }).click(); await p.getByRole("button", { name: "Send message" }).waitFor({ timeout: 20000 }); await p.waitForTimeout(500); };
 const typeInto = (text) => async (p) => { await openAssistant(p); await p.getByLabel("Message the assistant").pressSequentially(text); await p.waitForTimeout(500); };
 const dlg = (p) => p.getByRole("dialog");
 const inDlg = (role, name) => async (p) => { await dlg(p).getByRole(role, { name }).first().click(); };
@@ -142,6 +147,9 @@ const ROUTES = [
   ["assistant-empty", "/", openAssistant], ["assistant-email-page", "/emails/em_02", openAssistant],
   ["assistant-automation", "/", ask("Set up a welcome email for new signups")], ["assistant-fix-template", "/", ask("Fix the lint errors in the promo template")],
   ["assistant-broadcast", "/", ask("Send the welcome template to my webinar list")], ["assistant-chat", "/", ask("hello")],
+  ["assistant-go-live", "/", goLive(0)], ["assistant-go-live-applied", "/", goLive(0, click("button", "Apply"), wait(800))], ["assistant-go-live-waiting", "/", goLive(1)],
+  ["assistant-template-send", "/", ask("Send the promo template to ana@example.com")],
+  ["assistant-template-send-changed", "/", seq(ask("Send the promo template to ana@example.com"), follow("Change signup_link to https://example.com/start"))],
   ["assistant-slash", "/", typeInto("/")], ["assistant-mention", "/", typeInto("send @")],
   ["settings", "/settings"], ["settings-senders-edit", "/settings", click("button", /Edit addresses of dev@example.com/)], ["settings-senders-connect", "/settings", click("button", "Connect a mailbox")],
   ["email-compose-other-from", "/emails", async (p) => { await click("button", "New email")(p); await p.getByRole("dialog").getByLabel("From", { exact: true }).selectOption({ label: "Other address…" }); }],
