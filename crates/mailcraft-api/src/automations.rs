@@ -1,4 +1,5 @@
-//! `/v1/automations`: install (validated `Definition`), list/get, publish (activate), pause/resume, runs.
+//! `/v1/automations`: install (validated `Definition`), list/get, publish (activate), pause/resume,
+//! archive/unarchive, test run, runs (+ one run's step log), and the known event names.
 //! Execution belongs to the automations `Engine` the engine worker ticks; these routes only edit state.
 use std::sync::Arc;
 
@@ -8,7 +9,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use chrono::{DateTime, Utc};
-use mailcraft_automations::{Definition, Engine, EngineConfig, NoopPersonalizer};
+use mailcraft_automations::{ContactInput, Definition, Engine, EngineConfig, NoopPersonalizer};
 use mailcraft_core::auth::Scope;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -18,7 +19,8 @@ use crate::{
     audit::{self, Actor, Entry},
     auth::Auth,
     error::{
-        envelope, envelope_list, invalid, json_or_default, not_found, ApiError, ApiJson, ApiResult,
+        envelope, envelope_list, err, invalid, json_or_default, not_found, ApiError, ApiJson,
+        ApiResult,
     },
     page,
     services::ae,
@@ -130,7 +132,7 @@ pub async fn list(State(st): State<AppState>, auth: Auth, Query(q): Query<ListQ>
     let (at, after) = page::decode(q.cursor.as_deref())?;
     let lim = page::limit(q.limit);
     let mut rows: Vec<AutomationView> = sqlx::query_as(&format!(
-        "SELECT {COLS} FROM automations WHERE workspace_id = $1 AND ($4::text IS NULL OR status = $4) AND (created_at, id::text) < ($2, $3) \
+        "SELECT {COLS} FROM automations WHERE workspace_id = $1 AND (($4::text IS NULL AND status <> 'archived') OR status = $4) AND (created_at, id::text) < ($2, $3) \
          ORDER BY created_at DESC, id::text DESC LIMIT $5"
     ))
     .bind(auth.0.workspace_id)
@@ -241,6 +243,13 @@ pub async fn publish(
     let b: PublishBody = json_or_default(&body)?;
     let ws = auth.0.workspace_id;
     let a = find(&st, ws, &id).await?;
+    if a.status == "archived" {
+        return Err(err(
+            "invalid_state",
+            409,
+            "automation is `archived`; unarchive it before publishing",
+        ));
+    }
     let engine = Engine::new(
         st.db.clone(),
         Arc::new(NoopPersonalizer),
@@ -321,6 +330,110 @@ pub async fn resume(State(st): State<AppState>, auth: Auth, Path(id): Path<Strin
     set_status(&st, &auth, &id, &["paused"], "active", "automation.resume").await
 }
 
+/// Archived automations leave the default list and never run; only a draft or paused one can be archived.
+pub async fn archive(State(st): State<AppState>, auth: Auth, Path(id): Path<String>) -> ApiResult {
+    set_status(
+        &st,
+        &auth,
+        &id,
+        &["draft", "paused"],
+        "archived",
+        "automation.archive",
+    )
+    .await
+}
+
+/// Back to `draft`: publish it again to go live.
+pub async fn unarchive(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+) -> ApiResult {
+    set_status(
+        &st,
+        &auth,
+        &id,
+        &["archived"],
+        "draft",
+        "automation.unarchive",
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TestRunBody {
+    pub email: String,
+    #[serde(default)]
+    pub first_name: Option<String>,
+    /// Properties of the simulated trigger event (`event.*` in filters, `$event.x` in variables).
+    #[serde(default)]
+    pub properties: Option<Value>,
+    #[serde(default)]
+    pub contact_properties: Option<Value>,
+}
+
+/// Start a run for one contact now, whatever the automation's status, skipping its entry rule. A test
+/// key keeps every email in the sandbox; a live key sends for real once the workspace is live.
+pub async fn test_run(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+    ApiJson(b): ApiJson<TestRunBody>,
+) -> ApiResult {
+    if auth.require(Scope::Send).is_err() {
+        auth.require(Scope::Manage)?;
+    }
+    let ws = auth.0.workspace_id;
+    let a = find(&st, ws, &id).await?;
+    if a.status == "archived" {
+        return Err(err(
+            "invalid_state",
+            409,
+            "automation is `archived`; unarchive it to test it",
+        ));
+    }
+    let engine = Engine::new(
+        st.db.clone(),
+        Arc::new(NoopPersonalizer),
+        EngineConfig::default(),
+    );
+    let env = auth.0.env.as_str();
+    let contact = ContactInput {
+        email: b.email,
+        first_name: b.first_name,
+        properties: b.contact_properties,
+        ..Default::default()
+    };
+    let (run_id, contact_id) = engine
+        .start_test_run(
+            ws,
+            a.id,
+            contact.clone(),
+            b.properties.unwrap_or(Value::Null),
+            env,
+            Utc::now(),
+        )
+        .await
+        .map_err(|e| ApiError(ae(e)))?;
+    audit::append_standalone(
+        &st.db,
+        ws,
+        Actor::Key(&auth.0),
+        Entry {
+            action: "automation.test_run",
+            args: json!({"automation_id": a.id, "run_id": run_id, "email": contact.email, "env": env}),
+            decision: "auto",
+            approval_id: None,
+        },
+    )
+    .await?;
+    Ok(envelope(
+        StatusCode::ACCEPTED,
+        json!({"run_id": run_id, "automation_id": a.id, "contact_id": contact_id, "env": env, "status": "started"}),
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct RunsQ {
     limit: Option<u32>,
@@ -333,12 +446,20 @@ struct RunView {
     id: Uuid,
     version: i32,
     contact_id: Uuid,
+    contact_email: String,
     state: String,
     current_step: Option<String>,
     next_wake_at: Option<DateTime<Utc>>,
     started_at: DateTime<Utc>,
     ended_at: Option<DateTime<Utc>>,
+    /// Why an `exited` run left (`goal`, `suppressed`, `topic_opt_out`, `exit_step`, ...).
+    exit_reason: Option<String>,
+    /// Started by a dashboard/API test run.
+    test: bool,
 }
+
+const RUN_COLS: &str = "r.id, r.version, r.contact_id, c.email AS contact_email, r.state, r.current_step, r.next_wake_at, \
+    r.started_at, r.ended_at, r.context->>'exit_reason' AS exit_reason, (r.context->'test') IS NOT NULL AS test";
 
 pub async fn runs(
     State(st): State<AppState>,
@@ -358,11 +479,11 @@ pub async fn runs(
     }
     let (at, after) = page::decode(q.cursor.as_deref())?;
     let lim = page::limit(q.limit);
-    let mut rows: Vec<RunView> = sqlx::query_as(
-        "SELECT id, version, contact_id, state, current_step, next_wake_at, started_at, ended_at FROM automation_runs \
-         WHERE automation_id = $1 AND ($4::text IS NULL OR state = $4) AND (started_at, id::text) < ($2, $3) \
-         ORDER BY started_at DESC, id::text DESC LIMIT $5",
-    )
+    let mut rows: Vec<RunView> = sqlx::query_as(&format!(
+        "SELECT {RUN_COLS} FROM automation_runs r JOIN contacts c ON c.id = r.contact_id \
+         WHERE r.automation_id = $1 AND ($4::text IS NULL OR r.state = $4) AND (r.started_at, r.id::text) < ($2, $3) \
+         ORDER BY r.started_at DESC, r.id::text DESC LIMIT $5"
+    ))
     .bind(a.id)
     .bind(at)
     .bind(after)
@@ -376,4 +497,55 @@ pub async fn runs(
         page::encode(l.started_at, l.id)
     });
     Ok(envelope_list(rows, next))
+}
+
+/// One run with its step log (`step_key`, what the engine decided, when): why an email was held, a wait
+/// timed out, the run exited.
+pub async fn run_get(
+    State(st): State<AppState>,
+    auth: Auth,
+    Path((id, run)): Path<(String, String)>,
+) -> ApiResult {
+    auth.require(Scope::Read)?;
+    let a = find(&st, auth.0.workspace_id, &id).await?;
+    let run = Uuid::parse_str(&run).map_err(|_| not_found("run"))?;
+    let r: RunView = sqlx::query_as(&format!(
+        "SELECT {RUN_COLS} FROM automation_runs r JOIN contacts c ON c.id = r.contact_id WHERE r.id = $1 AND r.automation_id = $2"
+    ))
+    .bind(run)
+    .bind(a.id)
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or_else(|| not_found("run"))?;
+    let steps: Vec<(String, Value, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT step_key, result, at FROM automation_run_steps WHERE run_id = $1 ORDER BY id",
+    )
+    .bind(run)
+    .fetch_all(&st.db)
+    .await?;
+    let mut out = serde_json::to_value(&r).unwrap_or_default();
+    out["steps"] = steps
+        .into_iter()
+        .map(|(key, result, at)| json!({"step_key": key, "result": result, "at": at}))
+        .collect();
+    Ok(envelope(StatusCode::OK, out))
+}
+
+/// Event names this workspace has tracked in the last 90 days, newest first (trigger suggestions).
+pub async fn event_names(State(st): State<AppState>, auth: Auth) -> ApiResult {
+    auth.require(Scope::Read)?;
+    let rows: Vec<(String, i64, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT name, count(*), max(received_at) FROM track_events \
+         WHERE workspace_id = $1 AND received_at > now() - interval '90 days' \
+         GROUP BY name ORDER BY max(received_at) DESC LIMIT 100",
+    )
+    .bind(auth.0.workspace_id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(envelope(
+        StatusCode::OK,
+        rows.into_iter()
+            .map(|(name, count, last_seen_at)| json!({"name": name, "count": count, "last_seen_at": last_seen_at}))
+            .collect::<Vec<_>>(),
+    ))
 }

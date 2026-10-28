@@ -1196,3 +1196,162 @@ async fn contact_timezone_column_filled_from_properties_and_validated() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn a_send_step_may_name_its_template_by_id_or_alias() {
+    let f = fx!();
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM templates WHERE alias = 'plain'")
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    let steps = |tpl: &str| json!([{"key":"t","type":"trigger","config":{"event":"go"},"next":"m"}, send("m", tpl, "product", None)]);
+    // an unknown id is refused at install, like an unknown alias
+    let e = install(
+        &f.pool,
+        f.ws,
+        &def("bad", steps(&Uuid::new_v4().to_string()), json!({})),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("does not exist"), "{e}");
+    // the id installs, and the engine resolves it at send time
+    install(
+        &f.pool,
+        f.ws,
+        &def("by-id", steps(&id.to_string()), json!({})),
+    )
+    .await
+    .unwrap();
+    f.engine
+        .ingest(f.ws, ev("go", "id@x.com", json!({}), None), t0())
+        .await
+        .unwrap();
+    f.engine.tick(t0()).await.unwrap();
+    assert_eq!(
+        emails(&f.pool, "id@x.com").await,
+        vec![("Hello".into(), "queued".into(), "marketing".into())]
+    );
+}
+
+#[tokio::test]
+async fn test_run_starts_on_a_draft_and_follows_the_key_env() {
+    let f = fx!();
+    let steps = json!([
+        {"key":"t","type":"trigger","config":{"event":"go"},"next":"c"},
+        {"key":"c","type":"condition","config":{"rule":{"field":"event.plan","op":"eq","value":"pro"}},"next":{"true":"m","false":"end"}},
+        send("m", "plain", "product", None),
+        {"key":"end","type":"exit"}]);
+    let (auto, _) = install(
+        &f.pool,
+        f.ws,
+        &def(
+            "drafty",
+            steps,
+            json!({"status":"draft","approval":"first_n:5"}),
+        ),
+    )
+    .await
+    .unwrap();
+    let input = |email: &str| ContactInput {
+        email: email.into(),
+        ..Default::default()
+    };
+
+    // a real event does not enter a draft
+    f.engine
+        .ingest(
+            f.ws,
+            ev("go", "real@x.com", json!({"plan":"pro"}), None),
+            t0(),
+        )
+        .await
+        .unwrap();
+    f.engine.tick(t0()).await.unwrap();
+    assert!(emails(&f.pool, "real@x.com").await.is_empty());
+
+    // a test-key run sends from the draft, into the sandbox, past the approval policy and frequency caps
+    for _ in 0..2 {
+        f.engine
+            .start_test_run(
+                f.ws,
+                auto,
+                input("t@x.com"),
+                json!({"plan":"pro"}),
+                "test",
+                t0(),
+            )
+            .await
+            .unwrap();
+    }
+    f.engine.tick(t0()).await.unwrap();
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT env, status FROM emails WHERE to_addr = 't@x.com'")
+            .fetch_all(&f.pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, vec![("test".into(), "queued".into()); 2]);
+    let (state, ..) = run_of(&f.pool, auto).await;
+    assert_eq!(state, "completed");
+
+    // event properties drive the branch
+    f.engine
+        .start_test_run(
+            f.ws,
+            auto,
+            input("free@x.com"),
+            json!({"plan":"free"}),
+            "test",
+            t0(),
+        )
+        .await
+        .unwrap();
+    f.engine.tick(t0()).await.unwrap();
+    assert!(emails(&f.pool, "free@x.com").await.is_empty());
+
+    // a live-key run in a live workspace is a real send, so the approval policy still holds it
+    let (run, _) = f
+        .engine
+        .start_test_run(
+            f.ws,
+            auto,
+            input("l@x.com"),
+            json!({"plan":"pro"}),
+            "live",
+            t0(),
+        )
+        .await
+        .unwrap();
+    f.engine.tick(t0()).await.unwrap();
+    let row: (String, String) =
+        sqlx::query_as("SELECT env, status FROM emails WHERE to_addr = 'l@x.com'")
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert_eq!(row, ("live".into(), "pending_approval".into()));
+    let flagged: bool =
+        sqlx::query_scalar("SELECT context ? 'test' FROM automation_runs WHERE id = $1")
+            .bind(run)
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert!(flagged);
+    // the kill switch still stops a test run
+    sqlx::query("UPDATE workspaces SET kill_switch = true")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    f.engine
+        .start_test_run(
+            f.ws,
+            auto,
+            input("k@x.com"),
+            json!({"plan":"pro"}),
+            "test",
+            t0(),
+        )
+        .await
+        .unwrap();
+    f.engine.tick(t0()).await.unwrap();
+    assert!(emails(&f.pool, "k@x.com").await.is_empty());
+}

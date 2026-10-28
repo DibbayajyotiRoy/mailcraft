@@ -60,24 +60,41 @@ const TEMPLATES = [
 ];
 const llm = { version: 1, subject: "Welcome", blocks: [{ type: "heading", text: "Hi" }, { type: "slot", name: "intro", max_len: 240, instructions: "One warm sentence", fallback: "Thanks for signing up." }] };
 
+const stat = (entered, active, completed, exited, failed) => ({ entered, active, completed, exited, failed });
 const AUTOMATIONS = [
-  { id: "a1", name: "welcome", status: "active", trigger: "signed_up", version: 2, entry_rule: "once", approval: "first_n:5", goal: { event: "upgraded" }, steps: [
-    { key: "start", type: "trigger", config: { event: "signed_up", filter: { field: "contact.plan", op: "eq", value: "free" } }, next: "mail" },
-    { key: "mail", type: "send_email", config: { template: "welcome", mode: "llm", from: "hello@example.com", instructions: "Friendly and brief.", custom_instructions: "Never mention pricing." }, next: "wait" },
-    { key: "wait", type: "delay", config: { duration: "2d" }, next: "check" },
-    { key: "check", type: "condition", config: { rule: { and: [{ field: "contact.plan", op: "eq", value: "free" }, { not: { field: "event_count:login", op: "gt", value: 3 } }] } }, next: { yes: "nudge", no: "end" } },
-    { key: "nudge", type: "send_email", config: { template: "winback", mode: "static", subject: "Need a hand?" }, next: "tag" },
-    { key: "tag", type: "update_contact", config: { set: { nudged: true } }, next: "seg" },
-    { key: "seg", type: "add_to_segment", config: { segment: "nudged" }, next: "end" },
-    { key: "end", type: "exit", config: { reason: "flow complete" } }] },
-  { id: "a2", name: "win-back", status: "paused", trigger: "inactive_30d", version: 1, steps: [] },
-  { id: "a3", name: "onboarding-tips", status: "draft", trigger: { event: "signed_up" }, version: 1, steps: [] },
+  { id: "a1", name: "welcome", status: "active", trigger: "signed_up", trigger_event: "signed_up", current_version: 2, entry_rule: "once", approval: "first_n:5", goal: { event: "upgraded" }, caps: {}, created_at: ago(60 * 24 * 9),
+    stats: { start: stat(412, 0, 412, 0, 0), mail: stat(412, 3, 396, 9, 4), wait: stat(396, 21, 375, 0, 0), check: stat(375, 0, 375, 0, 0), nudge: stat(212, 0, 205, 7, 0), tag: stat(205, 0, 205, 0, 0), seg: stat(205, 0, 205, 0, 0), end: stat(163, 0, 163, 0, 0) },
+    steps: [
+      { key: "start", type: "trigger", config: { event: "signed_up", filter: { field: "contact.plan", op: "eq", value: "free" } }, next: "mail" },
+      { key: "mail", type: "send_email", config: { template: "welcome", mode: "llm", from: "hello@example.com", instructions: "Friendly and brief.", custom_instructions: "Never mention pricing." }, next: "wait" },
+      { key: "wait", type: "delay", config: { duration: "2d" }, next: "check" },
+      { key: "check", type: "condition", config: { rule: { and: [{ field: "contact.plan", op: "eq", value: "free" }, { field: "event_count:login", op: "lte", value: 3 }] } }, next: { true: "nudge", false: "end" } },
+      { key: "nudge", type: "send_email", config: { template: "winback", mode: "static", subject: "Need a hand?" }, next: "tag" },
+      { key: "tag", type: "update_contact", config: { set: { nudged: true } }, next: "seg" },
+      { key: "seg", type: "add_to_segment", config: { segment: "nudged" }, next: "end" },
+      { key: "end", type: "exit", config: { reason: "flow complete" } }] },
+  { id: "a2", name: "win-back", status: "paused", trigger: "logged_in", trigger_event: "logged_in", current_version: 3, entry_rule: "always", approval: "never", created_at: ago(60 * 24 * 20), stats: {}, steps: [
+      { key: "trigger", type: "trigger", config: { event: "logged_in" }, next: "quiet" },
+      { key: "quiet", type: "wait_for_event", config: { event: "logged_in", timeout: "14d" }, next: { timeout: "miss" } },
+      { key: "miss", type: "send_email", config: { template: "winback", mode: "static", stream: "marketing" } }] },
+  { id: "a3", name: "onboarding-tips", status: "draft", trigger: { event: "signed_up" }, trigger_event: "signed_up", current_version: 1, entry_rule: "once", approval: "first_n:5", created_at: ago(60 * 5), stats: {}, steps: [] },
+  { id: "a4", name: "old-promo", status: "archived", trigger: "promo_viewed", trigger_event: "promo_viewed", current_version: 1, entry_rule: "once", approval: "first_n:5", created_at: ago(60 * 24 * 90), stats: {}, steps: [
+      { key: "trigger", type: "trigger", config: { event: "promo_viewed" } }] },
 ];
+const listRow = ({ steps, stats, trigger, ...a }) => a;
 const RUNS = [
-  { id: "run_01HZXY0000000000K9QF", contact: "ana@example.com", status: "running", started_at: ago(12), current_step: "wait" },
-  { id: "run_01HZXY1111111111AB12", contact: "ben@example.com", status: "completed", started_at: ago(60 * 5), finished_at: ago(60 * 5 - 3) },
-  { id: "run_01HZXY2222222222CD34", contact: "cy@example.com", status: "failed", started_at: ago(60 * 30), finished_at: ago(60 * 30 - 1) },
+  { id: "run_01HZXY0000000000K9QF", contact_id: "c1", contact_email: "ana@example.com", state: "waiting", started_at: ago(12), current_step: "wait", next_wake_at: ago(-60 * 36), version: 2, test: false, exit_reason: null },
+  { id: "run_01HZXY1111111111AB12", contact_id: "c2", contact_email: "ben@example.com", state: "completed", started_at: ago(60 * 5), ended_at: ago(60 * 5 - 3), version: 2, test: false, exit_reason: null },
+  { id: "run_01HZXY2222222222CD34", contact_id: "c4", contact_email: "cy@example.com", state: "failed", started_at: ago(60 * 30), ended_at: ago(60 * 30 - 1), version: 1, test: true, exit_reason: null },
+  { id: "run_01HZXY3333333333EF56", contact_id: "c1", contact_email: "ana@example.com", state: "exited", started_at: ago(60 * 40), ended_at: ago(60 * 38), version: 1, test: false, exit_reason: "goal" },
 ];
+const runDetail = (r) => ({ ...r, steps: [
+  { step_key: "start", result: {}, at: r.started_at },
+  { step_key: "mail", result: { decision: "enqueued", email_id: "em_01", status: "queued", subject: "Welcome aboard" }, at: ago(11) },
+  ...(r.state === "failed" ? [{ step_key: "wait", result: { decision: "error", error: "step `wait`: `x` is not a duration (use 5m, 2d, ...)", attempt: 1, failed: true }, at: ago(10) }]
+    : [{ step_key: "wait", result: { wake_at: ago(-60 * 36) }, at: ago(11) }]),
+] });
+const EVENT_NAMES = [{ name: "signed_up", count: 1204, last_seen_at: ago(4) }, { name: "logged_in", count: 9841, last_seen_at: ago(1) }, { name: "upgraded", count: 88, last_seen_at: ago(300) }, { name: "invoice_paid", count: 310, last_seen_at: ago(900) }];
 
 const CONTACTS = [
   { id: "c1", email: "ana@example.com", first_name: "Ana", last_name: "Silva", timezone: "Europe/Berlin", created_at: ago(500), properties: { plan: "pro", seats: 4, beta: true, tags: ["vip", "eu"] }, suppressed: false, suppression_reason: null },
@@ -106,12 +123,12 @@ const SEGMENTS = [
   { id: "s3", name: "EU or UK", member_count: 310, filter: { or: [{ field: "properties.country", op: "in", value: ["DE", "FR"] }, { field: "properties.country", op: "eq", value: "GB" }] } },
 ];
 
-const status = { env: "test", name: "Acme", key_prefix: "mc_test_8f3a", scopes: ["read", "send", "manage", "admin"], kill_switch: false, pending_approvals: APPROVALS.length, verified: true };
+const status = { env: "test", live_enabled: false, name: "Acme", key_prefix: "mc_test_8f3a", scopes: ["read", "send", "manage", "admin"], kill_switch: false, pending_approvals: APPROVALS.length, verified: true };
 const settings = { llm_provider: { kind: "openrouter", model: "anthropic/claude-sonnet-4", base_url: null, api_key_set: true }, delivery_path: { kind: "smtp-relay", detail: "postmark via smtp.postmarkapp.com:587" }, default_from: "Acme <hello@mail.example.com>", reply_to: "support@example.com", custom_instructions: "Be brief and friendly." };
 const policy = { default: { send: "needs_approval" }, keys: [{ key_id: "k1", name: "Production sender", policy: { send: "auto" } }] };
 const transports = [{ id: "tr1", kind: "smtp-relay", name: "postmark", label: "production", is_default: true, status: "active" }];
 
-const LISTS = { "/v1/emails": EMAILS, "/v1/approvals": APPROVALS, "/v1/domains": DOMAINS, "/v1/keys": KEYS, "/v1/templates": TEMPLATES, "/v1/automations": AUTOMATIONS, "/v1/contacts": CONTACTS, "/v1/segments": SEGMENTS, "/v1/transports": transports };
+const LISTS = { "/v1/emails": EMAILS, "/v1/approvals": APPROVALS, "/v1/domains": DOMAINS, "/v1/keys": KEYS, "/v1/templates": TEMPLATES, "/v1/contacts": CONTACTS, "/v1/segments": SEGMENTS, "/v1/transports": transports };
 
 const body = (res, data, extra = {}, code = 200) => { res.statusCode = code; res.end(JSON.stringify({ ok: true, data, ...extra })); };
 const fail = (res, e, code) => { res.statusCode = code; res.end(JSON.stringify({ ok: false, error: e })); };
@@ -131,6 +148,28 @@ createServer((req, res) => {
       });
     }
     if (p === "/v1/events") return body(res, { event_id: "ev9", duplicate: false, triggered_automations: [{ id: "a1", run_id: "run_9" }] }, {}, 202);
+    if (p === "/v1/automations") {
+      let raw = ""; req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const def = JSON.parse(raw || "{}"), bad = (def.steps ?? []).find((s) => s.config?.template === "missing");
+        if (bad) return fail(res, { code: "invalid_request", message: `automation \`${def.name}\`: step \`${bad.key}\`: template \`missing\` does not exist or has no published version`, hint: "Publish the template first, or pick another." }, 422);
+        const id = "a_" + (AUTOMATIONS.length + 1), old = AUTOMATIONS.find((a) => a.name === def.name);
+        if (old) { old.steps = def.steps; old.current_version += 1; return body(res, { id: old.id, name: old.name, version: old.current_version, status: old.status, trigger: old.trigger_event, steps: def.steps }, {}, 201); }
+        AUTOMATIONS.push({ id, name: def.name, status: "draft", trigger: def.steps?.[0]?.config?.event, trigger_event: def.steps?.[0]?.config?.event ?? "", current_version: 1, entry_rule: def.entry_rule, approval: def.approval, stats: {}, steps: def.steps, created_at: ago(0) });
+        body(res, { id, name: def.name, version: 1, status: "draft", trigger: def.steps?.[0]?.config?.event, steps: def.steps }, {}, 201);
+      });
+      return;
+    }
+    if ((m = p.match(/^\/v1\/automations\/([^/]+)\/(publish|pause|resume|archive|unarchive)$/))) {
+      const a = AUTOMATIONS.find((x) => x.id === m[1] || x.name === m[1]); if (!a) return notFound(res, "automation");
+      a.status = { publish: "active", pause: "paused", resume: "active", archive: "archived", unarchive: "draft" }[m[2]];
+      return body(res, { id: a.id, name: a.name, status: a.status });
+    }
+    if ((m = p.match(/^\/v1\/automations\/([^/]+)\/test$/))) {
+      let raw = ""; req.on("data", (c) => (raw += c));
+      req.on("end", () => { const b = JSON.parse(raw || "{}"); if (b.email === "nobody") return fail(res, { code: "invalid_request", message: "`nobody` is not a valid email address", hint: "Use name@domain.com" }, 422); body(res, { run_id: "run_test_" + Date.now(), automation_id: m[1], env: "test", status: "started" }, {}, 202); });
+      return;
+    }
     if ((m = p.match(/^\/v1\/templates\/([^/]+)\/preview$/))) {
       const t = TEMPLATES.find((x) => x.id === m[1] || x.alias === m[1]);
       return body(res, { subject: t?.subject, html: html(t?.name ?? "Template"), text: "", lint: t?.id === "t1" ? [] : [{ rule: "missing-alt", severity: "warning", message: "Image has no alt text", path: "blocks[2]" }, { rule: "no-unsubscribe", severity: "error", message: "Marketing email needs an unsubscribe link", path: "footer" }] });
@@ -146,6 +185,8 @@ createServer((req, res) => {
     const series = process.env.EMPTY ? [] : Array.from({ length: n }, (_, i) => { const sent = 700 + ((i * 137) % 9) * 60 + i * 20; return { date: day(n - 1 - i), sent, delivered: Math.round(sent * 0.985), bounced: Math.round(sent * 0.011), complained: i % 4 === 0 ? 1 : 0 }; });
     return body(res, { totals: { sent: 12408, delivered: 12301, bounced: 31, complained: 2 }, series });
   }
+  if (p === "/v1/automations") { if (process.env.EMPTY) return body(res, []); const st = q.get("status"); return body(res, AUTOMATIONS.filter((a) => (st ? a.status === st : a.status !== "archived")).map(listRow)); }
+  if (p === "/v1/events/names") return body(res, process.env.EMPTY ? [] : EVENT_NAMES);
   if (process.env.EMPTY && LISTS[p]) return body(res, []);
   if (p === "/v1/emails") {
     let rows = EMAILS; const s = q.get("status"); if (s) rows = rows.filter((e) => e.status === s);
@@ -161,6 +202,7 @@ createServer((req, res) => {
   if ((m = p.match(/^\/v1\/emails\/([^/]+)$/))) { const e = EMAILS.find((x) => x.id === m[1]); return e ? body(res, e) : notFound(res, "email"); }
   if ((m = p.match(/^\/v1\/templates\/([^/]+)\/export$/))) return body(res, { content: q.get("format") === "json" ? JSON.stringify(llm, null, 2) : html("Export") });
   if ((m = p.match(/^\/v1\/templates\/([^/]+)$/))) { const t = TEMPLATES.find((x) => x.id === m[1] || x.alias === m[1]); return t ? body(res, t.alias === "welcome" ? { ...t, content: llm } : t) : notFound(res, "template"); }
+  if ((m = p.match(/^\/v1\/automations\/([^/]+)\/runs\/([^/]+)$/))) { const r = RUNS.find((x) => x.id === m[2]) ?? (m[2].startsWith("run_test") ? { ...RUNS[0], id: m[2], contact_email: "you@example.com", test: true, current_step: "wait", started_at: ago(0.1) } : null); return r ? body(res, runDetail(r)) : notFound(res, "run"); }
   if ((m = p.match(/^\/v1\/automations\/([^/]+)\/runs$/))) return body(res, m[1] === "a1" ? RUNS : []);
   if ((m = p.match(/^\/v1\/automations\/([^/]+)$/))) { const a = AUTOMATIONS.find((x) => x.id === m[1]); return a ? body(res, a) : notFound(res, "automation"); }
   body(res, []);

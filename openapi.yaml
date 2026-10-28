@@ -880,8 +880,8 @@ paths:
   /v1/automations:
     post:
       operationId: automation_create
-      summary: Install (validate and store) an automation as a new draft version (scope manage)
-      description: Body is a `Definition` (`steps[]` begins with a `trigger` step); a top-level `trigger` (event name or trigger config) is accepted and becomes that step.
+      summary: Install (validate and store) an automation as a new version (scope manage)
+      description: Body is a `Definition` (`steps[]` begins with a `trigger` step); a top-level `trigger` (event name or trigger config) is accepted and becomes that step. A `send_email` step's `config.template` is a published template's alias or id. A new name creates a `draft`. An existing name (names are the key, so this is also how you edit) stores version N+1 and leaves the status alone; if it is `active`, new entries run the new version at once while runs already in flight finish on their own version.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AutomationDefinition" } } } }
       responses:
@@ -893,7 +893,7 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
         - { name: cursor, in: query, schema: { type: string } }
-        - { name: status, in: query, schema: { type: string, enum: [draft, active, paused] } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, paused, archived] }, description: "archived automations are hidden unless asked for" }
       responses:
         "200": { description: page of automations }
   /v1/automations/{id}:
@@ -927,10 +927,53 @@ paths:
       responses:
         "200": { description: active }
         "409": { $ref: "#/components/responses/Error" }
+  /v1/automations/{id}/archive:
+    post:
+      operationId: automation_archive
+      summary: Archive a draft or paused automation (409 `invalid_state` otherwise; scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: archived }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/automations/{id}/unarchive:
+    post:
+      operationId: automation_unarchive
+      summary: Bring an archived automation back as a draft (409 `invalid_state` otherwise; scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: draft }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/automations/{id}/test:
+    post:
+      operationId: automation_test_run
+      summary: Start a run for one contact now, whatever the status, skipping the entry rule (scope send or manage)
+      description: The contact is created if new. A test key keeps every email in the sandbox (nothing is delivered); a live key sends for real once the workspace is live, and the kill switch, suppressions, topic opt-outs and the approval policy still apply. The worker advances the run within about a second; poll `GET /v1/automations/{id}/runs/{run}`.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email], additionalProperties: false, properties: { email: { type: string, format: email }, first_name: { type: string }, properties: { type: object, description: "properties of the simulated trigger event" }, contact_properties: { type: object } } } } } }
+      responses:
+        "202": { description: "{run_id, automation_id, contact_id, env, status}" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/automations/{id}/runs/{run}:
+    get:
+      operationId: automation_run_get
+      summary: One run with its step log (scope read)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: run, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: "run (state, current_step, next_wake_at, exit_reason, test) and steps[{step_key, result, at}]" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/events/names:
+    get:
+      operationId: event_names
+      summary: Event names tracked in the last 90 days with counts, newest first (scope read)
+      responses:
+        "200": { description: "[{name, count, last_seen_at}]" }
   /v1/automations/{id}/runs:
     get:
       operationId: automation_runs
-      summary: Runs, newest first (scope read)
+      summary: Runs, newest first; each carries contact_email, exit_reason and `test` (scope read)
       parameters:
         - { $ref: "#/components/parameters/Id" }
         - { name: status, in: query, schema: { type: string, enum: [active, waiting, completed, exited, failed] } }
@@ -1112,7 +1155,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        status: { type: string, enum: [draft, active, paused] }
+        status: { type: string, enum: [draft, active, paused, archived] }
         trigger: { type: string }
         version: { type: integer }
         steps: { type: array, items: { type: object } }

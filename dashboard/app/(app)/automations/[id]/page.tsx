@@ -9,6 +9,7 @@ import { RetryError } from "@/components/ui/error-state";
 import { parseErr } from "@/lib/err";
 import { ruleWords } from "@/lib/rules";
 import { AutomationToggle } from "../AutomationToggle";
+import { DetailActions } from "./DetailActions";
 import { RunsTable, type Run } from "./RunsTable";
 import { StepFlow } from "./StepFlow";
 import { flowSteps, slotsOf, type Slot } from "./steps";
@@ -20,7 +21,7 @@ export default async function AutomationDetail({ params, searchParams }: { param
   const { id } = await params;
   const { err } = await searchParams;
   const e = parseErr(err);
-  const [a, runs] = await Promise.all([get(`/v1/automations/${encodeURIComponent(id)}`), get(`/v1/automations/${encodeURIComponent(id)}/runs`)]);
+  const [a, runs, who, acct] = await Promise.all([get(`/v1/automations/${encodeURIComponent(id)}`), get(`/v1/automations/${encodeURIComponent(id)}/runs`), get("/v1/contacts?limit=50"), get("/v1/account/status")]);
   const shaped = !a.error && a.data && !Array.isArray(a.data) && typeof a.data === "object";
   if (a.error || !shaped) return (
     <>
@@ -32,6 +33,9 @@ export default async function AutomationDetail({ params, searchParams }: { param
   const name: string = d.name ?? id;
   const runList: Run[] = Array.isArray(runs.data) ? runs.data : [];
   const steps = flowSteps(d);
+  const types = Object.fromEntries(steps.map((s) => [s.key, s.type]));
+  const archived = d.status === "archived", version = d.current_version ?? d.version;
+  const contacts: string[] = (Array.isArray(who.data) ? who.data : []).map((c: any) => c.email).filter(Boolean);
   const llm = steps.filter((s) => s.type === "send_email" && s.config?.mode === "llm");
   const aliases = [...new Set(llm.map((s) => s.config?.template).filter(Boolean))] as string[];
   const slots: Record<string, Slot[]> = {};
@@ -44,9 +48,15 @@ export default async function AutomationDetail({ params, searchParams }: { param
       <PageHeader
         breadcrumb={[{ label: "Automations", href: "/automations" }, { label: name }]}
         title={<span className="inline-flex flex-wrap items-center gap-3">{name}<StatusBadge status={d.status} /></span>}
-        description={d.version != null ? `Version ${d.version}` : undefined}
-        action={<div className="inline-flex items-center gap-3 text-sm font-medium"><span aria-hidden>{d.status === "active" ? "Live" : d.status === "paused" ? "Paused" : "Draft"}</span><AutomationToggle id={id} name={name} status={d.status} from={`/automations/${id}`} /></div>}
+        description={version != null ? `Version ${version}` : undefined}
+        action={
+          <div className="flex max-w-full flex-wrap items-center gap-3">
+            {!archived && <div className="inline-flex items-center gap-3 text-sm font-medium"><span aria-hidden>{d.status === "active" ? "Live" : d.status === "paused" ? "Paused" : "Draft"}</span><AutomationToggle id={id} name={name} status={d.status} from={`/automations/${id}`} /></div>}
+            <DetailActions id={d.id ?? id} name={name} status={d.status} env={acct.data?.env === "live" ? "live" : "test"} liveEnabled={!!acct.data?.live_enabled} contacts={contacts} types={types} />
+          </div>
+        }
       />
+      {archived && <p role="note" className="mb-4 rounded-md border border-border bg-surface px-3 py-2 text-sm text-muted">This automation is archived: it does not run and is hidden from the list. Restore it from the menu to edit or publish it.</p>}
       {e && <div className="mb-4"><RetryError error={e} /></div>}
       <Tabs defaultValue="flow">
         <TabsList aria-label="Automation sections">
@@ -54,8 +64,8 @@ export default async function AutomationDetail({ params, searchParams }: { param
           <TabsTrigger value="runs">Runs{!runs.error && <span className="ml-1.5 text-xs text-subtle">{runList.length}</span>}</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
-        <TabsContent value="flow"><StepFlow automation={d} slots={slots} /></TabsContent>
-        <TabsContent value="runs">{runs.error ? <RetryError error={runs.error} /> : <RunsTable runs={runList} event={trig?.event ?? trig?.events?.[0]} />}</TabsContent>
+        <TabsContent value="flow"><StepFlow automation={d} slots={slots} stats={d.stats ?? null} /></TabsContent>
+        <TabsContent value="runs">{runs.error ? <RetryError error={runs.error} /> : <RunsTable runs={runList} event={trig?.event ?? trig?.events?.[0]} id={d.id ?? id} types={types} />}</TabsContent>
         <TabsContent value="settings">
           <div className="grid max-w-3xl gap-4">
             <Card>
@@ -81,7 +91,7 @@ export default async function AutomationDetail({ params, searchParams }: { param
                       </li>
                     ))}
                   </ul>
-                  <p className="text-sm text-muted">Edit by setting <code>config.custom_instructions</code> (max 1,000 characters) on the step and re-importing the automation.</p>
+                  <p className="text-sm text-muted">Change them in the editor: open a step, switch on Write with AI and edit its guidance (max 1,000 characters).</p>
                 </CardBody>
               )}
             </Card>

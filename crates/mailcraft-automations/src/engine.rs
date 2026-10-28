@@ -481,6 +481,68 @@ impl Engine {
         Ok(())
     }
 
+    /// Dashboard "Test run": start a run for `contact` right now on the automation's current version,
+    /// whatever its status, skipping entry rules (each call is a fresh run). `env` is the starting key's
+    /// env: `test` keeps every email in the sandbox; `live` follows the workspace (and still honours
+    /// the kill switch, suppressions and the approval policy). Returns `(run_id, contact_id)`.
+    pub async fn start_test_run(
+        &self,
+        workspace_id: Uuid,
+        automation_id: Uuid,
+        contact: ContactInput,
+        event_properties: Value,
+        env: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(Uuid, Uuid)> {
+        let a: AutoRow = sqlx::query_as(&format!(
+            "SELECT {AUTO_COLS} FROM automations WHERE id = $1 AND workspace_id = $2"
+        ))
+        .bind(automation_id)
+        .bind(workspace_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| AutomationError::not_found(format!("automation {automation_id}")))?;
+        let mut tx = self.pool.begin().await?;
+        let steps = load_steps(&mut tx, a.id, a.current_version).await?;
+        let (trigger, cfg) = trigger_of(&steps)
+            .ok_or_else(|| AutomationError::invalid("automation has no trigger"))?;
+        let c = contacts::upsert_contact(&mut *tx, workspace_id, &contact, now).await?;
+        let first = trigger.edge("next").map(str::to_owned);
+        let name = cfg
+            .event_names()
+            .first()
+            .copied()
+            .unwrap_or("segment.entered");
+        let props = if event_properties.is_null() {
+            json!({})
+        } else {
+            event_properties
+        };
+        let (state, wake, ended) = if first.is_some() {
+            ("active", Some(now), None)
+        } else {
+            ("completed", None, Some(now))
+        };
+        let run_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO automation_runs (automation_id, version, contact_id, entry_key, state, current_step, context, next_wake_at, started_at, ended_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
+        )
+        .bind(a.id)
+        .bind(a.current_version)
+        .bind(c.id)
+        .bind(format!("test:{}", Uuid::new_v4()))
+        .bind(state)
+        .bind(first)
+        .bind(json!({"event": {"id": null, "name": name, "properties": props}, "wait_events": {}, "test": env}))
+        .bind(wake)
+        .bind(now)
+        .bind(ended)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok((run_id, c.id))
+    }
+
     /// `--backfill` suppression: pending trigger events are marked matched, and every contact
     /// that ever had a trigger event (or is in the trigger segment) gets an `exited` run with
     /// `entry_key = 'backfill'`, which blocks `once`/`if_no_active_run`/`after_days` re-entry.
@@ -876,12 +938,18 @@ impl Engine {
                 .bind(auto.workspace_id)
                 .fetch_one(&mut *tx)
                 .await?;
-        // A workspace that has not gone live only has the sandbox: its mail is `test` env.
-        let env = if live { "live" } else { "test" };
+        // A dashboard test run (`context.test` = the starting key's env) may send from a draft, and a
+        // test key keeps it in the sandbox. A workspace that has not gone live only has the sandbox anyway.
+        let test_run = ctx.get("test").and_then(Value::as_str);
+        let env = if live && test_run != Some("test") {
+            "live"
+        } else {
+            "test"
+        };
         if kill {
             return Ok(defer(now + self.cfg.gate_retry, "kill_switch"));
         }
-        if auto.status != "active" {
+        if auto.status != "active" && test_run.is_none() {
             return Ok(defer(now + self.cfg.gate_retry, "automation_paused"));
         }
 
@@ -924,9 +992,9 @@ impl Engine {
         }
 
         // template
-        let (template_id, tpl_stream, doc): (Uuid, String, Value) = sqlx::query_as(
-            "SELECT t.id, t.stream, v.doc FROM templates t JOIN template_versions v ON v.id = t.current_version_id
-             WHERE t.workspace_id = $1 AND t.alias = $2",
+        let (template_id, tpl_alias, tpl_stream, doc): (Uuid, String, String, Value) = sqlx::query_as(
+            "SELECT t.id, t.alias, t.stream, v.doc FROM templates t JOIN template_versions v ON v.id = t.current_version_id
+             WHERE t.workspace_id = $1 AND (t.alias = $2 OR t.id::text = $2) ORDER BY (t.alias = $2) DESC LIMIT 1",
         )
         .bind(auto.workspace_id)
         .bind(&c.template)
@@ -947,7 +1015,7 @@ impl Engine {
 
         // 3. frequency caps
         let defer_key = step.key.clone();
-        if c.cap_exempt {
+        if c.cap_exempt || test_run.is_some() {
             decisions.push(json!({"gate":"frequency_cap","decision":"exempt"}));
         } else {
             let fo = auto.caps.0.frequency.clone().unwrap_or_default();
@@ -1111,7 +1179,7 @@ impl Engine {
                 automation_id: auto.id,
                 run_id: run.id,
                 step_key: step.key.clone(),
-                template_alias: c.template.clone(),
+                template_alias: tpl_alias,
                 subject_template: template.subject.clone(),
                 slots: slots.clone(),
                 context: Value::Object(vars.clone()),
@@ -1160,6 +1228,7 @@ impl Engine {
         // 6. approval policy
         let pending_approval = match parse_approval(&auto.approval)? {
             None => false,
+            Some(_) if test_run.is_some() && env == "test" => false, // sandbox mail reaches no one
             Some(n) => {
                 let sent: i64 = sqlx::query_scalar(
                     "SELECT count(*) FROM emails e JOIN automation_runs r ON r.id = e.automation_run_id

@@ -1927,6 +1927,244 @@ async fn automation_step_stats_and_run_current_step() {
 }
 
 #[tokio::test]
+async fn automations_editing_archive_test_run_and_run_log() {
+    let c = ctx!();
+    c.c(
+        "POST",
+        "/v1/templates",
+        Some(json!({"name": "welcome", "subject": "Hi {{ first_name }}", "html": "<p>Hi</p>"})),
+    )
+    .await;
+    c.c("POST", "/v1/templates/welcome/publish", None).await;
+    let tid = c.c("GET", "/v1/templates/welcome", None).await.1["data"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // a send step may name its template by id as well as alias
+    let def = |tpl: &str, delay: &str| {
+        json!({"name": "flow", "trigger": "signed_up", "steps": [
+        {"key": "pause", "type": "delay", "config": {"duration": delay}, "next": "mail"},
+        {"key": "mail", "type": "send_email", "config": {"template": tpl, "from": "hello@example.com"}}]})
+    };
+    let (s, b) = c.c("POST", "/v1/automations", Some(def(&tid, "1d"))).await;
+    assert_eq!(
+        (s, b["data"]["status"].as_str()),
+        (201, Some("draft")),
+        "{b}"
+    );
+    let id = b["data"]["id"].as_str().unwrap().to_string();
+
+    // editing = installing the same name again: version 2, status untouched
+    c.c("POST", &format!("/v1/automations/{id}/publish"), None)
+        .await;
+    let (s, b) = c
+        .c("POST", "/v1/automations", Some(def("welcome", "2d")))
+        .await;
+    assert_eq!(
+        (
+            s,
+            b["data"]["version"].as_i64(),
+            b["data"]["status"].as_str()
+        ),
+        (201, Some(2), Some("active")),
+        "{b}"
+    );
+    let (_, b) = c.c("GET", &format!("/v1/automations/{id}"), None).await;
+    assert_eq!(
+        (
+            b["data"]["current_version"].as_i64(),
+            b["data"]["steps"][1]["config"]["duration"].as_str()
+        ),
+        (Some(2), Some("2d"))
+    );
+
+    // archive: not while live; hidden from the default list; cannot be published or tested; restores as a draft
+    let (s, b) = c
+        .c("POST", &format!("/v1/automations/{id}/archive"), None)
+        .await;
+    assert_eq!((s, code(&b)), (409, "invalid_state"));
+    c.c("POST", &format!("/v1/automations/{id}/pause"), None)
+        .await;
+    let (s, b) = c
+        .c("POST", &format!("/v1/automations/{id}/archive"), None)
+        .await;
+    assert_eq!(
+        (s, b["data"]["status"].as_str()),
+        (200, Some("archived")),
+        "{b}"
+    );
+    assert_eq!(
+        c.c("GET", "/v1/automations", None).await.1["data"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    let (_, b) = c.c("GET", "/v1/automations?status=archived", None).await;
+    assert_eq!(b["data"][0]["id"].as_str(), Some(id.as_str()));
+    assert_eq!(
+        c.c("POST", &format!("/v1/automations/{id}/publish"), None)
+            .await
+            .0,
+        409
+    );
+    assert_eq!(
+        c.c(
+            "POST",
+            &format!("/v1/automations/{id}/test"),
+            Some(json!({"email": "t@example.com"}))
+        )
+        .await
+        .0,
+        409
+    );
+    let (s, b) = c
+        .c("POST", &format!("/v1/automations/{id}/unarchive"), None)
+        .await;
+    assert_eq!(
+        (s, b["data"]["status"].as_str()),
+        (200, Some("draft")),
+        "{b}"
+    );
+
+    // test run: works on a draft, needs send or manage, refuses bad input
+    let ro = c.key(&[Scope::Read]).await;
+    let url = format!("/v1/automations/{id}/test");
+    assert_eq!(
+        call(
+            &c.app,
+            "POST",
+            &url,
+            Some(&ro),
+            Some(json!({"email": "t@example.com"}))
+        )
+        .await
+        .0,
+        403
+    );
+    assert_eq!(
+        c.c("POST", &url, Some(json!({"email": "nobody"}))).await.0,
+        422
+    );
+    assert_eq!(
+        c.c(
+            "POST",
+            &url,
+            Some(json!({"email": "t@example.com", "bogus": 1}))
+        )
+        .await
+        .0,
+        400
+    );
+    let (s, b) = c
+        .c(
+            "POST",
+            &url,
+            Some(json!({"email": "T@Example.com", "properties": {"plan": "pro"}})),
+        )
+        .await;
+    assert_eq!(
+        (s, b["data"]["status"].as_str()),
+        (202, Some("started")),
+        "{b}"
+    );
+    let run = b["data"]["run_id"].as_str().unwrap().to_string();
+    // the engine worker picks it up; the delay parks it
+    let engine = mailcraft_automations::Engine::new(
+        c.st.db.clone(),
+        Arc::new(NoopPersonalizer),
+        mailcraft_automations::EngineConfig::default(),
+    );
+    engine.tick(chrono::Utc::now()).await.unwrap();
+    let (_, b) = c
+        .c("GET", &format!("/v1/automations/{id}/runs"), None)
+        .await;
+    assert_eq!(
+        (
+            b["data"][0]["contact_email"].as_str(),
+            b["data"][0]["test"].as_bool(),
+            b["data"][0]["current_step"].as_str()
+        ),
+        (Some("T@example.com"), Some(true), Some("mail"))
+    );
+    let (s, b) = c
+        .c("GET", &format!("/v1/automations/{id}/runs/{run}"), None)
+        .await;
+    assert_eq!(s, 200, "{b}");
+    assert_eq!(b["data"]["steps"][0]["step_key"], "pause");
+    assert_eq!(
+        c.c(
+            "GET",
+            &format!("/v1/automations/{id}/runs/{}", Uuid::nil()),
+            None
+        )
+        .await
+        .0,
+        404
+    );
+    assert_eq!(
+        c.c(
+            "GET",
+            &format!("/v1/automations/{id}/runs/not-a-uuid"),
+            None
+        )
+        .await
+        .0,
+        404
+    );
+    // fast-forward past the 2 day delay: the mail is queued in the sandbox, no approval needed
+    engine
+        .tick(chrono::Utc::now() + chrono::Duration::days(3))
+        .await
+        .unwrap();
+    let (_, b) = c
+        .c("GET", &format!("/v1/automations/{id}/runs/{run}"), None)
+        .await;
+    assert_eq!(b["data"]["state"], "completed", "{b}");
+    let last = b["data"]["steps"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (
+            last["step_key"].as_str(),
+            last["result"]["decision"].as_str(),
+            last["result"]["status"].as_str()
+        ),
+        (Some("mail"), Some("enqueued"), Some("queued")),
+        "{last}"
+    );
+    let env: String = sqlx::query_scalar("SELECT env FROM emails WHERE to_addr = 'T@example.com'")
+        .fetch_one(&c.st.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        env, "test",
+        "a workspace that is not live only has the sandbox"
+    );
+
+    // event names for the trigger picker
+    c.c(
+        "POST",
+        "/v1/events",
+        Some(json!({"name": "signed_up", "contact": {"email": "e@example.com"}})),
+    )
+    .await;
+    let (s, b) = c.c("GET", "/v1/events/names", None).await;
+    assert_eq!(
+        (
+            s,
+            b["data"][0]["name"].as_str(),
+            b["data"][0]["count"].as_i64()
+        ),
+        (200, Some("signed_up"), Some(1)),
+        "{b}"
+    );
+}
+
+#[tokio::test]
 async fn domain_verify_stamps_last_checked_and_records_diagnostics() {
     std::env::set_var("MAILCRAFT_PUBLIC_URL", "https://mc.example.net");
     let c = ctx!();
