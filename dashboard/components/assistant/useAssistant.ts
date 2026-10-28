@@ -42,8 +42,9 @@ export function toHistory(msgs: Msg[]): ChatMsg[] {
       m.steps.length ? `tools: ${m.steps.map((s) => s.label).slice(0, 6).join("; ")}` : "",
       ...m.cards.map((c) => {
         const t = c.proposal.title, redo = c.proposal.pending ? ` (once a person approves go-live, prepare it again: ${c.proposal.pending.what})` : "";
-        const vals = c.proposal.variables?.length ? ` [values: ${c.proposal.variables.map((v) => `${v.name}=${v.value.slice(0, 40)}`).join("; ").slice(0, 200)}]` : ""; // "make it friendlier" needs what the card said
-        return c.state === "applied" ? `applied: ${t}${redo}` : c.state === "cancelled" ? `cancelled: ${t}` : c.state === "pending" ? `proposed (not applied): ${t}${redo}${vals}` : "";
+        // names only, never values: those can come from contact records and must not sit unwrapped in an assistant-role message
+        const vars = c.proposal.variables?.length ? ` [variables: ${c.proposal.variables.map((v) => v.name + (v.placeholder ? " (needs a value)" : "")).join(", ").slice(0, 200)}]` : "";
+        return c.state === "applied" ? `applied: ${t}${redo}` : c.state === "cancelled" ? `cancelled: ${t}` : c.state === "replaced" ? `replaced by a newer proposal: ${t}` : c.state === "pending" ? `proposed (not applied): ${t}${redo}${vars}` : "";
       }),
     ].filter(Boolean).join("; ");
     return { role: m.role, content: m.text, ...(notes && { note: notes }) };

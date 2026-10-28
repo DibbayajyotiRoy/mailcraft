@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import type { DoneStats } from "@/lib/assistant/types";
 import { Composer } from "./Composer";
 import { Markdown, splitNext } from "./Markdown";
+import { hasPlaceholders } from "./VariablesSection";
 import { ProposalCard } from "./ProposalCard";
 import { Steps } from "./Steps";
 import { useAssistant, useStatus, type Msg, type Status } from "./useAssistant";
@@ -113,7 +114,7 @@ export function AssistantLauncher() {
   const off = status?.configured === false || !!status?.model?.error;
   const lastStats = [...a.msgs].reverse().find((m) => m.stats)?.stats;
   const lastBot = a.msgs.at(-1);
-  const announce = a.busy ? a.phase?.label ?? "Thinking…" : lastBot?.role === "assistant" ? (lastBot.cards.length ? `Proposal ready: ${lastBot.cards.at(-1)!.proposal.title}` : lastBot.error ? lastBot.error.message : lastBot.text ? "Reply ready" : "") : "";
+  const announce = a.busy ? a.phase?.label ?? "Thinking…" : lastBot?.role === "assistant" ? (lastBot.cards.length ? `Proposal ready: ${lastBot.cards.at(-1)!.proposal.title}${hasPlaceholders(lastBot.cards.at(-1)!.proposal.variables) ? ". It needs a value before it can be sent." : ""}` : lastBot.error ? lastBot.error.message : lastBot.text ? "Reply ready" : "") : "";
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

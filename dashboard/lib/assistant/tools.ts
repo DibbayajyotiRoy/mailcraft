@@ -97,7 +97,7 @@ const GROUP_TOOLS: Record<Group, ToolDef[]> = {
 const KEYWORDS: Record<Group, RegExp> = {
   templates: /templat|subject|html|mjml|lint|design|layout|copy|preheader|footer|wording|rewrite|fix/i,
   automations: /automat|flow|journey|workflow|trigger|drip|onboard|welcome|nudge|sequence|win-?back|lifecycle|signup|sign-up|abandon|reminder|step\b|runs?\b/i,
-  broadcasts: /broadcast|newsletter|blast|campaign|announce|\bsend\b|email (it|them|this)|webinar|launch|@template:/i,
+  broadcasts: /broadcast|newsletter|blast|campaign|announce|\bsend\b|email (it|them|this)|webinar|launch/i,
   contacts: /contact|\blists?\b|segment|audience|import|subscriber|people|upsert|@\w|customers?/i,
 };
 const PAGE: [RegExp, Group[]][] = [[/^\/templates/, ["templates"]], [/^\/automations/, ["automations", "templates"]], [/^\/broadcasts/, ["broadcasts"]], [/^\/contacts/, ["contacts"]]];

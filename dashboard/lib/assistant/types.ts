@@ -19,7 +19,7 @@ export type Proposal = {
   audience?: { count: number; skipped: { reason: string; n: number }[]; schedule?: string };
   items?: string[];
   /** go_live only: what the user was trying to send, kept so it can be proposed again once a person approves going live. */
-  pending?: { kind: "email" | "broadcast"; what: string; args: unknown };
+  pending?: { kind: "email" | "broadcast"; what: string };
   /** go_live only: a go-live request is already waiting in Approvals, so there is nothing to apply. */
   waiting?: boolean;
   /** Template sends: every variable with the value the assistant drafted for it. `placeholder` marks a stand-in such as "[add signup link]"

@@ -15,7 +15,7 @@ const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
 const done: ChatEvent = { type: "done", stats: { model: "m", prompt: 1, completion: 1, rounds: 1, ttft_ms: 1, total_ms: 1, est_input: 1 } };
 
 const base = { summary: "s", risk: "safe" as const, warnings: [] as string[], expires_at: Date.now() + 600_000 };
-const GO_LIVE: Proposal = { ...base, id: "g1", kind: "go_live", key: "go_live", title: "Request go-live approval", summary: "This workspace can't send real mail until a person approves going live. Apply asks for that approval; it then appears in Approvals.", items: ["email to bipul@example.com"], pending: { kind: "email", what: "email to bipul@example.com", args: {} } };
+const GO_LIVE: Proposal = { ...base, id: "g1", kind: "go_live", key: "go_live", title: "Request go-live approval", summary: "This workspace can't send real mail until a person approves going live. Apply asks for that approval; it then appears in Approvals.", items: ["email to bipul@example.com"], pending: { kind: "email", what: "email to bipul@example.com" } };
 const WAITING: Proposal = { ...GO_LIVE, id: "g2", title: "Waiting for go-live approval", waiting: true };
 const SEND = (id: string, signup: string, extra: Partial<Proposal> = {}): Proposal => ({
   ...base, id, kind: "email", risk: "sends", key: "send:bipul@example.com", title: `Send "Welcome Bipul" to bipul@example.com`, items: ["bipul@example.com"],
@@ -89,18 +89,29 @@ test("a template send lists every variable, shows the filled preview, and invite
   expect((screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
-test("a placeholder value blocks Apply with a clear message naming it", () => {
+test("a placeholder value blocks Apply: it stays focusable (aria-disabled), does nothing, and points at the reason", () => {
   const p = props();
   render(<ProposalCard card={{ proposal: SEND("s2", "[add signup link]"), state: "pending" }} {...p} />);
-  expect((screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  const apply = screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement;
+  expect(apply.disabled).toBe(false); // focusable, so keyboard and screen-reader users can reach the explanation
+  expect(apply.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(apply);
   expect(p.onApply).not.toHaveBeenCalled();
-  const alert = screen.getByRole("alert");
-  expect(alert.textContent).toContain("[add signup link]");
-  expect(alert.textContent).toContain("change signup_link to");
+  const why = document.getElementById(apply.getAttribute("aria-describedby")!)!;
+  expect(why.textContent).toContain("[add signup link]");
+  expect(why.textContent).toContain("change signup_link to");
   expect(screen.getByText("needs a value")).toBeTruthy();
-  const apply = screen.getByRole("button", { name: "Apply" });
-  expect(document.getElementById(apply.getAttribute("aria-describedby")!)!.textContent).toBe("Replace the placeholder values first."); // the reason reaches assistive tech too
+  expect(screen.queryByRole("alert")).toBeNull(); // not a live region: it would re-announce on every mount, session restore included
+});
+
+test("the note and the block go away once the card is no longer open (replaced, cancelled, failed)", () => {
+  for (const state of ["replaced", "cancelled", "failed"] as const) {
+    const { unmount } = render(<ProposalCard card={{ proposal: SEND("s9", "[add signup link]"), state }} {...props()} />);
+    expect(screen.queryByText(/^Replace \[add/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+    unmount();
+  }
 });
 
 test("the pencil next to a variable pre-fills the composer with 'Change <var> to '", async () => {
@@ -126,4 +137,11 @@ test("asking for a change: the new proposal replaces the old card, which shows R
   expect(within(fresh).getByRole("button", { name: "Apply" })).toBeTruthy();
   expect(within(fresh).queryByText("Replaced by a newer proposal.")).toBeNull();
   expect(calls.some((c) => c.url === "/api/assistant/apply")).toBe(false);
+});
+
+test("the live announcement says when a proposal needs a value", async () => {
+  chat = () => ndjson([{ type: "proposal", proposal: SEND("a1", "[add signup link]") }, done]);
+  await open();
+  await ask("send the welcome template to bipul@example.com");
+  await waitFor(() => expect(screen.getAllByRole("status").some((el) => /Proposal ready: .*It needs a value before it can be sent\./.test(el.textContent ?? ""))).toBe(true));
 });

@@ -106,3 +106,17 @@ describe("mentionedSend", () => {
     expect(mentionedSend("Send a welcome to bipul@example.com")).toBeNull();
   });
 });
+
+describe("review fixes", () => {
+  it("a contact lookup that failed for any reason other than 'no such contact' is 'unknown', not 'not known'", async () => {
+    fakeWorld([], { "GET /v1/templates/welcome": () => ({ id: "t1", variables: ["first_name"] }), "GET /v1/contacts/a%40example.com": () => apiFail(500, "internal_error", "boom"), "GET /v1/contacts/b%40example.com": () => apiFail(404, "not_found", "no"), "GET /v1/senders": () => [], "GET /v1/account/status": () => ({}) });
+    const r: any = await sendContext({ template: "welcome", to: ["a@example.com", "b@example.com"] }, ctx());
+    expect(r.ok.contacts).toEqual([{ email: "a@example.com", known: "unknown" }, { email: "b@example.com", known: false }]);
+  });
+
+  it("the real template shape: worker-injected names (unsubscribe_url, preferences_url, workspace.*) are not offered as variables to fill", async () => {
+    fakeWorld([], { "GET /v1/templates/welcome": () => ({ id: "t1", alias: "welcome", variables: ["first_name", "preferences_url", "signup_link", "unsubscribe_url", "workspace.name"], source: "<p>x</p>" }), "GET /v1/senders": () => [], "GET /v1/account/status": () => ({}) });
+    const r: any = await sendContext({ template: "welcome" }, ctx());
+    expect(r.ok.template.variables).toEqual(["first_name", "signup_link"]);
+  });
+});

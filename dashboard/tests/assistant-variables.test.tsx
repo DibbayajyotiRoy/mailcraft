@@ -51,18 +51,35 @@ describe("VariablesSection", () => {
     expect(flagged.className).toContain("text-warn");
     expect(flagged.className).toContain("bg-warn-bg");
     expect(within(ok).queryByText("needs a value")).toBeNull();
-    expect(screen.getByRole("alert").textContent).toBe("Replace [add signup link] before sending: tell me what to use, e.g. “change signup_link to …”.");
+    const note = screen.getByText(/^Replace /);
+    expect(note.textContent).toBe("Replace [add signup link] before sending: tell me what to use, e.g. “change signup_link to …”.");
+    expect(screen.queryByRole("alert")).toBeNull(); // static content, not a live region: it must not announce on every mount or session restore
   });
 
   it("joins several placeholders with commas", () => {
     render(<VariablesSection variables={[{ name: "a", value: "[add a]", placeholder: true }, { name: "b", value: "[add b]", placeholder: true }]} />);
-    expect(screen.getByRole("alert").textContent).toContain("Replace [add a], [add b] before sending");
+    expect(screen.getByText(/^Replace /).textContent).toContain("Replace [add a], [add b] before sending");
     expect(screen.getAllByText("needs a value")).toHaveLength(2);
   });
 
-  it("shows no alert when nothing is a placeholder", () => {
+  it("a variable that was never filled is named in the note by its name", () => {
+    render(<VariablesSection variables={[{ name: "signup_link", value: "", placeholder: true }]} />);
+    expect(screen.getByText(/^Replace /).textContent).toContain("Replace signup_link before sending");
+  });
+
+  it("showGap=false hides the note (a card that is no longer open), gapId lets Apply point at it", () => {
+    const v = [{ name: "a", value: "[add a]", placeholder: true }];
+    const { unmount } = render(<VariablesSection variables={v} gapId="why" />);
+    expect(document.getElementById("why")!.textContent).toContain("Replace [add a]");
+    unmount();
+    render(<VariablesSection variables={v} showGap={false} />);
+    expect(screen.queryByText(/^Replace /)).toBeNull();
+    expect(screen.getByText("needs a value")).toBeTruthy(); // the row itself still says so
+  });
+
+  it("shows no note when nothing is a placeholder", () => {
     render(<VariablesSection variables={plain} />);
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/^Replace /)).toBeNull();
     expect(screen.queryByText("needs a value")).toBeNull();
   });
 
@@ -80,6 +97,7 @@ describe("VariablesSection", () => {
     cleanup();
     render(<VariablesSection variables={many(11)} />);
     expect(rows()).toHaveLength(8);
+    expect(screen.getByRole("button", { name: "Show all 11" }).getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Show all 11" }));
     expect(rows()).toHaveLength(11);
     fireEvent.click(screen.getByRole("button", { name: "Show less" }));

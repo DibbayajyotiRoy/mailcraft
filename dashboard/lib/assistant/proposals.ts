@@ -30,6 +30,12 @@ export function cancelProposal(sid: string, id: string) { const s = find(sid, id
 const err = (code: string, message: string, hint?: string): ApplyResult => ({ status: "failed", label: message, error: { code, message, hint } });
 const sub = (v: unknown, prev: any): unknown => (typeof v === "string" ? v.replace(/\$prev\.(\w+)/g, (_, k) => String(prev?.[k] ?? "")) : Array.isArray(v) ? v.map((x) => sub(x, prev)) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x, prev)])) : v);
 
+/** Is a go-live request already waiting in Approvals? undefined when that cannot be read. The API neither de-duplicates requests nor filters approvals by kind. */
+export async function goLivePending(a: { base: string; key: string }): Promise<boolean | undefined> {
+  const r = await request(a.base, a.key, "GET", "/v1/approvals?status=pending&limit=200");
+  return r.error || !Array.isArray(r.data) ? undefined : r.data.some((x: any) => x.kind === "go_live" && (x.status ?? "pending") === "pending");
+}
+
 /** Runs the stored calls with the user's own key, so scopes, approvals, go-live gates and the kill switch all apply. */
 export async function applyProposal(sid: string, id: string, a: { base: string; key: string }, confirmed: boolean): Promise<ApplyResult> {
   const s = find(sid, id);
@@ -39,7 +45,8 @@ export async function applyProposal(sid: string, id: string, a: { base: string; 
   if (s.card.confirm && !confirmed) return err("confirmation_required", "This needs an explicit confirmation.", s.card.confirm);
   store.delete(s.card.id); // one-shot, even when a call fails: a retry is a new proposal
   let prev: any, status: ApplyResult["status"] = "completed";
-  for (const c of s.calls) {
+  const run = s.card.kind === "go_live" && (await goLivePending(a)) ? [] : s.calls; // a second card for the same workspace-wide request must not file it twice
+  for (const c of run) {
     const r = await request(a.base, a.key, c.method, sub(c.path, prev) as string, c.body === undefined ? undefined : sub(c.body, prev), 120_000);
     if (r.error) return { status: "failed", label: `${c.label} failed`, error: { code: r.error.code, message: r.error.message, hint: r.error.hint } };
     prev = r.data;

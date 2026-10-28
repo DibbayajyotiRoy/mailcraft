@@ -11,8 +11,8 @@ const FOLD = 8;
 /** True when any variable still holds a stand-in a person must replace (Apply is blocked until then). */
 export const hasPlaceholders = (v?: Proposal["variables"]) => !!v?.some((x) => x.placeholder);
 
-/** What a template send will fill in: name = value per variable, stand-ins flagged, a pencil that prefills a "change X to " message. */
-export function VariablesSection({ variables, onTweak }: { variables: Vars; onTweak?: (draft: string) => void }) {
+/** `showGap` false hides the "replace before sending" note (the card is no longer open). What a template send will fill in: name = value per variable, stand-ins flagged, a pencil that prefills a "change X to " message. */
+export function VariablesSection({ variables, onTweak, gapId, showGap = true }: { variables: Vars; onTweak?: (draft: string) => void; gapId?: string; showGap?: boolean }) {
   const [all, setAll] = useState(false);
   const shown = all ? variables : variables.slice(0, FOLD), open = variables.filter((v) => v.placeholder);
   return (
@@ -36,10 +36,10 @@ export function VariablesSection({ variables, onTweak }: { variables: Vars; onTw
           </div>
         ))}
       </dl>
-      {variables.length > FOLD && <button type="button" onClick={() => setAll(!all)} className="text-xs text-accent underline underline-offset-2">{all ? "Show less" : `Show all ${variables.length}`}</button>}
-      {open.length > 0 && (
-        <p role="alert" className="break-words rounded-md bg-warn-bg px-3 py-2 text-sm text-warn">
-          Replace {open.map((v) => v.value).join(", ")} before sending: tell me what to use, e.g. “change {open[0].name} to …”.
+      {variables.length > FOLD && <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className="text-xs text-accent underline underline-offset-2">{all ? "Show less" : `Show all ${variables.length}`}</button>}
+      {open.length > 0 && showGap && ( // a plain paragraph, not a live region: it is static content and Apply points at it (aria-describedby)
+        <p id={gapId} className="break-words rounded-md bg-warn-bg px-3 py-2 text-sm text-warn">
+          Replace {open.map((v) => v.value || v.name).join(", ")} before sending: tell me what to use, e.g. “change {open[0].name} to …”.
         </p>
       )}
     </section>

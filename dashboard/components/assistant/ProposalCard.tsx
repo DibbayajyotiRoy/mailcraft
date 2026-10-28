@@ -89,7 +89,7 @@ export function ProposalCard({ card, onApply, onCancel, onEdit, onTweak }: { car
   const waiting = !!p.waiting && state === "pending"; // a go-live request is already in Approvals: nothing to apply, so no buttons and no expiry
   const expired = state === "pending" && !waiting && Date.now() > p.expires_at;
   const open = state === "pending" || state === "applying";
-  const gap = hasPlaceholders(p.variables), gapId = useId(); // Apply is disabled while a stand-in value is left: say why to assistive tech too
+  const gap = hasPlaceholders(p.variables) && state === "pending", gapId = useId(); // Apply stays focusable but inert while a stand-in value is left, and points at the reason
   return (
     <section aria-label={p.title} className="overflow-hidden rounded-lg border border-border bg-surface">
       <div className="space-y-3 p-3">
@@ -116,7 +116,7 @@ export function ProposalCard({ card, onApply, onCancel, onEdit, onTweak }: { car
             {p.lint.slice(0, 6).map((l, i) => <li key={i} className="flex items-start gap-2"><Badge size="sm" tone={l.sev === "error" ? "bad" : "warn"}>{l.sev}</Badge><span className="min-w-0 break-words">{l.msg}</span></li>)}
           </ul>
         )}
-        {p.variables && p.variables.length > 0 && <VariablesSection variables={p.variables} onTweak={state === "pending" ? onTweak : undefined} />}
+        {p.variables && p.variables.length > 0 && <VariablesSection variables={p.variables} onTweak={state === "pending" ? onTweak : undefined} gapId={gapId} showGap={state === "pending"} />}
         {p.diff && <Diff d={p.diff} />}
         {p.preview && <Preview p={p.preview} />}
       </div>
@@ -124,8 +124,7 @@ export function ProposalCard({ card, onApply, onCancel, onEdit, onTweak }: { car
         {waiting && <TaskRow r={{ status: "pending_approval", label: "A go-live request is already waiting", detail: goLiveNext(p.pending?.kind), href: "/approvals", hrefLabel: "Open Approvals" }} />}
         {open && !expired && !waiting && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button loading={state === "applying"} disabled={gap} aria-describedby={gap ? gapId : undefined} onClick={() => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
-            {gap && <span id={gapId} className="sr-only">Replace the placeholder values first.</span>}
+            <Button loading={state === "applying"} aria-disabled={gap || undefined} aria-describedby={gap ? gapId : undefined} className={gap ? "cursor-not-allowed opacity-50" : undefined} onClick={gap ? undefined : () => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
             <Button variant="secondary" disabled={state === "applying"} onClick={onEdit}>Edit</Button>
             <Button variant="ghost" disabled={state === "applying"} onClick={onCancel}>Cancel</Button>
             <span className="ml-auto text-xs text-muted">Nothing changes until you apply.</span>

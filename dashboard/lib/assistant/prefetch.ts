@@ -3,6 +3,7 @@
 import { findSender, sendersOf } from "@/lib/senders";
 import { clip } from "./compact";
 import { apiErr, fail, read, type Ctx, type Out } from "./core";
+import { varNames } from "./variables";
 
 const BUDGET = 1200, enc = encodeURIComponent;
 const cut = (s: unknown, n: number) => clip(s, Infinity).slice(0, n);
@@ -13,15 +14,15 @@ const props = (o: unknown) => {
   return e.length ? Object.fromEntries(e) : undefined;
 };
 
-export function packSendContext(t: any, contacts: { email: string; contact?: any }[], sender: { address?: string; name?: string } | undefined, workspace?: string): Record<string, unknown> {
+export function packSendContext(t: any, contacts: { email: string; contact?: any; unknown?: boolean }[], sender: { address?: string; name?: string } | undefined, workspace?: string): Record<string, unknown> {
   t = t && typeof t === "object" ? t : {};
   const src = [t.source, t.content, t.html].find((x) => typeof x === "string" && x) ?? "";
   const s = prune({ address: cut(sender?.address, 120), name: cut(sender?.name, 60) });
   const p: any = prune({
-    template: prune({ id: t.id, alias: t.alias, subject: cut(t.subject, 120), variables: (Array.isArray(t.variables) ? t.variables : []).map((v: any) => cut(typeof v === "string" ? v : v?.name, 40)).filter(Boolean).slice(0, 30), excerpt: plain(src) }),
-    contacts: contacts.map(({ email, contact: c }) => (c && typeof c === "object"
+    template: prune({ id: t.id, alias: t.alias, subject: cut(t.subject, 120), variables: varNames(t.variables).map((v) => cut(v, 40)).slice(0, 30), excerpt: plain(src) }),
+    contacts: contacts.map(({ email, contact: c, unknown }) => (c && typeof c === "object"
       ? prune({ email, known: true, first_name: cut(c.first_name, 60), last_name: cut(c.last_name, 60), timezone: cut(c.timezone, 40), props: props(c.properties) })
-      : { email, known: false })),
+      : { email, known: unknown ? "unknown" : false })), // "unknown": the lookup failed for a reason other than "no such contact"
     sender: Object.keys(s).length ? s : undefined,
     workspace: cut(workspace, 80),
   });
@@ -42,7 +43,7 @@ export async function sendContext(a: { template?: string; to?: string[] | string
   const to = [...new Map([a.to ?? []].flat().flatMap((x) => String(x ?? "").split(/[\s,;]+/)).filter(Boolean).map((e) => [e.toLowerCase(), e])).values()].slice(0, 3);
   const [tr, cs, sr, ar] = await Promise.all([
     read(ctx, "GET", `/v1/templates/${enc(id)}`),
-    Promise.all(to.map(async (email) => ({ email, contact: (await read(ctx, "GET", `/v1/contacts/${enc(email)}`)).data ?? undefined }))),
+    Promise.all(to.map(async (email) => { const r = await read(ctx, "GET", `/v1/contacts/${enc(email)}`); return { email, contact: r.data ?? undefined, unknown: !!r.error && r.error.code !== "not_found" }; })),
     read(ctx, "GET", "/v1/senders?limit=100"), // same path as the list tool, so the 60s read cache is shared
     read(ctx, "GET", "/v1/account/status"),
   ]);
@@ -52,11 +53,14 @@ export async function sendContext(a: { template?: string; to?: string[] | string
   return { ok: packSendContext(tr.data, cs, row && { address: row.address, name: row.display_name ?? undefined }, typeof ws === "string" ? ws : undefined), done: "Read the send context" };
 }
 
-const ADDR = "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+";
+// Bounded on purpose: the input is a user message. Local part up to 64, labels up to 63, at most 9 labels; the text is cut to 4000 chars first.
+const ADDR = "[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){1,8}";
 /** "Send @template:welcome to a@example.com through b@example.com" -> { template: "welcome", to: ["a@..."], from: "b@..." }; null unless a template and a recipient are there. */
-export function mentionedSend(text: string): { template: string; to: string[]; from?: string } | null {
-  const template = /@template:([\w-]+(?:\.[\w-]+)*)/i.exec(text)?.[1];
+export function mentionedSend(raw: string): { template: string; to: string[]; from?: string } | null {
+  const text = raw.slice(0, 4000);
+  const template = /@template:([\w-]{1,64}(?:\.[\w-]{1,64}){0,4})/i.exec(text)?.[1];
+  if (!template) return null;
   const from = new RegExp(`\\b(?:from|through|via|using)\\s+(?:[^<\\n]{0,40}<)?(${ADDR})`, "i").exec(text)?.[1]; // the sender is not a recipient
   const to = [...new Map((text.match(new RegExp(ADDR, "g")) ?? []).filter((e) => e.toLowerCase() !== from?.toLowerCase()).map((e) => [e.toLowerCase(), e])).values()];
-  return template && to.length ? { template, to, ...(from && { from }) } : null;
+  return to.length ? { template, to, ...(from && { from }) } : null;
 }

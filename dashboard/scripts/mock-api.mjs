@@ -87,7 +87,7 @@ const TEMPLATES = [
   { id: "t1", alias: "welcome", name: "Welcome", stream: "transactional", subject: "Welcome {{ first_name }}", preheader: "Your account is ready", status: "published", version: 3, published_version: 3, updated_at: ago(300), variables: ["first_name"], source_format: "mjml", source: MJML_SRC },
   { id: "t2", alias: "receipt", name: "Receipt", stream: "transactional", subject: "Your receipt", status: "published", version: 5, published_version: 4, updated_at: ago(60 * 30), variables: ["first_name", "amount"], source_format: "html", source: HTML_SRC },
   { id: "t3", alias: "winback", name: "Win-back", stream: "marketing", subject: "We miss you", status: "draft", version: 1, published_version: null, updated_at: ago(60 * 24 * 3), variables: ["first_name"], source_format: "json", source: JSON.stringify({ version: 1, subject: "We miss you", blocks: [{ type: "heading", text: "Come back, {{ first_name }}" }] }, null, 2) },
-  { id: "t4", alias: "promo", name: "Promo", stream: "marketing", subject: "", status: "published", version: 1, published_version: 1, updated_at: ago(60 * 12), variables: ["first_name"], source_format: "html", source: `<!doctype html>\n<html>\n  <body>\n    <h1>Big autumn sale, {{ first_name }}</h1>\n    <img src="https://example.com/sale.png">\n    <p>Everything is 20% off this week.</p>\n    <a href="http://example.com/sale">Shop the sale</a>\n  </body>\n</html>\n` },
+  { id: "t4", alias: "promo", name: "Promo", stream: "marketing", subject: "Big autumn sale, {{ first_name }}", status: "published", version: 1, published_version: 1, updated_at: ago(60 * 12), variables: ["first_name", "signup_link"], source_format: "html", source: `<!doctype html>\n<html>\n  <body>\n    <h1>Big autumn sale, {{ first_name }}</h1>\n    <img src="https://example.com/sale.png">\n    <p>Everything is 20% off this week.</p>\n    <a href="http://example.com/sale">Shop the sale</a>\n    <p><a href="{{ signup_link }}">Sign up for early access</a></p>\n  </body>\n</html>\n` },
 ];
 const llm = { version: 1, subject: "Welcome", blocks: [{ type: "heading", text: "Hi" }, { type: "slot", name: "intro", max_len: 240, instructions: "One warm sentence", fallback: "Thanks for signing up." }] };
 // Version history per template (newest first): t2 has a live v4 and an unpublished draft v5.
@@ -348,6 +348,7 @@ function scripted(messages) {
   }
   if (/bipul|go.?live|send it now/i.test(lastUser)) { // a single email: a normal proposal when the workspace is live, the go-live request when it is not
     if (!after.length) return call("propose_email", { to: ["bipul@example.com"], from: "partner@example.com", subject: "Hello from Acme", text: "Hi Bipul,\n\nHere is the note we talked about.\n\nAcme" });
+    if (after.some((m) => /go_live_request_already_pending/.test(m.content))) return { text: "A go-live request is already waiting for approval in Approvals, so there is nothing to apply. Approve it there, then say \"send it now\" and I'll prepare the email again.\nNEXT: Send it now" };
     return after.some((m) => /go_live/.test(m.content))
       ? { text: "This workspace can't send real mail until a person approves going live. Apply asks for that approval. Approve it in Approvals, then say \"send it now\" and I'll prepare the email again.\nNEXT: Send it now" }
       : { text: "The email to bipul@example.com is ready. Press Apply to send it." };
@@ -544,7 +545,7 @@ createServer(async (req, res) => {
     if ((m = p.match(/^\/v1\/templates\/([^/]+)\/preview$/))) {
       const t = findTemplate(m[1]);
       if (!t) return notFound(res, "template");
-      if (t.id === "t4" && b.content == null && b.html == null && b.mjml == null) return body(res, renderInline({ content: t.source, format: "html", subject: t.subject }).data);
+      if (t.id === "t4" && b.content == null && b.html == null && b.mjml == null) return body(res, renderInline({ content: t.source, format: "html", subject: t.subject, variables: b.variables }).data);
       if (b.content != null || b.html != null || b.mjml != null) {
         const r = renderInline({ ...b, content: b.content ?? b.html ?? b.mjml, format: b.format ?? (b.mjml != null ? "mjml" : "html") });
         return r.error ? fail(res, r.error, r.status) : body(res, r.data);

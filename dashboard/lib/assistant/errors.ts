@@ -6,6 +6,7 @@ type ApiErr = { code?: string; message?: string; hint?: string; rule?: string };
 /** emails.rs plan(): a live key on a workspace nobody approved for live sending gets 403 blocked_by_policy (rule go_live).
  *  The JSON has no `rule` field (the rule is only in the audit log), so the message and hint are matched too. Other
  *  blocked_by_policy cases (key_domain, send policy) say neither "live sending" nor "go-live". */
+// TODO: the API only says this in English (message + hint). Once it returns a machine-readable `rule` ("go_live"), match that alone; `e.rule` is already accepted.
 export const isGoLive = (e?: ApiErr | null) => !!e && e.code === "blocked_by_policy" && (e.rule === "go_live" || /live sending|go-live/i.test(`${e.message} ${e.hint}`));
 
 export const GO_LIVE_TITLE = "Request go-live approval";
