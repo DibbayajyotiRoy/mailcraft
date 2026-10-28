@@ -52,6 +52,10 @@ services:
     build: ./dashboard
     environment:
       MAILCRAFT_API_URL: http://mailcraft:8080
+      # AI assistant (docs/ASSISTANT.md): off without a key; free open-weight models only.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MAILCRAFT_ASSISTANT_MODEL: ${MAILCRAFT_ASSISTANT_MODEL:-}
+      MAILCRAFT_ASSISTANT_BASE_URL: ${MAILCRAFT_ASSISTANT_BASE_URL:-}
     ports: ["${MAILCRAFT_DASHBOARD_PORT:-3000}:3000"]
     depends_on: [mailcraft]
     restart: unless-stopped
