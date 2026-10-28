@@ -127,5 +127,5 @@ export async function deleteSource(d: FormData) {
   const r = await api("DELETE", `/v1/contact-sources/${encodeURIComponent(f(d, "id"))}${d.get("delete_list") === "on" ? "?delete_list=true" : ""}`);
   if (r.error) redirect(`/settings?err=${encodeURIComponent(`${r.error.code}|${r.error.message}|${r.error.hint ?? ""}`)}#sources`);
   revalidatePath("/settings");
-  redirect(withFlash("/settings#sources", `Deleted ${f(d, "name")}. Its contacts are kept.`));
+  redirect(`${withFlash("/settings", `Deleted ${f(d, "name")}. Its contacts are kept.`)}#sources`); // the flash goes in the query, before the fragment
 }

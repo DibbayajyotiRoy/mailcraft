@@ -143,10 +143,7 @@ describe("deleteSource", () => {
     expect(api).toHaveBeenCalledWith("DELETE", "/v1/contact-sources/s1");
     expect(to).toMatch(/^\/settings.*Deleted%20Acme%20app/);
   });
-  // KNOWN BUG, settings/actions.ts:117: withFlash("/settings#sources", ...) appends ?ok= after the fragment, so the
-  // server never sees `ok` and no toast shows. The fix is withFlash("/settings", ...) + "#sources" (as the Gmail
-  // callback does). When fixed this test starts failing: change it.fails to it.
-  it.fails("the flash is in the query, before the #sources fragment", async () => {
+  it("the flash is in the query, before the #sources fragment", async () => {
     api.mockResolvedValueOnce(ok({ deleted: true }));
     expect(await redirected(deleteSource(form({ id: "s1", name: "Acme app" })))).toBe("/settings?ok=Deleted%20Acme%20app.%20Its%20contacts%20are%20kept.#sources");
   });
