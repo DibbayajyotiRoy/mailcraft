@@ -1,11 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ChatEvent } from "@/lib/assistant/types";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/templates/t2", useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("bot-avatars", () => ({ BotAvatar: (p: any) => <canvas data-avatar={p.state ?? "default"} data-paused={p.paused ? "1" : undefined} /> }));
 vi.mock("border-beam", () => ({ BorderBeam: (p: any) => <div data-beam={p.size} data-active={String(p.active)} data-theme={p.theme}>{p.children}</div> }));
-import { AssistantLauncher } from "@/components/assistant/AssistantPanel";
+import { AssistantLauncher, UsageLine } from "@/components/assistant/AssistantPanel";
 
 const enc = new TextEncoder();
 const ndjson = (evs: ChatEvent[], hold?: (signal?: AbortSignal | null) => Promise<void>, signal?: AbortSignal | null) => new Response(new ReadableStream({
@@ -102,7 +102,61 @@ test("usage line shows tokens, requests and times of the last turn", async () =>
   expect(await screen.findByText(/1\.2k in \/ 80 out/)).toBeTruthy();
   expect(screen.getByText(/first token 0\.9s/)).toBeTruthy();
   expect(screen.getByText(/4\.2s total/)).toBeTruthy();
-  expect(screen.getByText(/41 left on the key/)).toBeTruthy();
+  expect(screen.getByText(/~3 used today \(counted here\)/)).toBeTruthy(); // no OpenRouter number in STATUS: the local tally, marked approximate
+  expect(screen.getByText(/Credit limit left: 41/)).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/left on the key/); // the key's credit limit is spend, never "requests left"
+});
+
+// 2026-10-28 12:00 UTC; Asia/Kolkata is UTC+5:30, so the next UTC midnight (12h away) is 05:30 there. Defaults to the machine's zone otherwise.
+const NOW = Date.UTC(2026, 9, 28, 12, 0), MIDNIGHT = Date.UTC(2026, 9, 29, 0, 0);
+const line = (status: object | null) => { cleanup(); render(<UsageLine status={status as any} now={NOW} />); return screen.getByLabelText("Usage of the last reply").textContent!; };
+
+describe("footer usage numbers", () => {
+  const prev = process.env.TZ;
+  beforeEach(() => { process.env.TZ = "Asia/Kolkata"; });
+  afterEach(() => { process.env.TZ = prev; if (prev === undefined) delete process.env.TZ; });
+
+  test("OpenRouter's free-request count, with its reset in the viewer's time and relative", () => {
+    const t = line({ configured: true, requests_today: 9, free: { limit: 50, remaining: 12, resetAt: MIDNIGHT }, key: { limit_remaining: 41 } });
+    expect(t).toContain("Free requests today: 12 of 50 left (from OpenRouter)");
+    expect(t).toMatch(/resets 05:30.* · in 12h/);
+    expect(t).not.toContain("counted here"); // one count, not two that disagree
+    expect(t).toContain("Credit limit left: 41");
+    expect(t).not.toMatch(/left on the key/);
+  });
+
+  test("a free count without a limit says only how many are left; zero is a real number", () => {
+    expect(line({ configured: true, free: { limit: null, remaining: 0, resetAt: MIDNIGHT } })).toContain("Free requests today: 0 left (from OpenRouter)");
+  });
+
+  test("only the local tally: approximate, resets at 00:00 UTC", () => {
+    const t = line({ configured: true, requests_today: 7, free: null });
+    expect(t).toContain("~7 used today (counted here)");
+    expect(t).toMatch(/resets 05:30.* · in 12h/);
+    expect(t).not.toContain("from OpenRouter");
+  });
+
+  test("credit limit present or absent: shown only when it is a number", () => {
+    expect(line({ configured: true, requests_today: 1, key: { limit_remaining: 0.5 } })).toContain("Credit limit left: 0.5");
+    expect(line({ configured: true, requests_today: 1, key: { limit_remaining: 0 } })).toContain("Credit limit left: 0");
+    expect(line({ configured: true, requests_today: 1, key: { limit_remaining: null } })).not.toContain("Credit limit");
+    expect(line({ configured: true, requests_today: 1, key: {} })).not.toContain("Credit limit");
+  });
+
+  test("nothing counted and nothing reported: no count, no reset time", () => {
+    const t = line({ configured: true, requests_today: 0 });
+    expect(t).not.toMatch(/today|resets/);
+  });
+});
+
+test("the daily-cap error names the reset time instead of a bare 'used up'", async () => {
+  const resetAt = Date.now() + (9 * 60 + 12) * 60_000;
+  turn([{ type: "error", code: "rate_limited", message: "Today's free AI requests are used up.", hint: "Settings → AI usage shows where your key stands.", resetAt }]);
+  await open();
+  await ask("hi");
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toMatch(/Today's free AI requests are used up\. They reset at \d{1,2}:\d{2}.* \(in 9h 1[12]m\)\./);
+  expect(alert.textContent).toContain("Settings → AI usage");
 });
 
 test("Apply sends only the proposal id to the execute route, then shows the task row with a link", async () => {

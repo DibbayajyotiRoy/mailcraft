@@ -1,9 +1,12 @@
 // One streamed chat-completions call to OpenRouter (OpenAI-compatible). Server-only: carries the API key.
 import { BASE } from "./models";
+import { noteRateLimit, readRateLimit } from "./usage";
 
 export class UpstreamError extends Error {
-  constructor(public code: string, message: string, public status = 0) { super(message); }
+  /** `resetAt` (epoch ms): only on the daily free-request cap, when the free requests come back. */
+  constructor(public code: string, message: string, public status = 0, public resetAt?: number) { super(message); }
 }
+export const isDailyCap = (message: string) => /per-day|daily/i.test(message);
 export type ToolCall = { id: string; name: string; args: string };
 export type Usage = { prompt: number; completion: number };
 export type Streamed = { content: string; calls: ToolCall[]; usage?: Usage; finish?: string };
@@ -25,10 +28,17 @@ export async function streamChat(r: Req): Promise<Streamed> {
         body: JSON.stringify({ ...r.body, stream: true }),
       });
     } catch (e) { throw abortReason(ac, e); }
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try { const j = await res.json(); msg = j?.error?.message ? String(j.error.message) : msg; } catch { /* keep status text */ }
-      throw new UpstreamError(res.status === 401 ? "unauthorized" : res.status === 402 ? "payment_required" : res.status === 429 ? "rate_limited" : res.status === 404 ? "model_unavailable" : "upstream_error", msg.slice(0, 300), res.status);
+    if (res.ok) noteRateLimit(readRateLimit(res.headers)); // OpenRouter documents them on 429s only; kept if they ever appear on a success
+    else {
+      let msg = `HTTP ${res.status}`, meta: Record<string, unknown> | undefined;
+      try { const j = await res.json(); msg = j?.error?.message ? String(j.error.message) : msg; meta = j?.error?.metadata?.headers; } catch { /* keep status text */ }
+      let resetAt: number | undefined;
+      if (res.status === 429 && !/per-min|minute/i.test(msg)) { // a per-minute 429 says nothing about today
+        const rl = readRateLimit(res.headers, meta), day = isDailyCap(msg);
+        noteRateLimit(rl, day);
+        if (day) resetAt = rl.resetAt ?? undefined;
+      }
+      throw new UpstreamError(res.status === 401 ? "unauthorized" : res.status === 402 ? "payment_required" : res.status === 429 ? "rate_limited" : res.status === 404 ? "model_unavailable" : "upstream_error", msg.slice(0, 300), res.status, resetAt);
     }
     const out: Streamed = { content: "", calls: [] };
     const calls = new Map<number, ToolCall>();

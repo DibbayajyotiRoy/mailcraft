@@ -50,7 +50,7 @@ export type ChatEvent =
   | { type: "text"; delta: string }
   | { type: "tool"; id: string; name: string; label: string; status: "running" | "done" | "error"; detail?: string }
   | { type: "proposal"; proposal: Proposal }
-  | { type: "error"; code: string; message: string; hint?: string }
+  | { type: "error"; code: string; message: string; hint?: string; resetAt?: number }
   | { type: "done"; stats: DoneStats };
 
 export type PageCtx = { path: string };
