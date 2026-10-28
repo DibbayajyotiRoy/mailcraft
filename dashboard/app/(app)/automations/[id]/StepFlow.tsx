@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { ruleWords } from "@/lib/rules";
+import { StepStats, type StepStat } from "../editor/StepStats";
 import { branchLabels, durationWords, flowSteps, triggerWords, type Slot, type Step } from "./steps";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -73,7 +74,12 @@ function StepNode({ s, slots }: { s: Step; slots?: Slot[] }) {
     case "trigger": return <Node icon={Zap} tone="accent" type="trigger" id={s.key}><p>{triggerWords(c)}</p></Node>;
     case "send_email": return <SendNode s={s} slots={slots} />;
     case "delay": return <Pill icon={Clock}>Wait {durationWords(c.duration)}</Pill>;
-    case "wait_for_event": return <Pill icon={Hourglass}>Wait up to {durationWords(c.timeout)} for “{c.event}”{ruleWords(c.filter) ? ` when ${ruleWords(c.filter)}` : ""}</Pill>;
+    case "wait_for_event": return (
+      <div className="grid justify-items-center gap-1.5">
+        <Pill icon={Hourglass}>Wait up to {durationWords(c.timeout)} for “{c.event}”{ruleWords(c.filter) ? ` when ${ruleWords(c.filter)}` : ""}</Pill>
+        {branchLabels(s.next).length > 0 && <ul className="flex flex-wrap justify-center gap-2">{branchLabels(s.next).map(([k, v]) => <li key={k}><Badge tone="neutral">{k} → <code>{v}</code></Badge></li>)}</ul>}
+      </div>
+    );
     case "condition": return (
       <Node icon={GitBranch} type="condition" id={s.key}>
         <p>If {ruleWords(c.rule) ?? "the condition holds"}</p>
@@ -91,8 +97,8 @@ function StepNode({ s, slots }: { s: Step; slots?: Slot[] }) {
   }
 }
 
-/** Read-only vertical flow, plain CSS (React Flow is phase 2). Slots are passed in per template alias. */
-export function StepFlow({ automation, slots }: { automation: any; slots: Record<string, Slot[]> }) {
+/** Read-only vertical flow, plain CSS. Slots are passed in per template alias; `stats` (per step key) adds the contact counts under each step. */
+export function StepFlow({ automation, slots, stats }: { automation: any; slots: Record<string, Slot[]>; stats?: Record<string, StepStat> | null }) {
   const steps = flowSteps(automation);
   if (!steps.length) return <p className="text-sm text-muted">This automation has no steps.</p>;
   return (
@@ -101,6 +107,7 @@ export function StepFlow({ automation, slots }: { automation: any; slots: Record
         <li key={s.key + i} className="grid w-full justify-items-center">
           {i > 0 && <div aria-hidden className="flex h-8 flex-col items-center text-border-strong"><span className="w-0.5 flex-1 bg-current" /><ArrowDown className="-mt-1 size-3.5" /></div>}
           <StepNode s={s} slots={slots[s.config?.template]} />
+          {stats && <StepStats stat={stats[s.key]} className="mt-2 [&_dl]:justify-center" />}
         </li>
       ))}
     </ol>
