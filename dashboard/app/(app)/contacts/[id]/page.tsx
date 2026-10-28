@@ -14,7 +14,8 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { ContactDialog } from "../ContactForm";
 import { DangerZone } from "../DangerZone";
 import { TrackEvent } from "../TrackEvent";
-import { fullName, isSuppressed, type Activity } from "../util";
+import { ContactLists, ListBadges } from "../ListsUI";
+import { fullName, isSuppressed, type Activity, type ListItem } from "../util";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Contact" };
@@ -25,7 +26,7 @@ const Empty = ({ children }: { children: string }) => <p className="px-4 py-6 te
 export default async function ContactDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ err?: string }> }) {
   const [{ id }, { err }] = await Promise.all([params, searchParams]);
   const q = encodeURIComponent(id);
-  const [r, a, autos, defs] = await Promise.all([get(`/v1/contacts/${q}`), get(`/v1/contacts/${q}/activity`), get("/v1/automations"), get("/v1/event-definitions")]);
+  const [r, a, autos, defs, ls] = await Promise.all([get(`/v1/contacts/${q}`), get(`/v1/contacts/${q}/activity`), get("/v1/automations"), get("/v1/event-definitions"), get("/v1/lists")]);
   const crumb = [{ label: "Contacts", href: "/contacts" }, { label: "Contact" }];
   if (r.error) return <><PageHeader title="Contact" breadcrumb={crumb} /><RetryError error={r.error} /></>;
   const c = r.data, act: Activity | null = a.error ? null : a.data;
@@ -37,7 +38,7 @@ export default async function ContactDetail({ params, searchParams }: { params: 
   return (
     <>
       <PageHeader title={fullName(c) || c.email} breadcrumb={[...crumb.slice(0, 1), { label: c.email }]}
-        description={<span className="inline-flex flex-wrap items-center gap-2">{fullName(c) && <span className="font-mono text-xs">{c.email}</span>}{suppressed ? <Badge tone="bad" size="sm" className="border border-bad">suppressed</Badge> : <StatusBadge status="active" size="sm" />}<span>added <RelativeTime value={c.created_at} /></span></span>}
+        description={<span className="inline-flex flex-wrap items-center gap-2">{fullName(c) && <span className="font-mono text-xs">{c.email}</span>}{suppressed ? <Badge tone="bad" size="sm" className="border border-bad">suppressed</Badge> : <StatusBadge status="active" size="sm" />}<span>added <RelativeTime value={c.created_at} /></span><ListBadges lists={c.lists} max={4} /></span>}
         action={<><ContactDialog contact={c}><Button variant="secondary"><Pencil aria-hidden />Edit</Button></ContactDialog><TrackEvent email={c.email} events={events} automations={autoNames} /></>} />
       {actionErr && <ErrorState className="mb-6" error={actionErr} />}
       {suppressed && (
@@ -106,6 +107,10 @@ export default async function ContactDetail({ params, searchParams }: { params: 
               <KeyValue items={[["First name", show(c.first_name)], ["Last name", show(c.last_name)], ["Time zone", show(c.timezone)], ["Added", <RelativeTime key="a" value={c.created_at} />]]} />
               <div><p className="mb-1 text-xs text-muted">Contact ID</p><CopyField value={c.id} label="contact ID" /></div>
             </CardBody>
+          </Card>
+          <Card>
+            <CardHeader title="Lists" description="Where this person came from. They can be on many." />
+            <CardBody><ContactLists contact={{ id: c.id, email: c.email }} member={c.lists ?? []} lists={(Array.isArray(ls.data) ? ls.data : []) as ListItem[]} /></CardBody>
           </Card>
           <Card>
             <CardHeader title="Attributes" />

@@ -14,6 +14,8 @@ const WARN: Record<string, string> = {
   complaint: "It was suppressed after the recipient marked a message as spam.",
   unsubscribe: "It was suppressed because the recipient unsubscribed.",
   spam_trap: "It was suppressed as a suspected spam trap.",
+  source_deleted: "It was suppressed because the account was deleted at the contact source it came from.",
+  source_suspended: "It was suppressed because the account is suspended at the contact source it came from.",
 };
 
 /** Suppress / unsuppress and delete. Each asks first; delete also needs the email typed. */

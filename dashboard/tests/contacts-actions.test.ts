@@ -132,3 +132,155 @@ describe("segments", () => {
     expect(r.ok).toBe("Added 3000");
   });
 });
+
+// ------------------------------------------------------------------ lists and list targets
+import { addToList, deleteList, previewImportChunk, removeFromList, saveList } from "@/app/(app)/contacts/actions";
+
+describe("saveList", () => {
+  it("needs a name, without calling the API", async () => {
+    expect((await saveList({}, form({ name: "  " }))).error?.field).toBe("name");
+    expect(api).not.toHaveBeenCalled();
+  });
+  it("create POSTs the trimmed name, leaving a blank description out", async () => {
+    api.mockResolvedValueOnce(ok({ id: "l1", name: "Acme customers" }));
+    expect(await saveList({}, form({ name: " Acme customers ", description: " " }))).toEqual({ ok: "Created Acme customers", id: "l1" });
+    expect(api).toHaveBeenCalledWith("POST", "/v1/lists", { name: "Acme customers", description: undefined });
+  });
+  it("edit PATCHes, sending a blank description so it clears", async () => {
+    api.mockResolvedValueOnce(ok({ id: "l1" }));
+    expect(await saveList({}, form({ id: "l1", name: "Renamed", description: "" }))).toEqual({ ok: "Saved Renamed", id: "l1" });
+    expect(api).toHaveBeenCalledWith("PATCH", "/v1/lists/l1", { name: "Renamed", description: "" });
+  });
+  it("API errors come back as state so the dialog stays open", async () => {
+    api.mockResolvedValueOnce(fail("conflict", "A list named Acme customers already exists", { field: "name" }));
+    const r = await saveList({}, form({ name: "Acme customers" }));
+    expect([r.error?.code, r.error?.field, r.ok]).toEqual(["conflict", "name", undefined]);
+  });
+});
+
+describe("deleteList", () => {
+  it("DELETEs and redirects to the Lists tab saying the contacts are untouched", async () => {
+    api.mockResolvedValueOnce(ok({ deleted: true }));
+    expect(await redirected(deleteList(form({ id: "l1", name: "Acme customers" })))).toBe("/contacts?tab=lists&ok=Deleted%20Acme%20customers%3B%20its%20contacts%20are%20untouched");
+    expect(api).toHaveBeenCalledWith("DELETE", "/v1/lists/l1");
+  });
+  it("redirects back to the Lists tab with the API error", async () => {
+    api.mockResolvedValueOnce(fail("not_found", "list not found", { hint: "gone?" }));
+    expect(await redirected(deleteList(form({ id: "l1", name: "x" })))).toBe("/contacts?tab=lists&err=not_found%7Clist%20not%20found%7Cgone%3F");
+  });
+});
+
+describe("addToList", () => {
+  it("needs a contact, and a list", async () => {
+    expect((await addToList({}, form({ list_id: "l1" }))).error?.message).toMatch(/at least one contact/);
+    expect((await addToList({}, form({ id: "c1" }))).error?.field).toBe("list_id");
+    expect(api).not.toHaveBeenCalled();
+  });
+  it("adds to an existing list and says which", async () => {
+    api.mockResolvedValueOnce(ok({ added: 2 }));
+    const r = await addToList({}, form({ id: ["c1", "c2"], list_id: "l1", list_label: "Acme customers" }));
+    expect(api).toHaveBeenCalledWith("POST", "/v1/lists/l1/members", { contact_ids: ["c1", "c2"] });
+    expect(r).toEqual({ ok: "Added 2 contacts to Acme customers", id: "l1" });
+  });
+  it("uses the singular for one contact", async () => {
+    api.mockResolvedValueOnce(ok({ added: 1 }));
+    expect((await addToList({}, form({ id: "c1", list_id: "l1" }))).ok).toBe("Added 1 contact");
+  });
+  it("creates the new list first, then adds into it (list_id=new or a bare new_name)", async () => {
+    for (const pick of [{ list_id: "new" }, {}] as Record<string, string>[]) {
+      api.mockReset();
+      api.mockResolvedValueOnce(ok({ id: "l9" })).mockResolvedValueOnce(ok({ added: 1 }));
+      const r = await addToList({}, form({ id: "c1", new_name: " VIPs ", ...pick }));
+      expect(api.mock.calls.map((c) => [c[0], c[1]])).toEqual([["POST", "/v1/lists"], ["POST", "/v1/lists/l9/members"]]);
+      expect(api).toHaveBeenNthCalledWith(1, "POST", "/v1/lists", { name: "VIPs" });
+      expect(r).toEqual({ ok: "Added 1 contact to VIPs", id: "l9" });
+    }
+  });
+  it("asks for a name when 'new list' is picked without one", async () => {
+    expect((await addToList({}, form({ id: "c1", list_id: "new" }))).error?.field).toBe("new_name");
+    expect(api).not.toHaveBeenCalled();
+  });
+  it("a 409 on the new list's name lands on the new_name field and adds nothing", async () => {
+    api.mockResolvedValueOnce(fail("conflict", "A list named VIPs already exists", { field: "name", hint: "Pick another name." }));
+    const r = await addToList({}, form({ id: "c1", new_name: "VIPs" }));
+    expect([r.error?.code, r.error?.field, r.error?.hint]).toEqual(["conflict", "new_name", "Pick another name."]);
+    expect(api).toHaveBeenCalledTimes(1);
+  });
+  it("leaves other error fields alone", async () => {
+    api.mockResolvedValueOnce(fail("invalid_request", "name too long", { field: "description" }));
+    expect((await addToList({}, form({ id: "c1", new_name: "x" }))).error?.field).toBe("description");
+  });
+  it("sends 1000 contacts per request and sums what was added", async () => {
+    api.mockResolvedValueOnce(ok({ added: 1000 })).mockResolvedValueOnce(ok({ added: 1000 })).mockResolvedValueOnce(ok({ added: 5 }));
+    const ids = Array.from({ length: 2001 }, (_, i) => `c${i}`);
+    const r = await addToList({}, form({ id: ids, list_id: "l1" }));
+    expect(api.mock.calls.map((c) => (c[2] as { contact_ids: string[] }).contact_ids.length)).toEqual([1000, 1000, 1]);
+    expect(r.ok).toBe("Added 2005 contacts");
+  });
+  it("stops at the first failing chunk", async () => {
+    api.mockResolvedValueOnce(ok({ added: 1000 })).mockResolvedValueOnce(fail("not_found", "list not found"));
+    const r = await addToList({}, form({ id: Array.from({ length: 2500 }, (_, i) => `c${i}`), list_id: "l1" }));
+    expect([r.error?.code, api.mock.calls.length]).toEqual(["not_found", 2]);
+  });
+});
+
+describe("removeFromList", () => {
+  it("POSTs to members/remove and says the list by name", async () => {
+    api.mockResolvedValueOnce(ok({ removed: 2 }));
+    const r = await removeFromList({}, form({ id: ["c1", "c2"], list_id: "l1", list_label: "Acme customers" }));
+    expect(api).toHaveBeenCalledWith("POST", "/v1/lists/l1/members/remove", { contact_ids: ["c1", "c2"] });
+    expect(r.ok).toBe("Removed 2 contacts from Acme customers");
+  });
+  it("falls back to 'the list', singular for one", async () => {
+    api.mockResolvedValueOnce(ok({ removed: 1 }));
+    expect((await removeFromList({}, form({ id: "c1", list_id: "l1" }))).ok).toBe("Removed 1 contact from the list");
+  });
+  it("chunks by 1000 and returns the API error", async () => {
+    api.mockResolvedValueOnce(ok({ removed: 1000 })).mockResolvedValueOnce(fail("forbidden_scope", "needs manage"));
+    const r = await removeFromList({}, form({ id: Array.from({ length: 1001 }, (_, i) => `c${i}`), list_id: "l1" }));
+    expect([r.error?.code, api.mock.calls.map((c) => (c[2] as { contact_ids: string[] }).contact_ids.length)]).toEqual(["forbidden_scope", [1000, 1]]);
+  });
+});
+
+describe("import into a list", () => {
+  const rows = [{ email: "a@b.co" }];
+  it("importContactsChunk sends list_id for an existing list", async () => {
+    api.mockResolvedValueOnce(ok({ imported: 1, failed: [] }));
+    await importContactsChunk(rows, { id: "l1" });
+    expect(api).toHaveBeenCalledWith("POST", "/v1/contacts/import", { contacts: rows, list_id: "l1" });
+  });
+  it("importContactsChunk sends list_name for a new one", async () => {
+    api.mockResolvedValueOnce(ok({ imported: 1, failed: [] }));
+    await importContactsChunk(rows, { name: "Webinar leads" });
+    expect(api).toHaveBeenCalledWith("POST", "/v1/contacts/import", { contacts: rows, list_name: "Webinar leads" });
+  });
+  it("an id wins over a name; no target (or null) sends neither", async () => {
+    api.mockResolvedValue(ok({ imported: 1, failed: [] }));
+    await importContactsChunk(rows, { id: "l1", name: "ignored" });
+    await importContactsChunk(rows, null);
+    await importContactsChunk(rows, {});
+    expect(api.mock.calls.map((c) => c[2])).toEqual([{ contacts: rows, list_id: "l1" }, { contacts: rows }, { contacts: rows }]);
+  });
+  it("previewImportChunk is a dry run and returns the rows and the list that would be used", async () => {
+    const list = { id: null, name: "Webinar leads", exists: false };
+    api.mockResolvedValueOnce(ok({ rows: [{ index: 0, email: "a@b.co", action: "new" }], list }));
+    expect(await previewImportChunk(rows, { name: "Webinar leads" })).toEqual({ rows: [{ index: 0, email: "a@b.co", action: "new" }], list });
+    expect(api).toHaveBeenCalledWith("POST", "/v1/contacts/import", { contacts: rows, dry_run: true, list_name: "Webinar leads" });
+  });
+  it("previewImportChunk with an existing list sends list_id; with none, no list and an empty rows default", async () => {
+    api.mockResolvedValueOnce(ok({ rows: [] }));
+    expect(await previewImportChunk(rows, { id: "l1" })).toEqual({ rows: [], list: null });
+    expect(api).toHaveBeenLastCalledWith("POST", "/v1/contacts/import", { contacts: rows, dry_run: true, list_id: "l1" });
+    api.mockResolvedValueOnce(ok({ rows: [] }));
+    await previewImportChunk(rows);
+    expect(api).toHaveBeenLastCalledWith("POST", "/v1/contacts/import", { contacts: rows, dry_run: true });
+  });
+  it("previewImportChunk returns the API error so the dialog can stop", async () => {
+    api.mockResolvedValueOnce(fail("invalid_request", "list_id and list_name are mutually exclusive"));
+    expect(await previewImportChunk(rows, { id: "l1" })).toEqual({ rows: [], list: null, error: { code: "invalid_request", message: "list_id and list_name are mutually exclusive" } });
+  });
+  it("importContactsChunk returns the API error for an unknown list", async () => {
+    api.mockResolvedValueOnce(fail("not_found", "list not found"));
+    expect(await importContactsChunk(rows, { id: "gone" })).toEqual({ imported: 0, failed: [], error: { code: "not_found", message: "list not found" } });
+  });
+});

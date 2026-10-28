@@ -71,6 +71,8 @@ Resources and methods:
 | `templates` | `create` `get` (adds `source_format` + `source`) `list` `update` (alias, stream, preheader) `publish` (`{ version }`) `preview` (saved `version` or unsaved `draft` content) `versions` `version` `restore` `discardDraft` `import` `export` |
 | `contacts` | `upsert` `get` `list` (`q`) `update` `remove` `activity` `import` (up to 5000, bad rows come back in `failed`) |
 | `segments` | `create` `list` `preview` `update` `remove` `addMembers` |
+| `lists` | `create` `list` `get` `update` `remove` `addMembers` `removeMembers` (a list is a manual segment with an `origin`: manual, import or source; contacts carry `lists`, `contacts.list` takes a `list` filter on the REST route) |
+| `contactSources` | `create` `list` `get` `update` (rotate `key`) `remove` (`{ deleteList }`) `test` `sync` `preview` (pull contacts from another product's API; see `docs/CONTACT-SOURCES.md`) |
 | `events` | `track` `names` |
 | `automations` | `create` `get` `list` (`status`) `publish` `pause` `resume` `archive` `unarchive` `test` `run` `runs` |
 | `approvals` | `list` `get` `decide(id, decision, reason?)` (admin key only; agent keys get 403) |

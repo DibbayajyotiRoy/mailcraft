@@ -5,7 +5,7 @@ const push = vi.fn(), refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 const A = vi.hoisted(() => ({
   saveContact: vi.fn(), saveSegment: vi.fn(), previewSegment: vi.fn(), addSegmentMembers: vi.fn(), deleteSegment: vi.fn(),
-  deleteContact: vi.fn(), suppressContact: vi.fn(), unsuppressContact: vi.fn(), trackEvent: vi.fn(), importContactsChunk: vi.fn(),
+  deleteContact: vi.fn(), suppressContact: vi.fn(), unsuppressContact: vi.fn(), trackEvent: vi.fn(), importContactsChunk: vi.fn(), previewImportChunk: vi.fn(),
 }));
 vi.mock("@/app/(app)/contacts/actions", () => A);
 vi.mock("@/lib/actions", () => ({ createKey: vi.fn() }));
@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 const fd = (fn: { mock: { calls: unknown[][] } }, call = 0, arg = 1) => fn.mock.calls[call][arg] as FormData;
 const open = (name: string | RegExp) => fireEvent.click(screen.getByRole("button", { name }));
 
-beforeEach(() => { vi.clearAllMocks(); A.saveContact.mockResolvedValue({}); A.saveSegment.mockResolvedValue({}); A.trackEvent.mockResolvedValue({}); });
+beforeEach(() => { vi.clearAllMocks(); A.previewImportChunk.mockResolvedValue({ rows: [], list: null }); A.saveContact.mockResolvedValue({}); A.saveSegment.mockResolvedValue({}); A.trackEvent.mockResolvedValue({}); });
 
 describe("contact form", () => {
   it("validates email and attributes before calling the server; time zone is a grouped select", async () => {
@@ -222,8 +222,24 @@ describe("csv import", () => {
     expect((await screen.findByText(/ready to import/)).textContent).toMatch(/2 ready to import, 2 will be skipped/);
     expect(screen.getByText("Not a valid email address.")).toBeTruthy();
     expect(screen.getByText("Same address as row 2.")).toBeTruthy();
-    expect(screen.getByRole("table", { name: "First rows to import" })).toBeTruthy();
     expect(A.importContactsChunk).not.toHaveBeenCalled();
+  });
+  it("asks the server what would change and shows it as a diff before importing", async () => {
+    A.previewImportChunk.mockResolvedValue({
+      list: { id: null, name: "Import", exists: false },
+      rows: [
+        { index: 0, email: "ana@example.com", status: "new", changes: [], list: "add", values: { first_name: "Ana", properties: { plan: "pro" } } },
+        { index: 1, email: "ben@example.com", status: "update", changes: [{ field: "first_name", old: "Benjamin", new: "Ben" }], list: "add" },
+      ],
+    });
+    render(<ImportContacts />);
+    open(/Import CSV/);
+    fireEvent.change(await screen.findByLabelText("Or paste the CSV"), { target: { value: "email,first_name\nana@example.com,Ana\nben@example.com,Ben" } });
+    const table = await screen.findByRole("table", { name: "What the import would change" });
+    expect(within(table).getByText("Benjamin").tagName).toBe("DEL");
+    expect(within(table).getAllByText("Ben").some((e) => e.tagName === "INS")).toBe(true);
+    expect(A.previewImportChunk.mock.calls[0][1]).toEqual({ name: expect.stringMatching(/^Import \d{4}-\d{2}-\d{2}$/) }); // pasted text: a dated suggestion
+    expect(A.importContactsChunk).not.toHaveBeenCalled(); // the preview writes nothing
   });
   it("sends the valid rows in chunks of 500 and summarises what was skipped", async () => {
     A.importContactsChunk.mockImplementation(async (rows: unknown[]) => ({ imported: rows.length - (rows.length === 1 ? 1 : 0), failed: rows.length === 1 ? [{ index: 0, email: "z1000@example.com", message: "Rejected" }] : [] }));

@@ -68,7 +68,13 @@ pub struct CreateBroadcast {
     /// Default `marketing`.
     #[serde(default)]
     pub stream: Option<Stream>,
+    /// The audience: rows given inline...
+    #[serde(default)]
     pub recipients: Vec<Recipient>,
+    /// ...or a contact list (id or name), up to 5000 members. Suppressed and opted-out members are
+    /// screened like any other row. Not both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_id: Option<String>,
     /// Upper bound on sends per day (the lowest of this and the transport / key caps applies).
     #[serde(default)]
     pub max_per_day: Option<u32>,
@@ -258,7 +264,10 @@ async fn analyze(
 ) -> ApiResult<Analysis> {
     let ws = key.workspace_id;
     if req.recipients.is_empty() || req.recipients.len() > MAX_ROWS {
-        return Err(invalid(format!("`recipients` needs 1-{MAX_ROWS} rows")).field("recipients"));
+        return Err(invalid(format!(
+            "`recipients` needs 1-{MAX_ROWS} rows (or pass `list_id`)"
+        ))
+        .field("recipients"));
     }
     let stream = req.stream.unwrap_or(Stream::Marketing);
     let override_subject = clean(&req.subject);
@@ -518,21 +527,73 @@ fn summary(a: &Analysis) -> Value {
     json!({"queued": a.items.len(), "skipped": a.skipped, "schedule": a.schedule})
 }
 
+/// `req` with `recipients` filled from `list_id`, when that is how the audience is given.
+async fn with_audience(
+    st: &AppState,
+    ws: Uuid,
+    req: &CreateBroadcast,
+) -> ApiResult<CreateBroadcast> {
+    let Some(l) = req
+        .list_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+    else {
+        return Ok(req.clone());
+    };
+    if !req.recipients.is_empty() {
+        return Err(invalid("pass recipients or list_id, not both").field("list_id"));
+    }
+    let list = crate::lists::resolve(st, ws, l)
+        .await
+        .map_err(|e| e.field("list_id"))?;
+    let rows: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT c.email, c.first_name, c.last_name FROM segment_members m JOIN contacts c ON c.id = m.contact_id \
+         WHERE m.segment_id = $1 AND c.workspace_id = $2 ORDER BY c.email LIMIT $3",
+    )
+    .bind(list)
+    .bind(ws)
+    .bind(MAX_ROWS as i64 + 1)
+    .fetch_all(&st.db)
+    .await?;
+    if rows.len() > MAX_ROWS {
+        return Err(invalid(format!(
+            "the list has more than {MAX_ROWS} members; a broadcast takes at most {MAX_ROWS}"
+        ))
+        .field("list_id"));
+    }
+    if rows.is_empty() {
+        return Err(invalid("the list has no members").field("list_id"));
+    }
+    let mut out = req.clone();
+    out.recipients = rows
+        .into_iter()
+        .map(|(email, first_name, last_name)| Recipient {
+            email,
+            first_name,
+            last_name,
+            data: None,
+        })
+        .collect();
+    Ok(out)
+}
+
 pub async fn create(
     State(st): State<AppState>,
     auth: Auth,
     headers: HeaderMap,
-    ApiJson(req): ApiJson<CreateBroadcast>,
+    ApiJson(sent): ApiJson<CreateBroadcast>,
 ) -> ApiResult {
     auth.require(Scope::Send)?;
     let key = &auth.0;
+    let req = with_audience(&st, key.workspace_id, &sent).await?;
     if req.dry_run {
         let a = analyze(&st, key, &req, false).await?;
         let mut d = summary(&a);
         d["dry_run"] = json!(true);
         return Ok(envelope(StatusCode::OK, d));
     }
-    let mut g = begin!(st, auth, headers, "POST /v1/broadcasts", req);
+    let mut g = begin!(st, auth, headers, "POST /v1/broadcasts", sent);
     let a = analyze(&st, key, &req, true).await?;
     let ws = key.workspace_id;
 

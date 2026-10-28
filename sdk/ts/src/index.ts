@@ -12,6 +12,10 @@ export type BroadcastResult = components["schemas"]["BroadcastResult"];
 export type Broadcast = components["schemas"]["Broadcast"];
 export type BroadcastDetail = components["schemas"]["BroadcastDetail"];
 export type PatchTemplate = components["schemas"]["PatchTemplate"];
+export type ContactList = components["schemas"]["List"];
+export type ListMembers = components["schemas"]["ListMembers"];
+export type ContactSource = components["schemas"]["ContactSource"];
+export type CreateContactSource = components["schemas"]["CreateContactSource"];
 export type ApiError = { code: string; message: string; field?: string; hint?: string; doc_url?: string; retryable: boolean };
 export type Result<T> =
   | { data: T; error: null; requestId?: string; nextCursor?: string | null }
@@ -51,6 +55,11 @@ export type Segment = { id: string; name: string; filter: Obj | null; member_cou
 export type SegmentPreview = { count: number; sample: { email: string; first_name: string | null; last_name: string | null }[] };
 export type EventResult = { event_id: string; contact_id: string; triggered_automations: { id: string; run_id: string }[]; would_send: Obj[] };
 export type EventName = { name: string; count: number; last_seen_at: string };
+export type ListMembersResult = { list_id: string; added: number; already_members: number; not_found: number };
+export type SourceTest = { ok: true; sample_count: number; has_more: boolean; fields: string[]; property_keys: string[] } | { ok: false; error: string };
+/** A failed pull is still a 200 with ok:false (the reason is also on the source). */
+export type SyncResult = { id: string; ok: boolean; error: string | null; counts: { created: number; updated: number; skipped: number; deleted: number; fetched: number; reasons?: Record<string, number> } | null; watermark: string | null; duration_ms: number };
+export type SyncPreview = { ok: true; dry_run: true; sample: true; has_more: boolean; summary: { new: number; update: number; unchanged: number; skipped: number }; list: { id: string; name: string } | null; rows: Obj[] } | { ok: false; error: string };
 export type Automation = { id: string; name: string; status?: string; trigger: Obj; steps: Obj[] } & Obj;
 export type AutomationRun = { id: string; version: number; contact_id: string; contact_email: string; state: string; current_step: string | null; next_wake_at: string | null; started_at: string; ended_at: string | null; exit_reason: string | null; test: boolean };
 export type AutomationRunDetail = AutomationRun & { steps: { step_key: string; result: Obj; at: string }[] };
@@ -172,6 +181,35 @@ export class Mailcraft {
     /** 409 invalid_state while an automation still names the segment. */
     remove: (id: string) => this.request<{ id: string; deleted: true }>("DELETE", `/v1/segments/${enc(id)}`),
     addMembers: (id: string, emails: string[], o?: Opts) => this.send<Obj>("POST", `/v1/segments/${enc(id)}/members`, { emails }, o),
+  };
+  /** Lists are manual segments with an origin (manual | import | source). Scope manage. Names are unique across lists and segments. */
+  lists = {
+    create: (l: { name: string; description?: string }, o?: Opts) => this.send<ContactList>("POST", "/v1/lists", l, o),
+    list: () => this.get<ContactList[]>("/v1/lists"),
+    get: (id: string) => this.get<ContactList>(`/v1/lists/${enc(id)}`),
+    /** `description: ""` clears it. */
+    update: (id: string, l: { name?: string; description?: string }, o?: Opts) => this.send<ContactList>("PATCH", `/v1/lists/${enc(id)}`, l, o),
+    /** Contacts stay. 409 while a contact source feeds the list or an automation names it. */
+    remove: (id: string) => this.request<{ id: string; deleted: true }>("DELETE", `/v1/lists/${enc(id)}`),
+    /** 1 to 1000 ids and/or emails per call; an unknown email becomes a contact. */
+    addMembers: (id: string, m: ListMembers, o?: Opts) => this.send<ListMembersResult>("POST", `/v1/lists/${enc(id)}/members`, m, o),
+    removeMembers: (id: string, m: ListMembers, o?: Opts) => this.send<{ list_id: string; removed: number }>("POST", `/v1/lists/${enc(id)}/members/remove`, m, o),
+  };
+  /** Pull contacts from another product's HTTP API (docs/CONTACT-SOURCES.md). Scope manage. The `key` is write-only: never returned. */
+  contactSources = {
+    create: (s: CreateContactSource, o?: Opts) => this.send<ContactSource>("POST", "/v1/contact-sources", s, o),
+    list: () => this.get<ContactSource[]>("/v1/contact-sources"),
+    get: (id: string) => this.get<ContactSource>(`/v1/contact-sources/${enc(id)}`),
+    /** Send `key` to rotate it; changing `url` makes the next run read everything again. */
+    update: (id: string, s: Partial<Omit<CreateContactSource, "list_name">>, o?: Opts) => this.send<ContactSource>("PATCH", `/v1/contact-sources/${enc(id)}`, s, o),
+    /** Contacts stay; the list is kept (detached) unless deleteList. */
+    remove: (id: string, o: { deleteList?: boolean } = {}) => this.request<{ id: string; deleted: true; list_deleted: boolean }>("DELETE", `/v1/contact-sources/${enc(id)}`, { query: { delete_list: o.deleteList } }),
+    /** Fetches one page with limit=1; writes nothing. Give url+key, or the id of a saved source for what you leave out. */
+    test: (t: { id?: string; url?: string; key?: string }) => this.send<SourceTest>("POST", "/v1/contact-sources/test", t),
+    /** Runs now and waits (can take minutes on a big source). 409 sync_in_progress while another run holds it. */
+    sync: (id: string) => this.request<SyncResult>("POST", `/v1/contact-sources/${enc(id)}/sync`),
+    /** Dry run of the next sync: the first page only, nothing written. */
+    preview: (id: string) => this.request<SyncPreview>("POST", `/v1/contact-sources/${enc(id)}/sync`, { query: { dry_run: true } }),
   };
   events = {
     /** Event names tracked in the last 90 days with counts, newest first. */

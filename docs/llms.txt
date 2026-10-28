@@ -22,6 +22,7 @@ Use test keys (`mc_test_...`) until a human approves go-live. Never print or ask
 ## Reference
 - [CLI](cli.md): commands, flags, exit codes (0 ok, 1 failure, 2 usage, 3 auth, 4 policy/approval, 5 retryable, 6 not found, 7 checks failed)
 - [Errors](errors/index.md): every core code with a fix; each error has `hint` and `doc_url`
+- [Contact sources and lists](CONTACT-SOURCES.md): pull contacts from another product's API into a list; `/v1/contact-sources`, `/v1/lists`, import into a list
 
 ## Optional
 - [Full docs in one file](llms-full.txt)

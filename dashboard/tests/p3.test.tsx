@@ -133,14 +133,14 @@ describe("contacts", () => {
     render(<TooltipProvider><ContactsView contacts={contacts} segments={[]} contactsError={null} segmentsError={null} tab="contacts" /></TooltipProvider>);
     expect(screen.getByText("suppressed")).toBeTruthy();
   });
-  it("segments tab shows counts and rule words, and offers edit and delete", () => {
+  it("segments tab shows counts and rule words, and offers edit and delete; manual lists live on the Lists tab", () => {
     render(<TooltipProvider><ContactsView contacts={[]} segments={[{ id: "s", name: "Pro", member_count: 1284, filter: { field: "properties.plan", op: "eq", value: "pro" } }, { id: "m", name: "VIPs" }]} contactsError={null} segmentsError={null} tab="segments" /></TooltipProvider>);
     expect(screen.getByText("1,284")).toBeTruthy();
     expect(screen.getByText("plan is “pro”")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit Pro" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Delete VIPs" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete Pro" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add contacts to Pro" })).toBeNull(); // rule-based: members come from the rules
-    expect(screen.getByRole("button", { name: "Add contacts to VIPs" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete VIPs" })).toBeNull(); // a manual segment is a list now
   });
   it("empty states point at the UI, not curl", () => {
     render(<TooltipProvider><ContactsView contacts={[]} segments={[]} contactsError={null} segmentsError={null} tab="contacts" /></TooltipProvider>);

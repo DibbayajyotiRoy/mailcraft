@@ -228,6 +228,7 @@ pub async fn serve(
     let mut tasks = tokio::task::JoinSet::new();
     tasks.spawn(engine.run(rx.clone()));
     tasks.spawn(crate::run_background(st.clone(), rx.clone()));
+    tasks.spawn(crate::contact_sources::run_loop(st.clone(), rx.clone()));
     // The API's own automations engine only ingests events; this one runs the timers.
     let journeys = auto::Engine::new(
         pool.clone(),

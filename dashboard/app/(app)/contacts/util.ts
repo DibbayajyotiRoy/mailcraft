@@ -2,8 +2,16 @@ import { ruleWords } from "@/lib/rules";
 
 export type Contact = {
   id?: string; email: string; name?: string; first_name?: string | null; last_name?: string | null; status?: string; timezone?: string | null;
-  properties?: Record<string, unknown>; created_at?: string; suppressed?: boolean; suppression_reason?: string | null;
+  properties?: Record<string, unknown>; created_at?: string; suppressed?: boolean; suppression_reason?: string | null; lists?: ListRef[];
 };
+export type ListOrigin = "manual" | "import" | "source";
+/** The lists a contact is on (GET /v1/contacts). */
+export type ListRef = { id: string; name: string; origin: ListOrigin };
+/** GET /v1/lists */
+export type ListItem = { id: string; name: string; description?: string | null; origin: ListOrigin; source_id?: string | null; detached?: boolean; member_count: number; created_at?: string };
+/** Lists a person can put contacts on by hand: not one a contact source fills. */
+export const pickableLists = (lists: ListItem[]) => lists.filter((l) => !(l.origin === "source" && !l.detached));
+export const originLabel = (l: Pick<ListItem, "origin" | "detached">) => (l.origin === "source" ? (l.detached ? "Source (detached)" : "Contact source") : l.origin === "import" ? "CSV import" : "Manual");
 export type Segment = { id: string; name: string; filter?: unknown; member_count?: number; members?: number; count?: number };
 
 /** GET /v1/contacts/{id}/activity */

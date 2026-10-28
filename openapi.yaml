@@ -356,13 +356,14 @@ paths:
         "501": { $ref: "#/components/responses/Error" }
     get:
       operationId: contact_list
-      summary: List contacts (scope manage). Each item carries `suppressed` and `suppression_reason`.
+      summary: List contacts (scope manage). Each item carries `suppressed`, `suppression_reason` and `lists`.
       parameters:
         - { name: limit, in: query, schema: { type: integer } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: q, in: query, description: "Case-insensitive substring of email, first or last name", schema: { type: string } }
+        - { name: list, in: query, description: "Only members of this list (id or exact name); 404 when there is no such list", schema: { type: string } }
       responses:
-        "200": { description: page of contacts }
+        "200": { description: "page of contacts; each carries `lists: [{id, name, origin}]`" }
         "501": { $ref: "#/components/responses/Error" }
   /v1/contacts/import:
     post:
@@ -371,6 +372,13 @@ paths:
       description: |
         Same semantics as `PUT /v1/contacts` per row. A bad row (invalid email or timezone) is skipped and
         reported in `failed` with its zero-based `index`; the rest are imported. Idempotent by `Idempotency-Key`.
+        With `list_id` (id or name of an existing list) or `list_name` (found, or created with origin `import`),
+        every imported contact, new or existing, is also added to that list; the answer carries `list_id`.
+        Not both. Repeating `list_name` across calls keeps filling the same list. Suppressions are not affected.
+        `dry_run: true` changes nothing (no contact, no list, no audit row) and answers
+        `{dry_run, summary: {new, update, unchanged, skipped, list_adds}, list: {id, name, exists} | null, rows}` with one row
+        per input: `{index, email, status: new|update|unchanged|skipped, changes: [{field, old, new}], list: add|already|null}`;
+        a skipped row has `reason` (`invalid_email`, `invalid_properties`, `invalid_timezone`) and `message`.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -380,6 +388,9 @@ paths:
               type: object
               required: [contacts]
               properties:
+                list_id: { type: string }
+                list_name: { type: string, maxLength: 100 }
+                dry_run: { type: boolean, default: false }
                 contacts:
                   type: array
                   minItems: 1
@@ -394,7 +405,8 @@ paths:
                       timezone: { type: string }
                       properties: { type: object }
       responses:
-        "200": { description: "`{imported, failed: [{index, email, error: {code, message}}]}`" }
+        "200": { description: "`{imported, failed: [{index, email, error: {code, message}}], list_id}`" }
+        "409": { $ref: "#/components/responses/Error" }
         "400": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/Error" }
   /v1/contacts/{id}:
@@ -483,7 +495,7 @@ paths:
         Returns `{count, sample: [{email, first_name, last_name}]}` (5 newest matches). The filter is a rule tree:
         `{"and":[..]}`, `{"or":[..]}`, `{"not":..}` or `{"field","op","value"}` with op one of
         `eq neq lt lte gt gte in contains exists`. Fields: `email`, `first_name`, `last_name`, `timezone`,
-        `created_at`, `properties.<key>`, `topic:<key>` (opted in), `event_count:<event>` and
+        `created_at`, `properties.<key>`, `topic:<key>` (opted in), `list:<id or name>` (true when the contact is on that list), `event_count:<event>` and
         `days_since:<event>` (whole days since the contact last tracked it; absent if never).
       requestBody:
         required: true
@@ -529,6 +541,184 @@ paths:
       responses:
         "200": { description: result }
         "501": { $ref: "#/components/responses/Error" }
+  /v1/lists:
+    post:
+      operationId: list_create
+      summary: Create a contact list (scope manage)
+      description: |
+        A list is a manual segment (no `filter`) that also knows its `origin`: `manual` (made here), `import`
+        (made by a CSV import) or `source` (fed by a contact source). It works anywhere a segment does:
+        the `segment.entered` trigger and `add_to_segment` step of automations, the `list:<id or name>` rule
+        field of segments, `GET /v1/contacts?list=` and the broadcast `list_id` audience. Names are unique
+        across lists and segments. Audited as `list.create`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name], additionalProperties: false, properties: { name: { type: string, maxLength: 100 }, description: { type: string, maxLength: 500 } } } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/List" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: list_list
+      summary: List contact lists with `member_count`, by name (scope manage)
+      responses:
+        "200": { description: lists, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/List" } } } } }
+  /v1/lists/{id}:
+    get:
+      operationId: list_get
+      summary: One list (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: list, content: { application/json: { schema: { $ref: "#/components/schemas/List" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: list_update
+      summary: Rename a list or change its description (scope manage)
+      description: |
+        `description: ""` clears it. 409 `invalid_state` when the name is taken, or when an automation refers to the
+        list by its current name (point it at the id first). Audited as `list.update`.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, properties: { name: { type: string, maxLength: 100 }, description: { type: string, maxLength: 500 } } } } }
+      responses:
+        "200": { description: list, content: { application/json: { schema: { $ref: "#/components/schemas/List" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: list_delete
+      summary: Delete a list; its contacts, events and suppressions are untouched (scope manage)
+      description: |
+        409 `invalid_state` while a contact source feeds the list (delete the source, optionally with its list) or an
+        automation still names it. Audited as `list.delete`.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: deleted }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/lists/{id}/members:
+    post:
+      operationId: list_add_members
+      summary: Add contacts to a list by id and/or email (scope manage)
+      description: |
+        1 to 1000 entries in total. An email that is not a contact yet becomes one. Idempotent; returns
+        `{list_id, added, already_members, not_found}` (`not_found` counts unknown contact ids). Suppressions are
+        not affected: a suppressed contact can be on a list and still receives nothing. Audited as `list.members_add`.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ListMembers" } } }
+      responses:
+        "200": { description: counts }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/lists/{id}/members/remove:
+    post:
+      operationId: list_remove_members
+      summary: Remove contacts from a list by id and/or email; the contacts stay (scope manage)
+      description: |
+        1 to 1000 entries in total. Returns `{list_id, removed}`. On a source list the next sync adds a contact back
+        while the source still returns it. Audited as `list.members_remove`.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ListMembers" } } }
+      responses:
+        "200": { description: counts }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/contact-sources:
+    post:
+      operationId: contact_source_create
+      summary: Pull contacts from another product's HTTP API (scope manage)
+      description: |
+        mailcraft calls `GET <url>?limit=500&cursor=..&updated_since=..` with `Authorization: Bearer <key>` every
+        `interval_minutes` and upserts what it returns; see docs/CONTACT-SOURCES.md for the contract. The `url`
+        may be an internal address; it must be http(s) without credentials. The `key` is sealed at rest and never
+        returned. A list named `list_name` (default: `name`) is created for the source and every synced contact joins
+        it. The first run starts within a minute. Audited as `contact_source.create`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateContactSource" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/ContactSource" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: contact_source_list
+      summary: List contact sources with their last run (scope manage)
+      responses:
+        "200": { description: sources, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ContactSource" } } } } }
+  /v1/contact-sources/test:
+    post:
+      operationId: contact_source_test
+      summary: Check a URL and key by fetching one page with `limit=1`; writes nothing (scope manage)
+      description: |
+        Give `url` and `key`, or the `id` of a saved source (its stored URL and key fill what you leave out).
+        Always 200: `{ok: true, sample_count, has_more, fields, property_keys}` or `{ok: false, error}`.
+        `fields` and `property_keys` are the first row's field names, never its values.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, properties: { id: { type: string, format: uuid }, url: { type: string }, key: { type: string } } } } }
+      responses:
+        "200": { description: result }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/contact-sources/{id}:
+    get:
+      operationId: contact_source_get
+      summary: One contact source (scope manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: source, content: { application/json: { schema: { $ref: "#/components/schemas/ContactSource" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: contact_source_update
+      summary: Edit a source, rotate its key, pause it (scope manage)
+      description: |
+        Send `key` to rotate it. Changing `url` clears the watermark, so the next run reads everything again.
+        Audited as `contact_source.update` (field names only).
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, properties: { name: { type: string }, url: { type: string }, key: { type: string }, enabled: { type: boolean }, interval_minutes: { type: integer, minimum: 1, maximum: 1440 }, full_sync_hours: { type: integer, minimum: 0, maximum: 720 } } } } }
+      responses:
+        "200": { description: source, content: { application/json: { schema: { $ref: "#/components/schemas/ContactSource" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: contact_source_delete
+      summary: Delete a source; contacts and suppressions stay (scope manage)
+      description: |
+        The source's list is kept and becomes `detached` unless `delete_list=true` (members still stay contacts).
+        409 when `delete_list=true` and an automation still names the list. Audited as `contact_source.delete`.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: delete_list, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200": { description: "`{id, deleted, list_deleted}`" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/contact-sources/{id}/sync:
+    post:
+      operationId: contact_source_sync
+      summary: Run a source now and wait for it (scope manage)
+      description: |
+        Returns `{id, ok, error, counts: {created, updated, skipped, deleted, fetched, reasons}, watermark, duration_ms}`.
+        A failed pull is still 200 with `ok: false` (the reason is also on the source). 409 `sync_in_progress` while
+        another run holds the source. At most 50,000 rows per run; a larger source finishes over several runs.
+        Audited as `contact_source.sync`. With `dry_run=true` it fetches only the first page and answers
+        `{ok, dry_run, sample: true, has_more, summary, list, rows}` (rows shaped as in `POST /v1/contacts/import`
+        `dry_run`, plus `external_id`) without writing anything; a failing source answers `{ok: false, error}`.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: dry_run, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200": { description: run result }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/events:
     post:
       operationId: event_send
@@ -821,7 +1011,7 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
         - { name: cursor, in: query, schema: { type: string } }
-        - { name: reason, in: query, schema: { type: string, enum: [hard_bounce, soft_bounce_limit, complaint, unsubscribe, manual, spam_trap] } }
+        - { name: reason, in: query, schema: { type: string, enum: [hard_bounce, soft_bounce_limit, complaint, unsubscribe, manual, spam_trap, source_deleted, source_suspended] } }
       responses:
         "200": { description: page of suppressions }
   /v1/suppressions/{id}:
@@ -1364,6 +1554,52 @@ components:
         approval_id: { type: string, format: uuid }
         policy_decisions: { type: array, items: { type: object } }
         recipients: { type: array, items: { type: object, properties: { email: { type: string }, id: { type: string, format: uuid } } } }
+    List:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        origin: { type: string, enum: [manual, import, source] }
+        source_id: { type: [string, "null"], format: uuid, description: the contact source feeding the list; null once the source is deleted }
+        detached: { type: boolean, description: origin is `source` but the source is gone }
+        member_count: { type: integer }
+        created_at: { type: string, format: date-time }
+    ListMembers:
+      type: object
+      additionalProperties: false
+      properties:
+        contact_ids: { type: array, items: { type: string, format: uuid } }
+        emails: { type: array, items: { type: string } }
+    CreateContactSource:
+      type: object
+      required: [name, url, key]
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 100 }
+        url: { type: string, description: "http(s) endpoint implementing the pull contract; private and loopback addresses are allowed" }
+        key: { type: string, description: "sent as `Authorization: Bearer <key>`; write-only" }
+        interval_minutes: { type: integer, minimum: 1, maximum: 1440, default: 15 }
+        full_sync_hours: { type: integer, minimum: 0, maximum: 720, default: 24, description: "also read everything (no updated_since) this often; 0 = never" }
+        enabled: { type: boolean, default: true }
+        list_name: { type: string, maxLength: 100, description: "display name of the source's list (default: name)" }
+    ContactSource:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        url: { type: string }
+        enabled: { type: boolean }
+        interval_minutes: { type: integer }
+        full_sync_hours: { type: integer }
+        last_full_at: { type: [string, "null"], format: date-time, description: when a run last read the whole source }
+        watermark: { type: [string, "null"], format: date-time, description: "where the next incremental run resumes (it sends 5 minutes before it as updated_since): the source's synced_at after a finished run, the newest updated_at after a run stopped at a cap" }
+        last_run_at: { type: [string, "null"], format: date-time }
+        last_status: { type: [string, "null"], enum: [ok, error, null] }
+        last_error: { type: [string, "null"] }
+        last_counts: { type: [object, "null"], properties: { created: { type: integer }, updated: { type: integer }, skipped: { type: integer }, deleted: { type: integer }, fetched: { type: integer }, reasons: { type: object, additionalProperties: { type: integer } } } }
+        created_at: { type: string, format: date-time }
+        list: { type: [object, "null"], properties: { id: { type: string, format: uuid }, name: { type: string } } }
     BroadcastRecipient:
       type: object
       required: [email]
@@ -1375,14 +1611,16 @@ components:
         data: { type: object, description: "extra columns, usable as {{ data.<column> }}; keys are letters, digits and _, values are text, numbers or booleans" }
     CreateBroadcast:
       type: object
-      required: [template_id, from, recipients]
+      required: [template_id, from]
       additionalProperties: false
+      description: The audience is `recipients` or `list_id`, exactly one of them.
       properties:
         template_id: { type: string, description: id or alias }
         from: { type: string }
         subject: { type: string, description: replaces the template subject; may use the same variables }
         stream: { type: string, enum: [transactional, marketing], default: marketing }
         recipients: { type: array, minItems: 1, maxItems: 5000, items: { $ref: "#/components/schemas/BroadcastRecipient" } }
+        list_id: { type: string, description: "a contact list (id or name) with 1-5000 members; each member is screened like an inline row (suppressed and opted-out contacts are skipped); only first_name and last_name are available as variables" }
         max_per_day: { type: integer, minimum: 1, description: "upper bound on sends per day; the lowest of this and the transport / key caps applies" }
         transport_id: { type: string, format: uuid, description: "send through this transport; see SendEmail" }
         dry_run: { type: boolean, default: false }
