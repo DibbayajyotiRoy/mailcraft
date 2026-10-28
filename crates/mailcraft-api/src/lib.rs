@@ -16,12 +16,15 @@ pub mod auth;
 pub mod automations;
 pub mod broadcasts;
 pub mod caps;
+pub mod contact_sources;
+pub mod diff;
 pub mod emails;
 pub mod error;
 pub mod idem;
 pub mod ingest;
 pub mod integrations;
 pub mod keys;
+pub mod lists;
 pub mod metrics;
 pub mod ops;
 pub mod page;
@@ -264,6 +267,26 @@ pub fn router(st: AppState) -> Router {
             post(integrations::segments_members),
         )
         .route("/v1/events", post(integrations::events_track))
+        // lists (manual segments with an origin) and contact sources (pulled from another product)
+        .route("/v1/lists", post(lists::create).get(lists::list))
+        .route(
+            "/v1/lists/{id}",
+            get(lists::get).patch(lists::patch).delete(lists::delete),
+        )
+        .route("/v1/lists/{id}/members", post(lists::members_add))
+        .route("/v1/lists/{id}/members/remove", post(lists::members_remove))
+        .route(
+            "/v1/contact-sources",
+            post(contact_sources::create).get(contact_sources::list),
+        )
+        .route("/v1/contact-sources/test", post(contact_sources::test))
+        .route(
+            "/v1/contact-sources/{id}",
+            get(contact_sources::get)
+                .patch(contact_sources::patch)
+                .delete(contact_sources::delete),
+        )
+        .route("/v1/contact-sources/{id}/sync", post(contact_sources::sync))
         // approvals, go-live, policy, kill switch, audit
         .route("/v1/approvals", get(ops::approvals_list))
         .route("/v1/approvals/{id}", get(ops::approvals_get))

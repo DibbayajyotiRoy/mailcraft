@@ -63,6 +63,11 @@ pub fn normalize_email(raw: &str) -> Result<String> {
     }
 }
 
+/// True for an IANA zone name (`Europe/Berlin`).
+pub fn valid_timezone(t: &str) -> bool {
+    t.parse::<chrono_tz::Tz>().is_ok()
+}
+
 pub async fn upsert_contact(
     db: impl PgExecutor<'_>,
     workspace_id: Uuid,

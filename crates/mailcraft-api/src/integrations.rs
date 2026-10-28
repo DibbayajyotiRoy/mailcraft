@@ -20,7 +20,7 @@ use crate::{
     state::AppState,
 };
 
-async fn record(st: &AppState, auth: &Auth, action: &str, args: Value) -> ApiResult<()> {
+pub(crate) async fn record(st: &AppState, auth: &Auth, action: &str, args: Value) -> ApiResult<()> {
     audit::append_standalone(
         &st.db,
         auth.0.workspace_id,
@@ -234,6 +234,8 @@ pub struct ListQ {
     cursor: Option<String>,
     /// Case-insensitive substring of email / first name / last name.
     q: Option<String>,
+    /// Only members of this list (id or name).
+    list: Option<String>,
 }
 
 pub async fn contacts_list(
@@ -242,14 +244,14 @@ pub async fn contacts_list(
     Query(q): Query<ListQ>,
 ) -> ApiResult {
     auth.require(Scope::Manage)?;
+    let ws = auth.0.workspace_id;
+    let list = match q.list.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        Some(l) => Some(crate::lists::resolve(&st, ws, l).await?),
+        None => None,
+    };
     let p = st
         .contacts
-        .list(
-            auth.0.workspace_id,
-            q.limit.unwrap_or(25).clamp(1, 100),
-            q.cursor,
-            q.q,
-        )
+        .list(ws, q.limit.unwrap_or(25).clamp(1, 100), q.cursor, q.q, list)
         .await?;
     Ok(envelope_list(p.items, p.next_cursor))
 }
@@ -669,6 +671,16 @@ const IMPORT_MAX: usize = 5000;
 #[serde(deny_unknown_fields)]
 pub struct ImportContacts {
     pub contacts: Vec<UpsertContact>,
+    /// Add every imported contact (new or existing) to this list (id or name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_id: Option<String>,
+    /// Same, by display name: the list is found, or created (origin `import`) when new.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_name: Option<String>,
+    /// Report what each row would do (`new`, `update` with the changed fields, `unchanged`, `skipped`)
+    /// and change nothing, not even the list.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
 }
 
 /// Upsert up to 5000 contacts in one call. A bad row is reported and skipped, never fatal.
@@ -683,6 +695,11 @@ pub async fn contacts_import(
         return Err(invalid(format!("contacts needs 1-{IMPORT_MAX} entries")).field("contacts"));
     }
     let ws = auth.0.workspace_id;
+    if b.dry_run {
+        return import_preview(&st, ws, &b).await;
+    }
+    let list =
+        crate::lists::for_import(&st, ws, b.list_id.as_deref(), b.list_name.as_deref()).await?;
     let r = idempotent!(
         st,
         auth,
@@ -692,24 +709,125 @@ pub async fn contacts_import(
         StatusCode::OK,
         async {
             let (mut imported, mut failed) = (0, Vec::new());
+            let now = chrono::Utc::now();
             for (index, c) in b.contacts.iter().cloned().enumerate() {
                 let email = c.email.clone();
                 match st.contacts.upsert(ws, c).await {
-                Ok(_) => imported += 1,
+                Ok(v) => {
+                    imported += 1;
+                    if let (Some(l), Some(id)) = (list, v["id"].as_str().and_then(|i| i.parse().ok())) {
+                        mailcraft_automations::contacts::add_to_segment(&st.db, l, id, now).await.map_err(crate::services::ae)?;
+                    }
+                }
                 // Infrastructure trouble would repeat for every row: stop and let the caller retry.
                 Err(e) if e.status >= 500 => return Err(e),
                 Err(e) => failed.push(json!({"index": index, "email": email, "error": {"code": e.code, "message": e.message}})),
             }
             }
-            Ok::<_, mailcraft_core::Error>(json!({"imported": imported, "failed": failed}))
+            Ok::<_, mailcraft_core::Error>(
+                json!({"imported": imported, "failed": failed, "list_id": list}),
+            )
         }
     );
     record(
         &st,
         &auth,
         "contact.import",
-        json!({"rows": b.contacts.len()}),
+        json!({"rows": b.contacts.len(), "list_id": list}),
     )
     .await?;
     r
+}
+
+/// Dry run of [`contacts_import`]: classifies every row against the stored contacts. Writes nothing.
+async fn import_preview(st: &AppState, ws: Uuid, b: &ImportContacts) -> ApiResult {
+    use crate::diff;
+    use mailcraft_automations::contacts::{normalize_email, valid_timezone};
+    let target = crate::lists::target(st, ws, b.list_id.as_deref(), b.list_name.as_deref()).await?;
+    let emails: Vec<String> = b
+        .contacts
+        .iter()
+        .filter_map(|c| normalize_email(&c.email).ok())
+        .collect();
+    let have = diff::existing(&st.db, ws, &emails).await?;
+    let on_list = match target.as_ref().and_then(|t| t.id) {
+        Some(l) => {
+            let ids: Vec<Uuid> = have.values().map(|c| c.id).collect();
+            diff::members(&st.db, l, &ids).await?
+        }
+        None => Default::default(),
+    };
+    let (mut new, mut update, mut unchanged, mut skipped, mut list_adds) = (0, 0, 0, 0, 0);
+    let mut rows = Vec::with_capacity(b.contacts.len());
+    for (index, c) in b.contacts.iter().enumerate() {
+        let skip = |reason: &str, message: String| json!({"index": index, "email": c.email.trim(), "status": "skipped", "reason": reason, "message": message});
+        let Ok(email) = normalize_email(&c.email) else {
+            skipped += 1;
+            rows.push(skip(
+                "invalid_email",
+                format!("`{}` is not a valid email address", c.email.trim()),
+            ));
+            continue;
+        };
+        if c.properties.as_ref().is_some_and(|p| !p.is_object()) {
+            skipped += 1;
+            rows.push(skip(
+                "invalid_properties",
+                "properties must be a JSON object".into(),
+            ));
+            continue;
+        }
+        let tz = c
+            .timezone
+            .as_deref()
+            .or_else(|| c.properties.as_ref().and_then(|p| p["timezone"].as_str()))
+            .map(str::trim)
+            .filter(|t| !t.is_empty());
+        if let Some(t) = tz.filter(|t| !valid_timezone(t)) {
+            skipped += 1;
+            rows.push(skip(
+                "invalid_timezone",
+                format!("`{t}` is not an IANA timezone (e.g. Europe/Berlin)"),
+            ));
+            continue;
+        }
+        let existing = have.get(&email);
+        let changes = existing.map_or_else(Vec::new, |e| {
+            diff::changes(
+                e,
+                c.first_name.as_deref(),
+                c.last_name.as_deref(),
+                tz,
+                c.properties.as_ref(),
+            )
+        });
+        let status = match existing {
+            None => "new",
+            Some(_) if changes.is_empty() => "unchanged",
+            Some(_) => "update",
+        };
+        match status {
+            "new" => new += 1,
+            "update" => update += 1,
+            _ => unchanged += 1,
+        }
+        let list = target.as_ref().map(|_| {
+            if existing.is_some_and(|e| on_list.contains(&e.id)) {
+                "already"
+            } else {
+                "add"
+            }
+        });
+        list_adds += usize::from(list == Some("add"));
+        rows.push(json!({"index": index, "email": email, "status": status, "changes": changes, "list": list}));
+    }
+    Ok(envelope(
+        StatusCode::OK,
+        json!({
+            "dry_run": true,
+            "summary": {"new": new, "update": update, "unchanged": unchanged, "skipped": skipped, "list_adds": list_adds},
+            "list": target.map(|t| json!({"id": t.id, "name": t.name, "exists": t.id.is_some()})),
+            "rows": rows,
+        }),
+    ))
 }

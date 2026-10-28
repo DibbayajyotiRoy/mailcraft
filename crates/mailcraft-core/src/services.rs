@@ -78,13 +78,15 @@ pub trait ContactService: Send + Sync {
     async fn get(&self, workspace: Uuid, id_or_email: &str) -> Result<Value>;
     /// Recent events, emails, automation runs and topic opt-outs of one contact.
     async fn activity(&self, workspace: Uuid, id_or_email: &str) -> Result<Value>;
-    /// `q`: case-insensitive substring of email / first / last name.
+    /// `q`: case-insensitive substring of email / first / last name; `list`: only members of that
+    /// list (a manual segment id).
     async fn list(
         &self,
         workspace: Uuid,
         limit: u32,
         cursor: Option<String>,
         q: Option<String>,
+        list: Option<Uuid>,
     ) -> Result<Page>;
     async fn delete(&self, workspace: Uuid, id_or_email: &str) -> Result<()>;
     async fn suppress(&self, workspace: Uuid, id_or_email: &str, reason: &str) -> Result<()>;
@@ -183,7 +185,14 @@ impl ContactService for StubContactService {
     async fn activity(&self, _: Uuid, _: &str) -> Result<Value> {
         stub!("contacts")
     }
-    async fn list(&self, _: Uuid, _: u32, _: Option<String>, _: Option<String>) -> Result<Page> {
+    async fn list(
+        &self,
+        _: Uuid,
+        _: u32,
+        _: Option<String>,
+        _: Option<String>,
+        _: Option<Uuid>,
+    ) -> Result<Page> {
         stub!("contacts")
     }
     async fn delete(&self, _: Uuid, _: &str) -> Result<()> {

@@ -122,7 +122,7 @@ impl Rule {
     /// Append `(<predicate over contacts alias c>)` to `qb`.
     ///
     /// Fields: `email`, `first_name`, `last_name`, `timezone`, `created_at`, `properties.<path>`,
-    /// `topic:<key>` (effective opt-in), `event_count:<name>` and `days_since:<name>` (whole days
+    /// `topic:<key>` (effective opt-in), `list:<id or name>` (true when in that list), `event_count:<name>` and `days_since:<name>` (whole days
     /// since the contact last tracked that event; missing when it never did). The last one is
     /// segments-only: automation conditions are evaluated in Rust against prefetched fields.
     pub fn push_sql(&self, qb: &mut QueryBuilder<'_, Postgres>) -> Result<()> {
@@ -178,6 +178,13 @@ fn push_field(qb: &mut QueryBuilder<'_, Postgres>, field: &str) -> Result<()> {
             .push(" AND t.workspace_id = c.workspace_id), (SELECT t.default_opt_in FROM topics t WHERE t.workspace_id = c.workspace_id AND t.key = ")
             .push_bind(key.to_owned())
             .push("), false))");
+    } else if let Some(list) = field.strip_prefix("list:") {
+        // Membership of a list (a manual segment), by id or name: `{"field":"list:Webinar","op":"eq","value":true}`.
+        qb.push("to_jsonb(EXISTS (SELECT 1 FROM segment_members m JOIN segments s ON s.id = m.segment_id WHERE m.contact_id = c.id AND s.workspace_id = c.workspace_id AND s.filter IS NULL AND (s.id::text = ")
+            .push_bind(list.to_owned())
+            .push(" OR s.name = ")
+            .push_bind(list.to_owned())
+            .push(")))");
     } else if let Some(name) = field.strip_prefix("event_count:") {
         qb.push(
             "to_jsonb((SELECT count(*) FROM track_events e WHERE e.contact_id = c.id AND e.name = ",
@@ -190,7 +197,7 @@ fn push_field(qb: &mut QueryBuilder<'_, Postgres>, field: &str) -> Result<()> {
             .push("))");
     } else {
         return Err(AutomationError::invalid(format!(
-            "segment filter field `{field}` is not supported (use email, first_name, last_name, timezone, created_at, properties.*, topic:*, event_count:*, days_since:*)"
+            "segment filter field `{field}` is not supported (use email, first_name, last_name, timezone, created_at, properties.*, topic:*, list:*, event_count:*, days_since:*)"
         )));
     }
     Ok(())
