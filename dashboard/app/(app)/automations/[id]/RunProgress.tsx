@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Badge, StatusBadge } from "@/components/ui/badge";
+import { Busy } from "@/components/ui/busy";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { EventTimeline } from "@/components/ui/event-timeline";
@@ -19,8 +20,9 @@ export function RunProgress({ automation, run, types }: { automation: string; ru
   const [err, setErr] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const polls = useRef(0);
-  const load = useCallback(async () => {
-    setBusy(true);
+  // `manual` only: the auto-poll runs every 1.5s and would otherwise flash the Refresh button into its spinner each time.
+  const load = useCallback(async (manual = false) => {
+    if (manual) setBusy(true);
     const r = await runDetail(automation, run);
     setBusy(false);
     if (r.error) setErr(r.error); else { setErr(null); setD(r.data); }
@@ -34,7 +36,7 @@ export function RunProgress({ automation, run, types }: { automation: string; ru
   return (
     <div className="grid gap-4" aria-busy={running || undefined}>
       {err && <ErrorState error={err} onRetry={() => { polls.current = 0; void load(); }} />}
-      {!d && !err && <p role="status" className="flex items-center gap-2 text-sm text-muted"><Loader2 aria-hidden className="size-4 animate-spin" />Starting the run…</p>}
+      {!d && !err && <Busy state="working" label="Starting the run…" />}
       {d && (
         <>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
@@ -52,8 +54,8 @@ export function RunProgress({ automation, run, types }: { automation: string; ru
             })} />
           ) : <p className="text-sm text-muted">The engine has not picked this run up yet. It checks every second.</p>}
           <div className="flex items-center gap-3 text-xs text-muted">
-            <span role="status" aria-live="polite">{running ? "Updating…" : FINISHED.includes(d.state) ? "Finished." : polls.current >= MAX_POLLS ? "Stopped checking. Refresh to look again." : "Paused on a timer. Refresh to check again."}</span>
-            <Button size="sm" variant="ghost" loading={busy} onClick={() => { polls.current = 0; void load(); }}><RefreshCw aria-hidden />Refresh</Button>
+            <span role="status" aria-live="polite">{running ? <Busy state="working" label="Updating…" className="text-xs" /> : FINISHED.includes(d.state) ? "Finished." : polls.current >= MAX_POLLS ? "Stopped checking. Refresh to look again." : "Paused on a timer. Refresh to check again."}</span>
+            <Button size="sm" variant="ghost" loading={busy} onClick={() => { polls.current = 0; void load(true); }}><RefreshCw aria-hidden />Refresh</Button>
           </div>
         </>
       )}

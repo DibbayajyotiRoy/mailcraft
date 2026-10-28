@@ -1,6 +1,8 @@
 "use client";
 import { useActionState, useEffect, useState } from "react";
 import { CircleCheck, CircleX, Mail, Plus, Server } from "lucide-react";
+import { useFormStatus } from "react-dom";
+import { Busy } from "@/components/ui/busy";
 import { Button, SubmitButton } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -13,6 +15,17 @@ export type Transport = { id: string; kind: string; name?: string; label?: strin
 export const PRESETS = ["postmark", "mailgun", "resend", "brevo", "smtp2go", "ses", "custom"] as const;
 const KIND: Record<string, string> = { sandbox: "Sandbox inbox", "gmail-oauth": "Gmail", "smtp-relay": "SMTP relay", ses: "Amazon SES", direct: "Direct from this server" };
 
+/** The last result, swapped for the orb while a test is in flight (must sit inside the form to read its status). */
+function TestResult({ s }: { s: Result }) {
+  if (useFormStatus().pending) return <Busy state="connecting" label="Testing connection…" />;
+  return (
+    <>
+      {s.ok && <span className="inline-flex items-center gap-1 text-ok"><CircleCheck aria-hidden className="size-4" />{s.ok}</span>}
+      {s.error && <span className="inline-flex items-center gap-1 text-bad"><CircleX aria-hidden className="size-4" />{s.error}</span>}
+    </>
+  );
+}
+
 /** Test button with its result inline (aria-live) so a failure is read out, not just coloured. */
 export function TestButton({ id, label }: { id: string; label: string }) {
   const [s, act] = useActionState(testTransport, {} as Result);
@@ -20,10 +33,7 @@ export function TestButton({ id, label }: { id: string; label: string }) {
     <form action={act} className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="id" value={id} />
       <SubmitButton size="sm" variant="secondary" aria-label={`Test ${label}`}>Test connection</SubmitButton>
-      <span role="status" aria-live="polite" className="text-sm">
-        {s.ok && <span className="inline-flex items-center gap-1 text-ok"><CircleCheck aria-hidden className="size-4" />{s.ok}</span>}
-        {s.error && <span className="inline-flex items-center gap-1 text-bad"><CircleX aria-hidden className="size-4" />{s.error}</span>}
-      </span>
+      <span role="status" aria-live="polite" className="text-sm"><TestResult s={s} /></span>
     </form>
   );
 }
