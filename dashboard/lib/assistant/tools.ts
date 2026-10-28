@@ -14,13 +14,14 @@ export type ToolDef = { type: "function"; function: { name: string; description:
 const NOUN: Record<string, string> = { template: "templates", automation: "automations", broadcast: "broadcasts", email: "emails", contact: "contacts", list: "lists", domain: "domains", sender: "senders", approval: "approvals", event: "event names" };
 const LIST: Record<string, { tool?: string; path: string; q?: boolean }> = {
   template: { tool: "template_list", path: "/v1/templates" }, automation: { tool: "automation_list", path: "/v1/automations" },
-  email: { tool: "email_list", path: "/v1/emails" }, contact: { tool: "contact_list", path: "/v1/contacts", q: true }, approval: { tool: "approval_list", path: "/v1/approvals" },
-  broadcast: { path: "/v1/broadcasts" }, list: { path: "/v1/segments" }, domain: { path: "/v1/domains" }, sender: { path: "/v1/transports" }, event: { path: "/v1/events/names" },
+  email: { tool: "email_list", path: "/v1/emails", q: true }, contact: { tool: "contact_list", path: "/v1/contacts", q: true }, approval: { tool: "approval_list", path: "/v1/approvals" },
+  broadcast: { tool: "broadcast_list", path: "/v1/broadcasts" }, list: { tool: "segment_list", path: "/v1/segments" }, event: { tool: "event_names", path: "/v1/events/names" },
+  domain: { path: "/v1/domains" }, sender: { path: "/v1/transports" }, // not in the MCP server (a human adds domains and relays)
 };
 const GET: Record<string, { tool?: string; path: string }> = {
   template: { tool: "template_get", path: "/v1/templates/{id}" }, automation: { tool: "automation_get", path: "/v1/automations/{id}" }, email: { tool: "email_get", path: "/v1/emails/{id}" },
   contact: { tool: "contact_get", path: "/v1/contacts/{id_or_email}" }, approval: { tool: "approval_get", path: "/v1/approvals/{id}" },
-  broadcast: { path: "/v1/broadcasts/{id}" }, domain: { path: "/v1/domains/{id}" }, account: { tool: "account_status", path: "/v1/account/status" }, health: { tool: "doctor", path: "/v1/doctor" }, settings: { tool: "settings_get_instructions", path: "/v1/settings" },
+  broadcast: { tool: "broadcast_get", path: "/v1/broadcasts/{id}" }, domain: { path: "/v1/domains/{id}" }, account: { tool: "account_status", path: "/v1/account/status" }, health: { tool: "doctor", path: "/v1/doctor" }, settings: { tool: "settings_get_instructions", path: "/v1/settings" },
 };
 const route = (m: { tool?: string; path: string }) => (m.tool ? CAT.get(m.tool)! : { method: "GET", path: m.path });
 const KINDS_LIST = Object.keys(LIST), KINDS_GET = Object.keys(GET);
@@ -48,7 +49,7 @@ async function get(a: any, ctx: Ctx): Promise<Out> {
   const sib = async (path: string, method = "GET", body?: unknown) => { const r = await read(ctx, method, path, body); return r.error ? undefined : r.data; };
   const e = encodeURIComponent(id);
   const [r, x1] = await Promise.all([read(ctx, main.method, main.path),
-    kind === "email" ? sib(`/v1/emails/${e}/events`) : kind === "template" ? sib(`/v1/templates/${e}/preview`, "POST", {}) : kind === "contact" ? sib(`/v1/contacts/${e}/activity`) : undefined]);
+    kind === "email" ? sib(`/v1/emails/${e}/events`) : kind === "template" ? sib(`/v1/templates/${e}/preview`, "POST", {}) : kind === "contact" ? sib(buildCall(CAT.get("contact_activity")!, { id_or_email: id }).path) : undefined]);
   if (r.error) return apiErr(r.error);
   const extra = kind === "email" ? { events: x1 } : kind === "template" ? { lint: (x1 as any)?.lint } : kind === "contact" ? { activity: x1 } : {};
   const d = r.data;
@@ -66,15 +67,9 @@ async function viaCat(name: string, a: any, ctx: Ctx): Promise<Out> {
     case "template_preview": return { ok: { subject: d.subject, variables: d.variables, lint: compactLint(d.lint), text: clip(d.text, 500) }, done: "Rendered a preview" };
     case "content_lint": return { ok: { lint: compactLint(d.lint ?? d) ?? [], warnings: d.warnings }, done: "Checked lint" };
     case "automation_runs": return { ok: { rows: (Array.isArray(d) ? d : []).slice(0, 10).map((x: any) => ({ id: x.id, contact: x.contact_email, state: x.state, step: x.current_step, exit: x.exit_reason ?? undefined, test: x.test || undefined })) }, done: "Read automation runs" };
+    case "segment_preview": return { ok: { count: d.count, sample: (d.sample ?? []).slice(0, 5).map((x: any) => x.email) }, done: `Counted ${d.count ?? 0} matches` };
     default: return { ok: compactGet("other", d), done: name === "automation_simulate" ? "Simulated the automation" : "Done" };
   }
-}
-
-async function segmentPreview(a: any, ctx: Ctx): Promise<Out> {
-  if (!a?.filter || typeof a.filter !== "object") return fail("invalid_request", "filter (a rule tree) is required");
-  const r = await read(ctx, "POST", "/v1/segments/preview", { filter: a.filter });
-  if (r.error) return apiErr(r.error);
-  return { ok: { count: r.data?.count, sample: (r.data?.sample ?? []).slice(0, 5).map((x: any) => x.email) }, done: `Counted ${r.data?.count ?? 0} matches` };
 }
 
 // ---- schemas the model sees: tiny, one-line descriptions, no examples -------------------------------------------------
@@ -94,7 +89,7 @@ const GROUP_TOOLS: Record<Group, ToolDef[]> = {
   templates: [fromCat("template_preview"), fromCat("content_lint"), PROPOSE_SCHEMAS.propose_template],
   automations: [fromCat("automation_runs"), fromCat("automation_simulate"), PROPOSE_SCHEMAS.propose_automation, PROPOSE_SCHEMAS.propose_automation_state],
   broadcasts: [PROPOSE_SCHEMAS.propose_broadcast, PROPOSE_SCHEMAS.propose_email],
-  contacts: [T("segment_preview", "Who a segment rule matches now.", S({ filter: { type: "object" } }, ["filter"])), PROPOSE_SCHEMAS.propose_list, PROPOSE_SCHEMAS.propose_contacts],
+  contacts: [fromCat("segment_preview"), PROPOSE_SCHEMAS.propose_list, PROPOSE_SCHEMAS.propose_contacts],
 };
 const KEYWORDS: Record<Group, RegExp> = {
   templates: /templat|subject|html|mjml|lint|design|layout|copy|preheader|footer|wording|rewrite|fix/i,
@@ -151,9 +146,8 @@ export async function runTool(name: string, raw: string, ctx: Ctx, groups: Set<G
         gs.forEach((x: Group) => groups.add(x));
         return { content: JSON.stringify({ ok: true, added: gs.flatMap((g: Group) => GROUP_TOOLS[g].map((t) => t.function.name)) }), done: "Unlocked more tools" };
       }
-      case "template_preview": case "content_lint": case "automation_runs": case "automation_simulate":
+      case "template_preview": case "content_lint": case "automation_runs": case "automation_simulate": case "segment_preview":
         return out(await viaCat(name, a, ctx));
-      case "segment_preview": return out(await segmentPreview(a, ctx));
       default:
         if (PROPOSE[name]) return out(await PROPOSE[name](a, ctx));
         return out(fail("unknown_tool", `No tool named ${name}.`, "Use only the tools you were given; call use_tools to unlock more."));
