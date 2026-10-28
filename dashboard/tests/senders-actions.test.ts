@@ -64,8 +64,28 @@ describe("addRelay", () => {
     await addRelay({}, form({ ...mailbox, mailbox_sender: "" , name: "" }));
     const body = wire(0);
     expect(body).not.toHaveProperty("preset");
-    expect(body.name).toBe("custom"); // not a mailbox: falls back to the preset word
+    expect(body.name).toBe("smtp.example.com:587"); // not a mailbox: named by where it sends, so two custom relays never collide
     expect(body.config).toEqual({ password: "pw", username: "Ana@Example.com", host: "smtp.example.com", port: 587, mailbox_sender: false });
+  });
+
+  it("a custom relay needs a real port: empty, 0, out of range or fractional never reach the API", async () => {
+    for (const port of ["", "0", "70000", "-1", "5.5", "abc"]) {
+      const r = await addRelay({}, form({ ...mailbox, port }));
+      expect(r.error, `port ${JSON.stringify(port)}`).toMatch(/port.*1 to 65535/);
+    }
+    expect(api).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+    api.mockResolvedValueOnce(ok());
+    await addRelay({}, form({ ...mailbox, port: "65535" }));
+    expect(wire(0).config.port).toBe(65535);
+  });
+
+  it("two custom non-mailbox relays on different hosts get different names", async () => {
+    api.mockResolvedValue(ok());
+    const plain = { preset: "custom", password: "pw", username: "u", port: "587" };
+    await addRelay({}, form({ ...plain, host: "smtp.a.example.com" }));
+    await addRelay({}, form({ ...plain, host: "smtp.b.example.com" }));
+    expect([wire(0).name, wire(1).name]).toEqual(["smtp.a.example.com:587", "smtp.b.example.com:587"]);
   });
 
   it("a real preset sends the preset and only credentials/region, never host, port or aliases", async () => {

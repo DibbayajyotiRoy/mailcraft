@@ -673,6 +673,9 @@ async fn relay_alias_and_display_name_validation_and_domain_binding() {
             json!({"username": "apikey", "mailbox_sender": true}),
             "config.mailbox_sender",
         ),
+        // a port of 0 (an empty form field) is not a port
+        (json!({"port": 0}), "config.port"),
+        (json!({"port": 70000}), "config.port"),
     ] {
         let (s, b) = e.c("POST", "/v1/transports", Some(post(cfg.clone()))).await;
         assert_eq!(
