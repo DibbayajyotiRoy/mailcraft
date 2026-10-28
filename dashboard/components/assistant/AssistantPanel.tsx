@@ -145,13 +145,13 @@ export function AssistantLauncher() {
                 </ul>
               </div>
             ) : (
-              <ol role="log" aria-label="Conversation" aria-live="off" className="space-y-4">
+              <div role="log" aria-label="Conversation" aria-live="off"><ol className="space-y-4">
                 {a.msgs.map((m, i) => (
                   <Message key={m.id} m={m} last={i === a.msgs.length - 1} busy={a.busy} phase={a.phase} onAsk={(t) => void a.send(t)}
                     onApply={(pid, ok) => void a.apply(m.id, pid, ok)} onCancel={(pid) => a.cancel(m.id, pid)}
                     onEdit={(title) => { setDraft(`Change the proposal "${title}": `); requestAnimationFrame(() => input.current?.focus()); }} />
                 ))}
-              </ol>
+              </ol></div>
             )}
           </div>
           <div className="sr-only" role="status" aria-live="polite">{announce}</div>

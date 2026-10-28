@@ -80,7 +80,7 @@ export function Composer({ busy, disabled, model, draft, setDraft, onSend, onSto
       {tok && (
         <div className="absolute inset-x-0 bottom-full z-10 mb-2 rounded-lg border border-border bg-bg p-1 shadow-pop">
           {options.length ? (
-            <ul id={listId} role="listbox" aria-label={tok.kind === "slash" ? "Commands" : "Mentions"} className="max-h-56 overflow-auto">
+            <ul id={listId} role="listbox" aria-label={tok.kind === "slash" ? "Commands" : "Mentions"}>
               {options.map((o, i) => (
                 <li key={o.key} id={`${uid}-o${i}`} role="option" aria-selected={i === active} onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => pick(o)}
                   className={cn("flex min-h-9 cursor-pointer items-center gap-2 rounded-sm px-2 text-sm pointer-coarse:min-h-11", i === active && "bg-surface-2")}>

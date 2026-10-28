@@ -61,7 +61,7 @@ export async function AiUsageCard({ emailModel }: { emailModel?: string | null }
           <p className="mt-3 text-sm text-muted">
             {d?.is_free_tier === false
               ? "This key has credits, but mailcraft still only calls free models."
-              : "Free models have a small allowance of requests per day and per minute, shared by everything that uses this key. When it runs out the assistant says so and tries again after the reset; it never switches to a paid model. OpenRouter does not report how many requests were used today, so the count above is this dashboard's own."}
+              : `Free models have a small allowance of requests per day and per minute, shared by everything that uses this key. When it runs out the assistant says so and tries again after the reset; it never switches to a paid model.${key.ok ? ' OpenRouter does not report how many requests were used today, so the count above is this dashboard\'s own.' : ""}`}
           </p>
         </section>
       </CardBody>
