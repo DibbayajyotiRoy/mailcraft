@@ -53,6 +53,12 @@ const ROUTES = [
   ["automation-test-run", "/automations/a1", async (p) => { await p.getByRole("button", { name: "Test run" }).click(); await p.getByLabel("Contact email").fill("you@example.com"); await p.getByRole("button", { name: "Start test run" }).click(); await p.getByRole("list", { name: "Run log" }).waitFor(); }],
   ["automation-test-form", "/automations/a1", click("button", "Test run")],
   ["automation-run-log", "/automations/a1", async (p) => { await p.getByRole("tab", { name: /Runs/ }).click(); await p.getByRole("button", { name: /View run ana@example.com/ }).first().click(); await p.getByRole("list", { name: "Run log" }).waitFor(); }],
+  // Flow view: the toggle is clicked so 390px shows the chart too (it defaults to Steps below 1024px).
+  ["automation-flow", "/automations/a1", click("radio", "Flow")], ["automation-flow-steps", "/automations/a1", click("radio", "Steps")],
+  ["automation-flow-branches", "/automations/a5", click("radio", "Flow")], ["automation-flow-wait", "/automations/a2", click("radio", "Flow")], ["automation-flow-trigger-only", "/automations/a3", click("radio", "Flow")],
+  ["automation-flow-jump", "/automations/a5", async (p) => { await click("radio", "Flow")(p); await p.getByRole("button", { name: /trial-offer/ }).click(); await p.waitForTimeout(600); }],
+  ["automation-flow-zoom", "/automations/a5", async (p) => { await click("radio", "Flow")(p); await click("button", "Zoom in")(p); await click("button", "Zoom in")(p); }],
+  ["automation-edit-preview", "/automations/a5/edit"],
   ["automation-detail", "/automations/a1"], ["automation-runs", "/automations/a1", click("tab", /Runs/)], ["automation-settings", "/automations/a1", click("tab", "Settings")],
   ["contacts", "/contacts"], ["segments", "/contacts?tab=segments"], ["contacts-error", "/contacts?err=" + encodeURIComponent("invalid_state|automation(s) still use this segment: welcome|change or delete those automations first")],
   ["contact-detail", "/contacts/c1"], ["contact-suppressed", "/contacts/c3"], ["contact-notfound", "/contacts/zzz"],

@@ -16,6 +16,8 @@ import { countErrors, newKey, reduce, stepKeyInError, stepSummary, STEP_TYPES, t
 import { BASE_FIELDS, RuleEditor } from "./RuleEditor";
 import { CardShell, STEP_ICON, StepCard, type Options } from "./StepCard";
 import { NO_STAT, StepStats, type StepStat } from "./StepStats";
+import { FlowPreview } from "../flow/FlowPreview";
+import { useMedia } from "../flow/useMedia";
 
 const ENTRY: [string, string][] = [
   ["once", "Once per contact"], ["always", "Every time the trigger happens"], ["after_days", "Again after a number of days"], ["if_no_active_run", "Only when they are not already in it"],
@@ -64,6 +66,7 @@ export function Editor({ initial, mode, id, status, version, options, stats }: {
   const fields = useMemo(() => [...BASE_FIELDS, ...d.steps.filter((s) => s.type === "send_email").map((s) => `clicked_step:${s.key}`), ...options.events.map((e) => `event_count:${e}`)], [d.steps, options.events]);
   const isLive = status === "active", locked = mode === "edit", canPublish = !locked || status === "draft";
   const e = (k: string) => (submitted ? errs.top[k] : undefined);
+  const wide = useMedia("(min-width: 1400px)"); // room for the live preview beside the form
 
   let definition = "";
   try { definition = JSON.stringify(toDefinition(d)); } catch { /* raw rule JSON that does not parse: validation reports it, nothing is submitted */ }
@@ -110,6 +113,7 @@ export function Editor({ initial, mode, id, status, version, options, stats }: {
   };
 
   return (
+    <div className={wide ? "grid grid-cols-[minmax(0,48rem)_minmax(0,1fr)] items-start gap-6" : undefined}>
     <form ref={form} action={action} onSubmit={onSubmit} noValidate className="grid max-w-3xl gap-6">
       <input type="hidden" name="definition" value={definition} />
       {locked && isLive && <input type="hidden" name="intent" value="save" />}
@@ -135,7 +139,7 @@ export function Editor({ initial, mode, id, status, version, options, stats }: {
         <h2 id="flow-h" className="mb-2 text-md font-semibold">Flow</h2>
         <p role="status" aria-live="polite" className="sr-only">{live}</p>
         <ol aria-label="Automation steps" className="grid justify-items-center rounded-lg bg-surface-2 p-3 sm:p-6 [background-image:radial-gradient(var(--border-strong)_1px,transparent_1px)] [background-size:16px_16px]">
-          <li className="w-full">
+          <li id={`step-${d.triggerKey}`} tabIndex={-1} aria-label="Trigger" className="w-full">
             <CardShell icon={Zap} title="Trigger">
               {stats && <StepStats stat={stats[d.triggerKey] ?? NO_STAT} />}
               <SegmentedControl label="Start when" value={d.trigger.kind} onValueChange={(kind) => dispatch({ t: "trigger", patch: { kind } })}
@@ -243,5 +247,12 @@ export function Editor({ initial, mode, id, status, version, options, stats }: {
           description={`New contacts use version ${(version ?? 0) + 1} immediately. Contacts already inside finish on version ${version}.`} onConfirm={() => form.current?.requestSubmit()} />
       </AlertDialog>
     </form>
+    {wide && (
+      <div className="sticky top-16 grid max-h-[calc(100dvh-5rem)] gap-2 overflow-y-auto">
+        <h2 className="text-md font-semibold">Live preview</h2>
+        <FlowPreview definition={definition} stats={stats} />
+      </div>
+    )}
+    </div>
   );
 }
