@@ -1396,3 +1396,575 @@ async fn contacts_segments_services() {
     );
     assert_eq!(c.c("GET", &format!("/v1/contacts/{id}"), None).await.0, 404);
 }
+
+// ------------------------------------------------------------ dashboard API gaps
+
+impl Ctx {
+    async fn email(
+        &self,
+        to: &str,
+        from: &str,
+        subject: &str,
+        stream: &str,
+        env: &str,
+        at: &str,
+    ) -> Uuid {
+        sqlx::query_scalar(
+            "INSERT INTO emails (workspace_id, stream, env, from_addr, to_addr, subject, status, created_at) \
+             VALUES ($1,$2,$3,$4,$5,$6,'sent',$7::timestamptz) RETURNING id",
+        )
+        .bind(self.ws)
+        .bind(stream)
+        .bind(env)
+        .bind(from)
+        .bind(to)
+        .bind(subject)
+        .bind(at)
+        .fetch_one(&self.st.db)
+        .await
+        .unwrap()
+    }
+}
+
+fn ids(b: &Value) -> Vec<String> {
+    b["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["subject"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn email_detail_has_body_and_list_filters_server_side() {
+    let c = ctx!();
+    let a = c
+        .email(
+            "Ann@Example.com",
+            "me@acme.io",
+            "Welcome aboard",
+            "transactional",
+            "live",
+            "2026-10-01T10:00:00Z",
+        )
+        .await;
+    c.email(
+        "bob@example.com",
+        "me@acme.io",
+        "100% off sale",
+        "marketing",
+        "live",
+        "2026-10-05T10:00:00Z",
+    )
+    .await;
+    c.email(
+        "cy@other.org",
+        "news@acme.io",
+        "Weekly digest",
+        "marketing",
+        "test",
+        "2026-10-09T23:30:00Z",
+    )
+    .await;
+    sqlx::query("INSERT INTO email_bodies (email_id, html, text) VALUES ($1, $2, 'plain')")
+        .bind(a)
+        .bind("<p>Hello</p>")
+        .execute(&c.st.db)
+        .await
+        .unwrap();
+
+    let (s, b) = c.c("GET", &format!("/v1/emails/{a}"), None).await;
+    assert_eq!(s, 200, "{b}");
+    assert_eq!(
+        (
+            b["data"]["html"].as_str(),
+            b["data"]["text"].as_str(),
+            b["data"]["body_truncated"].as_bool()
+        ),
+        (Some("<p>Hello</p>"), Some("plain"), Some(false))
+    );
+    // no stored body (e.g. template not rendered yet): nulls, not an error
+    let none = c
+        .email(
+            "d@example.com",
+            "me@acme.io",
+            "x",
+            "transactional",
+            "live",
+            "2026-10-02T00:00:00Z",
+        )
+        .await;
+    let (_, b) = c.c("GET", &format!("/v1/emails/{none}"), None).await;
+    assert!(b["data"]["html"].is_null() && b["data"]["text"].is_null());
+    // size cap
+    sqlx::query("INSERT INTO email_bodies (email_id, html) VALUES ($1, repeat('a', 250000))")
+        .bind(none)
+        .execute(&c.st.db)
+        .await
+        .unwrap();
+    let (_, b) = c.c("GET", &format!("/v1/emails/{none}"), None).await;
+    assert_eq!(
+        (
+            b["data"]["html"].as_str().map(str::len),
+            b["data"]["body_truncated"].as_bool()
+        ),
+        (Some(200_000), Some(true))
+    );
+
+    let q = |qs: &str| format!("/v1/emails?{qs}");
+    // case-insensitive contains on to / from / subject
+    assert_eq!(
+        ids(&c.c("GET", &q("q=ANN@exam"), None).await.1),
+        ["Welcome aboard"]
+    );
+    assert_eq!(
+        ids(&c.c("GET", &q("q=digest"), None).await.1),
+        ["Weekly digest"]
+    );
+    assert_eq!(
+        c.c("GET", &q("q=news@acme"), None).await.1["data"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    // LIKE wildcards are literal
+    assert_eq!(
+        ids(&c.c("GET", &q("q=100%25"), None).await.1),
+        ["100% off sale"]
+    );
+    assert!(ids(&c.c("GET", &q("q=%25%25"), None).await.1).is_empty());
+    // by id
+    assert_eq!(
+        ids(&c.c("GET", &q(&format!("q={a}")), None).await.1),
+        ["Welcome aboard"]
+    );
+    // date range: `to` as a date includes that whole day; RFC 3339 works too
+    assert_eq!(
+        ids(&c
+            .c("GET", &q("from=2026-10-05&to=2026-10-09"), None)
+            .await
+            .1),
+        ["Weekly digest", "100% off sale"]
+    );
+    assert_eq!(
+        ids(&c.c("GET", &q("to=2026-10-01"), None).await.1),
+        ["Welcome aboard"]
+    );
+    assert_eq!(
+        ids(&c.c("GET", &q("from=2026-10-09T23:00:00Z"), None).await.1),
+        ["Weekly digest"]
+    );
+    // stream / env, combined with q
+    assert_eq!(
+        ids(&c.c("GET", &q("stream=marketing&env=live"), None).await.1),
+        ["100% off sale"]
+    );
+    assert_eq!(
+        ids(&c.c("GET", &q("env=test&q=weekly"), None).await.1),
+        ["Weekly digest"]
+    );
+    for bad in ["from=yesterday", "to=2026-13-01", "stream=bulk", "env=prod"] {
+        assert_eq!(c.c("GET", &q(bad), None).await.0, 400, "{bad}");
+    }
+    // filters compose with the cursor
+    let (_, p1) = c.c("GET", &q("stream=marketing&limit=1"), None).await;
+    let cur = p1["next_cursor"].as_str().expect("second page").to_string();
+    assert_eq!(
+        ids(&c
+            .c(
+                "GET",
+                &q(&format!("stream=marketing&limit=1&cursor={cur}")),
+                None
+            )
+            .await
+            .1),
+        ["100% off sale"]
+    );
+}
+
+#[tokio::test]
+async fn approval_reason_and_rendered_preview() {
+    let c = ctx!();
+    let e = c
+        .email(
+            "a@example.com",
+            "me@acme.io",
+            "Hi",
+            "transactional",
+            "live",
+            "2026-10-01T00:00:00Z",
+        )
+        .await;
+    sqlx::query("UPDATE emails SET status = 'pending_approval' WHERE id = $1")
+        .bind(e)
+        .execute(&c.st.db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO email_bodies (email_id, html, text) VALUES ($1,'<b>Pay now</b>','Pay now')",
+    )
+    .bind(e)
+    .execute(&c.st.db)
+    .await
+    .unwrap();
+    let mk = |_: ()| async {
+        sqlx::query_scalar::<_, Uuid>("INSERT INTO approvals (workspace_id, kind, subject_id, payload) VALUES ($1,'email',$2,$3) RETURNING id")
+            .bind(c.ws).bind(e)
+            .bind(json!({"email_ids": [e], "preview": {"subject": "Hi", "has_html": true}}))
+            .fetch_one(&c.st.db).await.unwrap()
+    };
+    let id = mk(()).await;
+    let (_, b) = c.c("GET", &format!("/v1/approvals/{id}"), None).await;
+    assert_eq!(
+        (
+            b["data"]["payload"]["preview"]["html"].as_str(),
+            b["data"]["reason"].is_null()
+        ),
+        (Some("<b>Pay now</b>"), true)
+    );
+    let long = "x".repeat(501);
+    let (s, b) = c
+        .c(
+            "POST",
+            &format!("/v1/approvals/{id}/decide"),
+            Some(json!({"decision": "reject", "reason": long})),
+        )
+        .await;
+    assert_eq!((s, code(&b)), (400, "invalid_request"), "{b}");
+    let (s, b) = c
+        .c(
+            "POST",
+            &format!("/v1/approvals/{id}/decide"),
+            Some(json!({"decision": "reject", "reason": "  looks like phishing "})),
+        )
+        .await;
+    assert_eq!(
+        (s, b["data"]["reason"].as_str()),
+        (200, Some("looks like phishing")),
+        "{b}"
+    );
+    let (_, b) = c.c("GET", &format!("/v1/approvals/{id}"), None).await;
+    assert_eq!(
+        (b["data"]["status"].as_str(), b["data"]["reason"].as_str()),
+        (Some("rejected"), Some("looks like phishing"))
+    );
+    let audited: Value = sqlx::query_scalar(
+        "SELECT args FROM audit_log WHERE action = 'approval.decide' AND approval_id = $1",
+    )
+    .bind(id)
+    .fetch_one(&c.st.db)
+    .await
+    .unwrap();
+    assert_eq!(audited["reason"], "looks like phishing");
+    // reason stays optional
+    let id2 = mk(()).await;
+    let (s, b) = c
+        .c(
+            "POST",
+            &format!("/v1/approvals/{id2}/decide"),
+            Some(json!({"decision": "approve"})),
+        )
+        .await;
+    assert_eq!((s, b["data"]["reason"].is_null()), (200, true));
+}
+
+#[tokio::test]
+async fn keys_last_used_segments_member_count_contacts_search() {
+    let c = ctx!();
+    let (_, b) = c.c("GET", "/v1/keys", None).await;
+    let admin = &b["data"].as_array().unwrap()[0];
+    assert!(
+        admin["last_used_at"].is_string(),
+        "authenticated request stamps last_used_at: {admin}"
+    );
+    let other = c.key(&[Scope::Read]).await;
+    let (_, b) = c.c("GET", "/v1/keys", None).await;
+    let unused = b["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|k| k["last_used_at"].is_null())
+        .count();
+    assert_eq!(unused, 1);
+    call(&c.app, "GET", "/v1/emails", Some(&other), None).await;
+    let (_, b) = c.c("GET", "/v1/keys", None).await;
+    assert!(b["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|k| k["last_used_at"].is_string()));
+
+    c.c(
+        "PUT",
+        "/v1/contacts",
+        Some(json!({"email": "ann@example.com", "first_name": "Ann", "last_name": "Lee"})),
+    )
+    .await;
+    c.c(
+        "PUT",
+        "/v1/contacts",
+        Some(json!({"email": "bob@example.com", "first_name": "Bob", "last_name": "Stone"})),
+    )
+    .await;
+    c.c(
+        "PUT",
+        "/v1/contacts",
+        Some(json!({"email": "x_y@other.org"})),
+    )
+    .await;
+    let emails = |b: &Value| -> Vec<String> {
+        let mut v: Vec<String> = b["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["email"].as_str().unwrap().to_lowercase())
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(
+        emails(&c.c("GET", "/v1/contacts?q=ANN", None).await.1),
+        ["ann@example.com"]
+    );
+    assert_eq!(
+        emails(&c.c("GET", "/v1/contacts?q=stone", None).await.1),
+        ["bob@example.com"]
+    );
+    assert_eq!(
+        emails(&c.c("GET", "/v1/contacts?q=ann%20lee", None).await.1),
+        ["ann@example.com"]
+    );
+    assert_eq!(
+        emails(&c.c("GET", "/v1/contacts?q=example.com", None).await.1).len(),
+        2
+    );
+    assert_eq!(
+        emails(&c.c("GET", "/v1/contacts?q=x_y", None).await.1),
+        ["x_y@other.org"]
+    );
+    assert!(emails(&c.c("GET", "/v1/contacts?q=x%25y", None).await.1).is_empty());
+    assert_eq!(
+        emails(&c.c("GET", "/v1/contacts?q=", None).await.1).len(),
+        3
+    );
+
+    let (_, seg) = c
+        .c("POST", "/v1/segments", Some(json!({"name": "vips"})))
+        .await;
+    let sid = seg["data"]["id"].as_str().unwrap();
+    c.c(
+        "POST",
+        &format!("/v1/segments/{sid}/members"),
+        Some(json!({"emails": ["ann@example.com", "bob@example.com"]})),
+    )
+    .await;
+    c.c("POST", "/v1/segments", Some(json!({"name": "empty"})))
+        .await;
+    let (_, b) = c.c("GET", "/v1/segments", None).await;
+    let counts: Vec<(String, i64)> = b["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["name"].as_str().unwrap().into(),
+                s["member_count"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(counts, [("empty".to_string(), 0), ("vips".to_string(), 2)]);
+}
+
+#[tokio::test]
+async fn template_version_history() {
+    let c = ctx!();
+    let (_, b) = c
+        .c(
+            "POST",
+            "/v1/templates",
+            Some(json!({"name": "News", "subject": "v1", "html": "<p>one</p>"})),
+        )
+        .await;
+    let id = b["data"]["id"].as_str().unwrap().to_string();
+    c.c("POST", &format!("/v1/templates/{id}/publish"), None)
+        .await;
+    let (s, _) = c
+        .c(
+            "PATCH",
+            &format!("/v1/templates/{id}"),
+            Some(json!({"subject": "v2", "html": "<p>two</p>"})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let (s, b) = c
+        .c("GET", &format!("/v1/templates/{id}/versions"), None)
+        .await;
+    assert_eq!(s, 200, "{b}");
+    let v: Vec<(i64, bool, bool)> = b["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            (
+                v["version"].as_i64().unwrap(),
+                v["published"].as_bool().unwrap(),
+                v["created_at"].is_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        v,
+        [(2, false, true), (1, true, true)],
+        "newest first; v1 is the live one"
+    );
+    assert!(b["data"][1]["published_at"].is_string() && b["data"][0]["published_at"].is_null());
+    let (s, b) = c
+        .c("GET", &format!("/v1/templates/{id}/versions/1"), None)
+        .await;
+    assert_eq!(
+        (
+            s,
+            b["data"]["version"].as_i64(),
+            b["data"]["subject"].as_str(),
+            b["data"]["published"].as_bool()
+        ),
+        (200, Some(1), Some("v1"), Some(true)),
+        "{b}"
+    );
+    assert!(b["data"]["template"].is_object());
+    assert_eq!(
+        c.c("GET", &format!("/v1/templates/{id}/versions/9"), None)
+            .await
+            .0,
+        404
+    );
+    assert_eq!(c.c("GET", "/v1/templates/nope/versions", None).await.0, 404);
+}
+
+#[tokio::test]
+async fn automation_step_stats_and_run_current_step() {
+    let c = ctx!();
+    c.c(
+        "POST",
+        "/v1/templates",
+        Some(json!({"name": "welcome", "subject": "Hi", "html": "<p>Hi</p>"})),
+    )
+    .await;
+    c.c("POST", "/v1/templates/welcome/publish", None).await;
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/automations",
+            Some(json!({"name": "flow", "trigger": "signed_up", "steps": [
+        {"key": "mail", "type": "send_email", "config": {"template": "welcome"}}]})),
+        )
+        .await;
+    assert_eq!(s, 201, "{b}");
+    let aid: Uuid = b["data"]["id"].as_str().unwrap().parse().unwrap();
+    let db = &c.st.db;
+    let run = |email: &'static str, state: &'static str, cur: Option<&'static str>| async move {
+        let cid: Uuid = sqlx::query_scalar(
+            "INSERT INTO contacts (workspace_id, email) VALUES ($1,$2) RETURNING id",
+        )
+        .bind(c.ws)
+        .bind(email)
+        .fetch_one(db)
+        .await
+        .unwrap();
+        sqlx::query_scalar::<_, Uuid>("INSERT INTO automation_runs (automation_id, version, contact_id, entry_key, state, current_step) VALUES ($1,1,$2,$3,$4,$5) RETURNING id")
+            .bind(aid).bind(cid).bind(email).bind(state).bind(cur).fetch_one(db).await.unwrap()
+    };
+    let log = |r: Uuid, step: &'static str, res: Value| async move {
+        sqlx::query(
+            "INSERT INTO automation_run_steps (run_id, step_key, result) VALUES ($1,$2,$3)",
+        )
+        .bind(r)
+        .bind(step)
+        .bind(res)
+        .execute(db)
+        .await
+        .unwrap();
+    };
+    // r1 finished both steps; r2 is waiting on `delay`; r3 failed at `mail` after a retry; r4 exited at `delay`;
+    // r5 has just arrived at `mail` (no log yet).
+    let r1 = run("1@x.io", "completed", None).await;
+    log(r1, "delay", json!({})).await;
+    log(r1, "mail", json!({})).await;
+    let r2 = run("2@x.io", "waiting", Some("delay")).await;
+    log(r2, "delay", json!({"outcome": "wait"})).await;
+    let r3 = run("3@x.io", "failed", Some("mail")).await;
+    log(r3, "delay", json!({})).await;
+    log(r3, "mail", json!({"decision": "error", "failed": false})).await;
+    log(r3, "mail", json!({"decision": "error", "failed": true})).await;
+    let r4 = run("4@x.io", "exited", Some("delay")).await;
+    log(r4, "delay", json!({})).await;
+    log(r4, "_goal", json!({"decision": "exit"})).await;
+    run("5@x.io", "active", Some("mail")).await;
+
+    let (_, b) = c.c("GET", &format!("/v1/automations/{aid}"), None).await;
+    let st = &b["data"]["stats"];
+    assert_eq!(
+        st["delay"],
+        json!({"entered": 4, "completed": 2, "failed": 0, "active": 1, "exited": 1}),
+        "{st}"
+    );
+    assert_eq!(
+        st["mail"],
+        json!({"entered": 3, "completed": 1, "failed": 1, "active": 1, "exited": 0}),
+        "{st}"
+    );
+    assert!(st.get("_goal").is_none());
+    // runs expose current_step
+    let (_, b) = c
+        .c(
+            "GET",
+            &format!("/v1/automations/{aid}/runs?status=waiting"),
+            None,
+        )
+        .await;
+    assert_eq!(b["data"][0]["current_step"], "delay");
+}
+
+#[tokio::test]
+async fn domain_verify_stamps_last_checked_and_records_diagnostics() {
+    std::env::set_var("MAILCRAFT_PUBLIC_URL", "https://mc.example.net");
+    let c = ctx!();
+    let (s, b) = c
+        .c(
+            "POST",
+            "/v1/domains",
+            Some(json!({"domain": "mail.gaps-test.invalid"})),
+        )
+        .await;
+    if s == 501 {
+        eprintln!("no system DNS resolver: domains stay stubbed here");
+        return;
+    }
+    assert_eq!(s, 201, "{b}");
+    let id = b["data"]["id"].as_str().unwrap().to_string();
+    assert!(b["data"]["last_checked_at"].is_null());
+    let (s, b) = c.c("POST", &format!("/v1/domains/{id}/verify"), None).await;
+    assert_eq!(s, 200, "{b}");
+    assert!(b["data"]["last_checked_at"].is_string(), "{b}");
+    let recs = b["data"]["records"].as_array().unwrap();
+    assert!(
+        recs.iter()
+            .all(|r| r["checked_at"].is_string() && r["detail"].is_string()),
+        "{b}"
+    );
+    let (_, g) = c.c("GET", &format!("/v1/domains/{id}"), None).await;
+    assert_eq!(g["data"]["last_checked_at"], b["data"]["last_checked_at"]);
+    // a wrong record surfaces what DNS returned
+    sqlx::query("UPDATE domain_records SET status = 'failed', found = 'v=spf1 -all' WHERE domain_id = $1 AND record = 'SPF'")
+        .bind(id.parse::<Uuid>().unwrap()).execute(&c.st.db).await.unwrap();
+    let (_, g) = c.c("GET", &format!("/v1/domains/{id}"), None).await;
+    assert!(
+        g["data"]["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["found"] == "v=spf1 -all"),
+        "{g}"
+    );
+}

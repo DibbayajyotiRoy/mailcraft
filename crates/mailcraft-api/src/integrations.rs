@@ -149,6 +149,8 @@ pub async fn contacts_upsert(
 pub struct ListQ {
     limit: Option<u32>,
     cursor: Option<String>,
+    /// Case-insensitive substring of email / first name / last name.
+    q: Option<String>,
 }
 
 pub async fn contacts_list(
@@ -163,6 +165,7 @@ pub async fn contacts_list(
             auth.0.workspace_id,
             q.limit.unwrap_or(25).clamp(1, 100),
             q.cursor,
+            q.q,
         )
         .await?;
     Ok(envelope_list(p.items, p.next_cursor))

@@ -32,6 +32,9 @@ pub struct DomainView {
     pub name: String,
     pub stream: String,
     pub status: String,
+    /// When DNS was last re-checked (verify); null before the first check.
+    #[serde(default)]
+    pub last_checked_at: Option<chrono::DateTime<chrono::Utc>>,
     pub records: Vec<DnsRecord>,
 }
 
@@ -69,7 +72,14 @@ pub struct Page {
 pub trait ContactService: Send + Sync {
     async fn upsert(&self, workspace: Uuid, req: UpsertContact) -> Result<Value>;
     async fn get(&self, workspace: Uuid, id_or_email: &str) -> Result<Value>;
-    async fn list(&self, workspace: Uuid, limit: u32, cursor: Option<String>) -> Result<Page>;
+    /// `q`: case-insensitive substring of email / first / last name.
+    async fn list(
+        &self,
+        workspace: Uuid,
+        limit: u32,
+        cursor: Option<String>,
+        q: Option<String>,
+    ) -> Result<Page>;
     async fn delete(&self, workspace: Uuid, id_or_email: &str) -> Result<()>;
     async fn suppress(&self, workspace: Uuid, id_or_email: &str, reason: &str) -> Result<()>;
 }
@@ -149,7 +159,7 @@ impl ContactService for StubContactService {
     async fn get(&self, _: Uuid, _: &str) -> Result<Value> {
         stub!("contacts")
     }
-    async fn list(&self, _: Uuid, _: u32, _: Option<String>) -> Result<Page> {
+    async fn list(&self, _: Uuid, _: u32, _: Option<String>, _: Option<String>) -> Result<Page> {
         stub!("contacts")
     }
     async fn delete(&self, _: Uuid, _: &str) -> Result<()> {

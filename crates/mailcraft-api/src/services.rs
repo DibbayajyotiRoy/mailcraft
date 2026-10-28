@@ -96,14 +96,32 @@ impl Domains {
     }
 
     async fn view(&self, d: DomainRow) -> Result<DomainView> {
-        let rows: Vec<(String, String, String, String, Option<i32>, String)> = sqlx::query_as(
-            "SELECT record, type, name, value, priority, status FROM domain_records WHERE domain_id = $1 ORDER BY record, name",
+        type Rec = (
+            String,
+            String,
+            String,
+            String,
+            Option<i32>,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<chrono::DateTime<Utc>>,
+        );
+        let rows: Vec<Rec> = sqlx::query_as(
+            "SELECT record, type, name, value, priority, status, detail, found, checked_at FROM domain_records WHERE domain_id = $1 ORDER BY record, name",
         )
         .bind(d.id)
         .fetch_all(&self.db)
         .await
         .map_err(db)?;
+        let last_checked_at =
+            sqlx::query_scalar("SELECT last_checked_at FROM domains WHERE id = $1")
+                .bind(d.id)
+                .fetch_one(&self.db)
+                .await
+                .map_err(db)?;
         Ok(DomainView {
+            last_checked_at,
             id: d.id,
             name: d.name,
             stream: if d.stream == Stream::Marketing {
@@ -115,14 +133,21 @@ impl Domains {
             status: d.status.as_str().into(),
             records: rows
                 .into_iter()
-                .map(|(record, kind, name, value, priority, status)| DnsRecord {
-                    priority: priority.and_then(|p| u16::try_from(p).ok()),
-                    record,
-                    kind,
-                    name,
-                    value,
-                    status,
-                })
+                .map(
+                    |(record, kind, name, value, priority, status, detail, found, checked_at)| {
+                        DnsRecord {
+                            detail,
+                            found,
+                            checked_at,
+                            priority: priority.and_then(|p| u16::try_from(p).ok()),
+                            record,
+                            kind,
+                            name,
+                            value,
+                            status,
+                        }
+                    },
+                )
                 .collect(),
         })
     }
@@ -233,6 +258,17 @@ impl DomainService for Domains {
 
 // ----------------------------------------------------------------- contacts
 
+/// `%needle%` for ILIKE with `\`, `%` and `_` escaped; `None` for a blank needle.
+pub(crate) fn like(q: Option<&str>) -> Option<String> {
+    let q = q.map(str::trim).filter(|s| !s.is_empty())?;
+    Some(format!(
+        "%{}%",
+        q.replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    ))
+}
+
 async fn resolve(pool: &PgPool, ws: Uuid, id_or_email: &str) -> Result<Uuid> {
     let by_id = id_or_email.parse::<Uuid>().ok();
     let email = if by_id.is_none() {
@@ -293,17 +329,27 @@ impl ContactService for Contacts {
         Ok(v)
     }
 
-    async fn list(&self, ws: Uuid, limit: u32, cursor: Option<String>) -> Result<Page> {
+    async fn list(
+        &self,
+        ws: Uuid,
+        limit: u32,
+        cursor: Option<String>,
+        q: Option<String>,
+    ) -> Result<Page> {
         let (at, id) = page::decode(cursor.as_deref()).map_err(|e| e.0)?;
         let lim = i64::from(limit);
         let rows: Vec<contacts::Contact> = sqlx::query_as(
             "SELECT id, workspace_id, email, first_name, last_name, properties, timezone, created_at FROM contacts \
-             WHERE workspace_id = $1 AND (created_at, id::text) < ($2, $3) ORDER BY created_at DESC, id::text DESC LIMIT $4",
+             WHERE workspace_id = $1 AND (created_at, id::text) < ($2, $3) \
+             AND ($5::text IS NULL OR email ILIKE $5 OR first_name ILIKE $5 OR last_name ILIKE $5 \
+                  OR concat_ws(' ', first_name, last_name) ILIKE $5) \
+             ORDER BY created_at DESC, id::text DESC LIMIT $4",
         )
         .bind(ws)
         .bind(at)
         .bind(id)
         .bind(lim + 1)
+        .bind(like(q.as_deref()))
         .fetch_all(&self.db)
         .await
         .map_err(db)?;
@@ -395,7 +441,7 @@ impl SegmentService for Segments {
         .fetch_all(&self.db)
         .await
         .map_err(db)?;
-        Ok(rows.into_iter().map(|(id, name, filter, members)| json!({"id": id, "name": name, "filter": filter, "members": members})).collect())
+        Ok(rows.into_iter().map(|(id, name, filter, members)| json!({"id": id, "name": name, "filter": filter, "members": members, "member_count": members})).collect())
     }
 
     async fn add_members(&self, ws: Uuid, segment: Uuid, emails: Vec<String>) -> Result<Value> {

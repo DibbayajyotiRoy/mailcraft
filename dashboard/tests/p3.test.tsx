@@ -123,10 +123,10 @@ describe("contacts", () => {
     { id: "c1", email: "ana@example.com", first_name: "Ana", properties: { plan: "pro" }, topics: [{ name: "news", subscribed: false }] },
     { id: "c2", email: "bad@example.com", suppressed: true, suppression_reason: "hard bounce" },
   ];
-  it("filters by search and opens the drawer with properties, topics and suppression", async () => {
-    render(<TooltipProvider><ContactsView contacts={contacts} segments={[]} contactsError={null} segmentsError={null} tab="contacts" /></TooltipProvider>);
-    fireEvent.change(screen.getByLabelText("Search contacts"), { target: { value: "ana" } });
-    expect(screen.queryByText("bad@example.com")).toBeNull();
+  it("search is a server-side GET form and the drawer shows properties, topics and suppression", async () => {
+    render(<TooltipProvider><ContactsView contacts={contacts} segments={[]} contactsError={null} segmentsError={null} tab="contacts" search="ana" /></TooltipProvider>);
+    const box = screen.getByLabelText("Search contacts") as HTMLInputElement;
+    expect([box.name, box.value, box.form?.method, box.form?.getAttribute("action")]).toEqual(["q", "ana", "get", "/contacts"]);
     fireEvent.click(screen.getByRole("button", { name: "ana@example.com" }));
     expect(await screen.findByText("plan")).toBeTruthy();
     expect(screen.getByText("news: unsubscribed")).toBeTruthy();

@@ -78,6 +78,18 @@ describe("ApprovalsInbox", () => {
     const fd = decide.mock.calls[0][0] as FormData;
     expect([fd.get("id"), fd.get("decision")]).toEqual(["ap1", "approve"]);
   });
+  it("R opens the reject dialog with an optional reason that is sent along", async () => {
+    const decide = vi.fn().mockResolvedValue(undefined);
+    render(<ApprovalsInbox approvals={[{ ...A(1), payload: { to: "u@x.com", preview: { subject: "S", html: "<b>rendered</b>" } } }]} canDecide decide={decide} />);
+    expect(screen.getByTitle("Preview of S").getAttribute("srcdoc")).toBe("<b>rendered</b>");
+    fireEvent.keyDown(window, { key: "r" });
+    const reason = await screen.findByLabelText(/Reason/);
+    fireEvent.change(reason, { target: { value: "  looks like phishing " } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Reject" }).at(-1)!);
+    await waitFor(() => expect(decide).toHaveBeenCalled());
+    const fd = decide.mock.calls[0][0] as FormData;
+    expect([fd.get("decision"), fd.get("reason")]).toEqual(["reject", "looks like phishing"]);
+  });
   it("non-admin sees a message and cannot decide", () => {
     render(<ApprovalsInbox approvals={[A(1)]} canDecide={false} decide={vi.fn()} />);
     expect(screen.getByText(/Only an admin key/)).toBeTruthy();

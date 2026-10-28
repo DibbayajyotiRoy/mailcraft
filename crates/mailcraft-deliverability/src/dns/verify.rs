@@ -49,6 +49,8 @@ pub struct Check {
     pub purpose: Purpose,
     pub status: Status,
     pub hint: String,
+    /// What DNS actually returns at the name, when the record is wrong (or still propagating).
+    pub found: Option<String>,
 }
 
 pub const PROPAGATION_MIN: u64 = 30;
@@ -231,6 +233,17 @@ fn check_txt(r: &Record, found: &[String]) -> (Status, String) {
     }
 }
 
+/// The live value at a record's name, for diagnostics. `None` when nothing resolves.
+async fn found_value<D: Dns>(dns: &D, r: &Record) -> Option<String> {
+    let v = match r.purpose {
+        Purpose::DkimCname | Purpose::MtaStsHost => dns.cname(&r.name).await,
+        Purpose::ReturnPathMx => dns.mx(&r.name).await,
+        _ => dns.txt(&r.name).await,
+    }
+    .ok()?;
+    (!v.is_empty()).then(|| v.join(" | "))
+}
+
 /// Check every record of the plan. `now_unix` drives the "propagating" hint.
 pub async fn verify<D: Dns>(dns: &D, plan: &Plan, now_unix: u64) -> Vec<Check> {
     let age_min = now_unix.saturating_sub(plan.created_unix) / 60;
@@ -244,7 +257,13 @@ pub async fn verify<D: Dns>(dns: &D, plan: &Plan, now_unix: u64) -> Vec<Check> {
             );
             status = Status::Propagating;
         }
+        let found = if matches!(status, Status::Wrong | Status::Propagating) {
+            found_value(dns, r).await
+        } else {
+            None
+        };
         out.push(Check {
+            found,
             name: r.name.clone(),
             rtype: r.rtype,
             purpose: r.purpose,
@@ -519,6 +538,14 @@ mod tests {
             "SPF include missing: include:_spf.mc.example.net"
         );
         assert!(c[..3].iter().all(|c| c.status == Status::Wrong));
+        // `found` carries what DNS actually returned; healthy records carry none.
+        assert_eq!(c[0].found.as_deref(), Some("other.dkim.evil.net."));
+        assert_eq!(c[1].found.as_deref(), Some("10 mail.old.com."));
+        assert_eq!(
+            c[2].found.as_deref(),
+            Some("v=spf1 include:sendgrid.net ~all")
+        );
+        assert!(c[3..].iter().all(|c| c.found.is_none()));
     }
 
     #[tokio::test]

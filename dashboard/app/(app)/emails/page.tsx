@@ -11,16 +11,16 @@ import { EmailsTable } from "@/components/emails/emails-table";
 import { Peek } from "@/components/emails/peek";
 import { EmailTrail, PolicyDecisions, type MailEvent } from "@/components/emails/trail";
 import { RetryError } from "@/components/monitor/retry-error";
-import { emailsHref, filterEmails, type EmailQuery } from "@/components/monitor/helpers";
+import { MessagePreview } from "@/components/monitor/message-preview";
+import { emailsHref, type EmailQuery } from "@/components/monitor/helpers";
 
 export const dynamic = "force-dynamic";
 
 export default async function Emails({ searchParams }: { searchParams: Promise<EmailQuery> }) {
   const query = await searchParams;
   const { status, cursor, open } = query;
-  const narrowed = !!(query.q || query.from || query.to);
-  const q = new URLSearchParams({ limit: narrowed ? "100" : "25" }); // text/date filters narrow the fetched page, so fetch a wider one
-  if (status) q.set("status", status);
+  const q = new URLSearchParams({ limit: "25" });
+  for (const k of ["status", "q", "from", "to"] as const) if (query[k]) q.set(k, query[k]!); // filtered by the API
   if (cursor) q.set("cursor", cursor);
   const [r, peek, peekEv] = await Promise.all([
     get(`/v1/emails?${q}`),
@@ -30,9 +30,8 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
   const header = <PageHeader title="Emails" description="Every message you send, and what happened to it." />;
   if (r.error) return <>{header}<EmailFilters query={query} /><RetryError error={r.error} /></>;
 
-  const all: any[] = r.data ?? [];
-  const rows = filterEmails(all, query);
-  const filtered = !!(status || narrowed);
+  const rows: any[] = r.data ?? [];
+  const filtered = !!(status || query.q || query.from || query.to);
   const pe = peek?.data;
   return (
     <>
@@ -40,7 +39,7 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
       <EmailFilters query={query} />
       {!rows.length ? (
         filtered || cursor ? (
-          <EmptyState variant="no-results" title="No emails match" description={all.length ? `${all.length} loaded emails were checked; try a wider search or date range.` : "Nothing matches these filters."}
+          <EmptyState variant="no-results" title="No emails match" description="Nothing matches these filters. Try a wider search or date range."
             action={<Button asChild variant="secondary"><Link data-ui="link" href="/emails">Clear filters</Link></Button>} />
         ) : (
           <EmptyState title="No emails yet" description="Send your first email via the API. It appears here within seconds."
@@ -51,7 +50,7 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
         <>
           <EmailsTable rows={rows} query={query} />
           <nav aria-label="Pagination" className="mt-4 flex items-center justify-between gap-3 text-sm">
-            <span className="text-muted">{rows.length} {rows.length === 1 ? "email" : "emails"}{rows.length !== all.length && ` of ${all.length} loaded`}</span>
+            <span className="text-muted">{rows.length} {rows.length === 1 ? "email" : "emails"}</span>
             <span className="flex gap-2">
               {cursor && <Button asChild variant="secondary"><Link data-ui="link" href={emailsHref(query, { cursor: undefined, open: undefined })}>First page</Link></Button>}
               {r.next_cursor && <Button asChild variant="secondary"><Link data-ui="link" rel="next" href={emailsHref(query, { cursor: r.next_cursor, open: undefined })}>Next page</Link></Button>}
@@ -69,6 +68,7 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
                 <p className="mt-2 break-all font-mono text-xs text-muted">{pe.from_addr} to {pe.to_addr}</p>
               </div>
               <CopyField value={pe.id} label="message ID" />
+              <section aria-labelledby="pk-m"><h3 id="pk-m" className="mb-3 text-sm font-medium">Message</h3><MessagePreview html={pe.html} text={pe.text} title={`Preview of ${pe.subject || "email"}`} /></section>
               <section aria-labelledby="pk-t"><h3 id="pk-t" className="mb-3 text-sm font-medium">Delivery timeline</h3>
                 {peekEv?.error ? <RetryError error={peekEv.error} /> : <EmailTrail events={(peekEv?.data as MailEvent[]) ?? []} status={pe.status} approvalHref="/approvals" label="Delivery timeline (peek)" />}
               </section>

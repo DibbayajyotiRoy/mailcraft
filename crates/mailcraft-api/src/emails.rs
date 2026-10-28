@@ -33,6 +33,8 @@ use crate::{
 const MAX_RECIPIENTS: usize = 50;
 const MAX_BATCH: usize = 100;
 const MAX_BODY: usize = 2_000_000;
+/// Characters of html / text returned by GET /v1/emails/{id} (and approval previews).
+pub(crate) const BODY_CAP: i32 = 200_000;
 
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -630,6 +632,36 @@ pub struct ListQ {
     limit: Option<i64>,
     cursor: Option<String>,
     status: Option<String>,
+    stream: Option<String>,
+    env: Option<String>,
+    /// Case-insensitive substring of to / from / subject (or an exact email id).
+    q: Option<String>,
+    /// created_at range: RFC 3339 or `YYYY-MM-DD` (`to` then includes that whole day).
+    from: Option<String>,
+    to: Option<String>,
+}
+
+/// `YYYY-MM-DD` or RFC 3339. `end` makes the bound exclusive: a date means the start of the next
+/// day, a timestamp one microsecond later.
+fn bound(v: &Option<String>, field: &'static str, end: bool) -> ApiResult<Option<DateTime<Utc>>> {
+    let Some(v) = v.as_deref().map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    let bad = || invalid(format!("`{field}` must be YYYY-MM-DD or RFC 3339")).field(field);
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d") {
+        let d = if end {
+            d.succ_opt().ok_or_else(bad)?
+        } else {
+            d
+        };
+        return Ok(d.and_hms_opt(0, 0, 0).map(|t| t.and_utc()));
+    }
+    let t = DateTime::parse_from_rfc3339(v).map_err(|_| bad())?.to_utc();
+    Ok(Some(if end {
+        t + chrono::Duration::microseconds(1)
+    } else {
+        t
+    }))
 }
 
 pub async fn list(State(st): State<AppState>, auth: Auth, Query(q): Query<ListQ>) -> ApiResult {
@@ -652,9 +684,25 @@ pub async fn list(State(st): State<AppState>, auth: Auth, Query(q): Query<ListQ>
         }
         None => (None, None),
     };
+    for (v, f, ok) in [
+        (&q.stream, "stream", ["transactional", "marketing"]),
+        (&q.env, "env", ["test", "live"]),
+    ] {
+        if v.as_deref().is_some_and(|v| !ok.contains(&v)) {
+            return Err(invalid(format!("`{f}` must be {}", ok.join("|"))).field(f));
+        }
+    }
+    let from = bound(&q.from, "from", false)?;
+    let to = bound(&q.to, "to", true)?;
+    // Trigram indexes (migration api_gaps) serve the ILIKEs.
+    let needle = crate::services::like(q.q.as_deref());
+    let by_id = q.q.as_deref().and_then(|s| s.trim().parse::<Uuid>().ok());
     let mut rows: Vec<EmailRow> = sqlx::query_as(&format!(
         "SELECT {EMAIL_COLS} FROM emails WHERE workspace_id = $1 AND ($2::text IS NULL OR status = $2) \
          AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4)) \
+         AND ($6::text IS NULL OR stream = $6) AND ($7::text IS NULL OR env = $7) \
+         AND ($8::timestamptz IS NULL OR created_at >= $8) AND ($9::timestamptz IS NULL OR created_at < $9) \
+         AND ($10::text IS NULL OR to_addr ILIKE $10 OR from_addr ILIKE $10 OR subject ILIKE $10 OR id = $11) \
          ORDER BY created_at DESC, id DESC LIMIT $5"
     ))
     .bind(auth.0.workspace_id)
@@ -662,6 +710,12 @@ pub async fn list(State(st): State<AppState>, auth: Auth, Query(q): Query<ListQ>
     .bind(c_at)
     .bind(c_id)
     .bind(limit + 1)
+    .bind(&q.stream)
+    .bind(&q.env)
+    .bind(from)
+    .bind(to)
+    .bind(needle)
+    .bind(by_id)
     .fetch_all(&st.db)
     .await?;
     let next = if rows.len() as i64 > limit {
@@ -684,7 +738,21 @@ pub async fn get(State(st): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -
     .fetch_optional(&st.db)
     .await?
     .ok_or_else(|| not_found("email"))?;
-    Ok(envelope(StatusCode::OK, row))
+    // Stored body: as sent, or rendered by the worker at dequeue (templates). Null until then.
+    let (html, text, truncated): (Option<String>, Option<String>, bool) = sqlx::query_as(
+        "SELECT left(html, $2), left(text, $2), COALESCE(length(html), 0) > $2 OR COALESCE(length(text), 0) > $2 \
+         FROM email_bodies WHERE email_id = $1",
+    )
+    .bind(id)
+    .bind(BODY_CAP)
+    .fetch_optional(&st.db)
+    .await?
+    .unwrap_or((None, None, false));
+    let mut out = serde_json::to_value(row).unwrap_or_default();
+    out["html"] = json!(html);
+    out["text"] = json!(text);
+    out["body_truncated"] = json!(truncated);
+    Ok(envelope(StatusCode::OK, out))
 }
 
 pub async fn events(State(st): State<AppState>, auth: Auth, Path(id): Path<Uuid>) -> ApiResult {
