@@ -52,21 +52,27 @@ Config: `~/.config/mailcraft/config.json`, mode 600. Env: `MAILCRAFT_API_URL`, `
 | `domain list` | |
 | `send --to --subject --text --html --from --template --data '<json>' --dry-run --idempotency-key` | `--template` with `--data` renders a stored template. `--to` may repeat. |
 | `emails get <id>` | Status, events, policy decisions. |
+| `emails list [--status] [--stream] [--env] [--q <text>] [--from <date>] [--to <date>]` | Newest first. |
+| `broadcasts create --template <id\|alias> --from <addr> (--csv <file>\|--recipients <json\|@file>) [--subject] [--stream] [--max-per-day N] [--dry-run]` | One template to up to 5000 recipients. Run `--dry-run` first: it returns `queued`, `skipped[]` and the `schedule`. CSV columns: `email`, `first_name`, `last_name`, anything else is `{{ data.<column> }}`. `pending_approval` exits 4. |
+| `broadcasts list`, `broadcasts get <id>`, `broadcasts preview --template <t> --email <addr>` | Progress per status; render one recipient. |
 | `templates import <file> [--name] [--format html\|mjml\|json]` | Format inferred from extension if omitted. |
 | `templates export <id> [--format html\|mjml\|json]` | Default `json`. |
 | `templates list` | |
+| `templates versions <id>`, `templates restore <id> <version>`, `templates discard-draft <id>` | History; copy an old version into a new draft; drop unpublished versions (irreversible). |
 | `templates publish <id\|alias> [--version N]` | Makes a version live; sends use the published version. |
-| `templates preview <id> --data '<json>'` | Returns subject, html, text, lint. |
+| `templates preview <id> --data '<json>' [--version N] [--file <path>]` | Returns subject, html, text, lint. `--file` renders unsaved html / mjml / json. |
 | `contacts` (`list`, `get <email>`, `upsert <email> [--first-name <n>] [--data <json>] [--timezone <IANA>]`) | `--timezone` sets the contact timezone that live-send quiet hours use (invalid is 422; `properties.timezone` is lifted too). |
+| `contacts import <file.csv>` | Header `email,first_name,last_name,timezone,...`; extra columns become properties. Up to 5000 rows per call; bad rows are listed in `data.failed`. |
 | `events track <name> --contact <email> --data '<json>'` | Add `--dry-run` to list the emails it would trigger. |
-| `automations list` | |
+| `automations list [--status archived]`, `automations archive <id>` / `unarchive <id>` | Archived automations are hidden by default. |
+| `automations test <id> --email <addr>`, `automations runs <id>`, `automations run <id> <run_id>` | `test` starts a real run for one contact (test key: sandbox; live key: sends). Poll `run`. |
 | `automations publish <id\|name> [--backfill-suppress]` | Activates a draft. Run `templates publish` first. |
 | `automations enable <id>` / `disable <id>` | Resume / pause. A draft needs `publish`, not `enable`. |
 | `automations import <file.json>` | See llms-full.txt for the format. First sends go to approval. |
 | `keys create --name <n> --scopes read,send --env test\|live` | Secret is shown once. `admin` scope needs a human. |
 | `keys list`, `keys revoke <id>` | |
 | `approvals list` | |
-| `approvals approve <id>` / `reject <id>` | Human only. Refused with agent keys. |
+| `approvals approve <id> [--reason]` / `reject <id> [--reason]` | Human only. Refused with agent keys. |
 | `kill-switch on\|off` (aliases `pause` / `resume`) | Engaging needs `manage`; releasing needs `admin` (a human). |
 | `settings instructions set "<text>"\|set --file <path>\|get\|clear` | Workspace writing instructions for LLM emails (max 2,000 chars). Changing needs `admin`. |
 | `doctor` | Exit 7 if any check fails. |
@@ -76,7 +82,7 @@ Mutating commands also accept `--yes` (skip prompt), `--dry-run`, `--idempotency
 ## MCP
 Remote: `https://<host>/mcp` (Streamable HTTP; OAuth or `Authorization: Bearer mc_...`). Local: `npx -y @dibbayajyotiroy/mailcraft-mcp` (use only this scoped package; look-alikes would receive your key). Flags `--tools a,b`, `--read-only`. Operation ids from openapi.yaml are tool names.
 
-Tools: account_status, go_live_request, kill_switch_status, kill_switch_engage, settings_get_instructions, settings_set_instructions (admin); email_send, email_get, email_events, email_cancel, email_list; domain_add, domain_check; event_send; automation_create/get/list/pause/resume/simulate/runs; template_create/get/list/update/publish/preview/import/export, content_lint; contact_upsert/get/list/delete; policy_get, policy_propose, approval_list, approval_get, audit_list, doctor. (Batch send, webhooks, segments, suppressions are REST-only for now.)
+Tools: account_status, go_live_request, kill_switch_status, kill_switch_engage, settings_get_instructions, settings_set_instructions (admin); email_send, email_get, email_events, email_cancel, email_list; broadcast_send (run with dry_run first), broadcast_preview, broadcast_list, broadcast_get; domain_add, domain_check; event_send, event_names; automation_create/get/list/pause/resume/archive/unarchive/test/run_get/runs (and `simulate`, which has no server route yet); template_create/get/list/update/publish/preview/import/export/versions/version_get/restore/discard_draft, content_lint; contact_upsert/get/list/update/activity/import/delete; segment_create/list/preview/update/delete/add_members; policy_get, policy_propose, approval_list, approval_get, audit_list, doctor. `--read-only` keeps the previews and drops every sending or mutating tool. (Batch send, webhooks, transports and suppressions are REST-only for now.)
 
 Absent from agent sessions: approval_decide, policy_set, kill_switch_set to off, go_live_approve. Inbound-as-untrusted and reply tools are LATER.
 

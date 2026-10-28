@@ -26,6 +26,16 @@ mailcraft send --to ana@example.org --from hello@example.com --template welcome 
 ```
 Result: `{"ok":true,"data":{"id":"<uuid>","status":"queued","recipients":[{"email":"...","id":"<uuid>"}]},"request_id":"req_...","schema":1}`.
 
+## Many recipients (broadcast)
+```
+mailcraft broadcasts preview --template welcome --email ana@example.org --first-name Ana --json
+mailcraft broadcasts create --template welcome --from hello@example.com --csv list.csv --dry-run --json
+mailcraft broadcasts create --template welcome --from hello@example.com --csv list.csv \
+  --idempotency-key welcome-2026-10 --json
+mailcraft broadcasts get <id> --json     # counts, skipped rows, per-recipient status
+```
+CSV: a header row with `email` (and optionally `first_name`, `last_name`); other columns are `{{ data.<column> }}`. Up to 5000 rows. Read `data.skipped[]` from the dry run (`invalid_email`, `duplicate`, `suppressed`, `unsubscribed`, `not_allowed`, `missing_variable`) and `data.schedule` (sends are paced under the daily cap) before the real run. Test keys sandbox everything. `pending_approval` (exit 4) carries one `approval_id` for the whole broadcast; never approve it yourself. MCP: `broadcast_send` with `dry_run: true`, `broadcast_preview`.
+
 ## Magic addresses (test keys, any domain, `+label` allowed)
 `delivered@test.mailcraft.local`, `bounced@` (550 5.1.1), `complained@`, `suppressed@`, `deferred@` (4.2.0 then success).
 

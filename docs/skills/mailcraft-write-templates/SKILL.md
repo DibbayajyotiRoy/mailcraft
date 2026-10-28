@@ -30,7 +30,7 @@ mailcraft templates preview <id> --data '{"first_name":"Ana","app_url":"https://
 mailcraft templates export <id> --format mjml --json
 mailcraft templates list --json
 ```
-`preview` returns `subject`, `html`, `text`, `lint[]`; fix every lint issue. Import formats: `html` becomes a `raw_html` block, `mjml` a `raw_mjml` block, `json` is canonical. React Email: render to HTML in CI, then import the HTML. Resend `{{{VAR}}}` becomes `{{ VAR }}`. JSON and MJML of block-built templates round-trip; raw blocks pass through.
+`preview` returns `subject`, `html`, `text`, `lint[]`; fix every lint issue. `preview <id> --file draft.html` renders unsaved content (nothing is stored); `--version N` renders an older saved version. `templates versions <id>` lists the history, `templates restore <id> <version>` copies an old version into a new draft (then `publish`), `templates discard-draft <id>` drops unpublished versions for good. Import formats: `html` becomes a `raw_html` block, `mjml` a `raw_mjml` block, `json` is canonical. React Email: render to HTML in CI, then import the HTML. Resend `{{{VAR}}}` becomes `{{ VAR }}`. JSON and MJML of block-built templates round-trip; raw blocks pass through.
 
 ## Pitfalls
 - Keep HTML under about 100 KB (Gmail clips larger messages; unverified vendor claim).

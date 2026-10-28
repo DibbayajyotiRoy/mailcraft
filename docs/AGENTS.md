@@ -7,4 +7,4 @@ This project sends email through mailcraft (self-hosted). Docs index: `llms.txt`
 - Never print, log or ask for API keys. They come from `MAILCRAFT_API_KEY` or `.mailcraft/`.
 - Try `--dry-run` first; add `--idempotency-key` to anything you may retry.
 - Never decide approvals, raise limits, go live or turn the kill switch off. Those are human steps. Exit code 4 means wait for a human; 5 means retry with backoff; 7 means a check failed, follow the hint.
-- Key commands: `mailcraft doctor`, `domain add|verify`, `send`, `templates import|preview`, `events track`, `automations import|list`, `approvals list`.
+- Key commands: `mailcraft doctor`, `domain add|verify`, `send`, `broadcasts create --dry-run|preview|get`, `templates import|preview|versions|restore`, `contacts import`, `events track`, `automations import|list|test|runs`, `approvals list`.
