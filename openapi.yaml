@@ -629,9 +629,11 @@ paths:
       operationId: transport_create
       summary: Add an smtp-relay (with `preset`) or ses transport (scope manage). Secrets are write-only.
       description: |
-        `smtp-relay` config: `{host,port,tls?,username?,password}` or, with `preset` (postmark, mailgun, resend, brevo, smtp2go, ses),
+        `smtp-relay` config: `{host,port,tls?,username?,password,mailbox_sender?}` or, with `preset` (postmark, mailgun, resend, brevo, smtp2go, ses),
         `{username?,password,region?}`. `ses` config: `{region,access_key_id,secret_access_key,session_token?}`.
-        Gmail is connected with `/v1/transports/gmail/oauth/*`.
+        `mailbox_sender: true` (needs `username`) sends with the mailbox address as the envelope sender, for
+        mailbox relays such as Zoho, Gmail/Workspace or Outlook that refuse any other MAIL FROM; bounces then go to
+        that mailbox. Gmail is connected with `/v1/transports/gmail/oauth/*`.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CreateTransport" } } } }
       responses:

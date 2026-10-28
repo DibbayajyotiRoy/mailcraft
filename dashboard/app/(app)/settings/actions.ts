@@ -31,10 +31,12 @@ export async function savePolicy(_p: Result, d: FormData) {
 
 export async function addRelay(_p: Result, d: FormData): Promise<Result> {
   const preset = f(d, "preset");
-  const config: Record<string, string> = { password: f(d, "password") };
+  const config: Record<string, string | number | boolean> = { password: f(d, "password") };
   if (f(d, "username")) config.username = f(d, "username");
   if (f(d, "region")) config.region = f(d, "region");
-  const r = await api("POST", "/v1/transports", { kind: "smtp-relay", preset, name: f(d, "name") || preset, config });
+  // `custom` is not an API preset: host/port go in config instead.
+  if (preset === "custom") Object.assign(config, { host: f(d, "host"), port: Number(f(d, "port")), mailbox_sender: d.get("mailbox_sender") === "on" });
+  const r = await api("POST", "/v1/transports", { kind: "smtp-relay", preset: preset === "custom" ? undefined : preset, name: f(d, "name") || preset, config });
   if (r.error) return fail(r);
   revalidatePath("/settings");
   return { ok: `${preset} relay added. Run the test to confirm the credentials.` };

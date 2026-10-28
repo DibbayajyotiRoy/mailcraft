@@ -24,6 +24,10 @@ pub struct SmtpConfig {
     pub username: Option<String>,
     pub password: Option<String>,
     pub timeout: Duration,
+    /// Mailbox relays (Zoho, Gmail/Workspace SMTP, Outlook) only accept the signed-in address
+    /// as MAIL FROM, so send with `username` as the envelope sender instead of the VERP
+    /// return path. Bounces then land in that mailbox rather than in mailcraft.
+    pub mailbox_sender: bool,
 }
 
 /// Verified (V) against provider docs on 2026-10-27, or (M) from memory: check before shipping.
@@ -97,12 +101,14 @@ impl SmtpConfig {
             username: Some(username.into()),
             password: Some(password.into()),
             timeout: Duration::from_secs(30),
+            mailbox_sender: false,
         })
     }
 }
 
 pub struct SmtpRelay {
     mailer: AsyncSmtpTransport<Tokio1Executor>,
+    envelope_from: Option<String>,
 }
 
 impl SmtpRelay {
@@ -119,7 +125,10 @@ impl SmtpRelay {
         if let (Some(u), Some(p)) = (&cfg.username, &cfg.password) {
             b = b.credentials(Credentials::new(u.clone(), p.clone()));
         }
-        Ok(Self { mailer: b.build() })
+        Ok(Self {
+            mailer: b.build(),
+            envelope_from: cfg.username.clone().filter(|_| cfg.mailbox_sender),
+        })
     }
 }
 
@@ -173,7 +182,9 @@ impl ClassifiedTransport for SmtpRelay {
                 .map_err(|e| TransportError::Permanent(format!("bad address {s}: {e}")))
         };
         let env = Envelope::new(
-            Some(parse(&msg.mail_from)?),
+            Some(parse(
+                self.envelope_from.as_deref().unwrap_or(&msg.mail_from),
+            )?),
             rcpts
                 .iter()
                 .map(|r| parse(r))
@@ -292,7 +303,25 @@ mod tests {
             username: Some("u".into()),
             password: Some("p".into()),
             timeout: Duration::from_secs(5),
+            mailbox_sender: false,
         }
+    }
+
+    #[tokio::test]
+    async fn mailbox_sender_uses_the_login_as_envelope_from() {
+        let (port, h) = sink(None).await;
+        let t = SmtpRelay::new(&SmtpConfig {
+            username: Some("dev@example.com".into()),
+            mailbox_sender: true,
+            ..cfg(port)
+        })
+        .unwrap();
+        t.submit(&sample()).await.unwrap();
+        let (cmds, _) = h.await.unwrap();
+        assert!(
+            cmds.contains(&"MAIL FROM:<dev@example.com>".to_string()),
+            "{cmds:?}"
+        );
     }
 
     #[tokio::test]

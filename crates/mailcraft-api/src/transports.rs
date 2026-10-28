@@ -121,10 +121,17 @@ fn build(b: &CreateTransport) -> ApiResult<(Value, Value)> {
                 TlsMode::Implicit => "implicit",
                 TlsMode::None => "none",
             };
-            let secret = json!({"host": host, "port": port, "tls": tls_s, "username": user, "password": s(c, "password")});
+            let mailbox_sender = c["mailbox_sender"].as_bool().unwrap_or(false);
+            if mailbox_sender && user.is_none() {
+                return Err(invalid(
+                    "config.mailbox_sender needs config.username (the mailbox address)",
+                )
+                .field("config.mailbox_sender"));
+            }
+            let secret = json!({"host": host, "port": port, "tls": tls_s, "username": user, "password": s(c, "password"), "mailbox_sender": mailbox_sender});
             Ok((
                 secret,
-                json!({"host": host, "port": port, "tls": tls_s, "preset": b.preset}),
+                json!({"host": host, "port": port, "tls": tls_s, "preset": b.preset, "mailbox_sender": mailbox_sender}),
             ))
         }
         "ses" => {
