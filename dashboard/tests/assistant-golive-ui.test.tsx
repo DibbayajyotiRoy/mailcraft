@@ -99,6 +99,8 @@ test("a placeholder value blocks Apply with a clear message naming it", () => {
   expect(alert.textContent).toContain("[add signup link]");
   expect(alert.textContent).toContain("change signup_link to");
   expect(screen.getByText("needs a value")).toBeTruthy();
+  const apply = screen.getByRole("button", { name: "Apply" });
+  expect(document.getElementById(apply.getAttribute("aria-describedby")!)!.textContent).toBe("Replace the placeholder values first."); // the reason reaches assistive tech too
 });
 
 test("the pencil next to a variable pre-fills the composer with 'Change <var> to '", async () => {

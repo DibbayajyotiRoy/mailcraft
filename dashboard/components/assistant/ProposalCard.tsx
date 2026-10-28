@@ -89,6 +89,7 @@ export function ProposalCard({ card, onApply, onCancel, onEdit, onTweak }: { car
   const waiting = !!p.waiting && state === "pending"; // a go-live request is already in Approvals: nothing to apply, so no buttons and no expiry
   const expired = state === "pending" && !waiting && Date.now() > p.expires_at;
   const open = state === "pending" || state === "applying";
+  const gap = hasPlaceholders(p.variables), gapId = useId(); // Apply is disabled while a stand-in value is left: say why to assistive tech too
   return (
     <section aria-label={p.title} className="overflow-hidden rounded-lg border border-border bg-surface">
       <div className="space-y-3 p-3">
@@ -123,7 +124,8 @@ export function ProposalCard({ card, onApply, onCancel, onEdit, onTweak }: { car
         {waiting && <TaskRow r={{ status: "pending_approval", label: "A go-live request is already waiting", detail: goLiveNext(p.pending?.kind), href: "/approvals", hrefLabel: "Open Approvals" }} />}
         {open && !expired && !waiting && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button loading={state === "applying"} disabled={hasPlaceholders(p.variables)} onClick={() => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
+            <Button loading={state === "applying"} disabled={gap} aria-describedby={gap ? gapId : undefined} onClick={() => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
+            {gap && <span id={gapId} className="sr-only">Replace the placeholder values first.</span>}
             <Button variant="secondary" disabled={state === "applying"} onClick={onEdit}>Edit</Button>
             <Button variant="ghost" disabled={state === "applying"} onClick={onCancel}>Cancel</Button>
             <span className="ml-auto text-xs text-muted">Nothing changes until you apply.</span>
