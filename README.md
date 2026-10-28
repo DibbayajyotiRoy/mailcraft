@@ -208,6 +208,7 @@ cd dashboard && npm install && npm run build
 ## Documentation
 
 - **Start here:** [docs/QUICKSTART.md](docs/QUICKSTART.md), then [docs/INTEGRATION.md](docs/INTEGRATION.md) to connect your product.
+- **Contacts:** [docs/CONTACT-SOURCES.md](docs/CONTACT-SOURCES.md) (pull contacts from another product's API into lists; manage lists).
 - **Operate:** [docs/DEPLOY-VM.md](docs/DEPLOY-VM.md), [docs/inbound.md](docs/inbound.md) (bounces and complaints), [docs/errors/index.md](docs/errors/index.md), [docs/cli.md](docs/cli.md) (CLI reference).
 - **Reference:** [openapi.yaml](openapi.yaml) (every route), [SPEC.md](SPEC.md) (product spec), [ARCHITECTURE.md](ARCHITECTURE.md), [crates/mailcraft-llm/README.md](crates/mailcraft-llm/README.md) (LLM settings, free models, guardrail presets).
 - **For agents:** [docs/llms.txt](docs/llms.txt) ([full](docs/llms-full.txt)), [docs/SKILL.md](docs/SKILL.md), [docs/AGENTS.md](docs/AGENTS.md), [docs/agent-setup.md](docs/agent-setup.md), the MCP server in [mcp/](mcp/README.md), the TypeScript SDK in [sdk/ts/](sdk/ts/README.md).

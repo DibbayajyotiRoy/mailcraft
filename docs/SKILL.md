@@ -20,7 +20,7 @@ description: Set up and operate mailcraft (self-hosted email with lifecycle auto
 5. `mailcraft doctor --json`; then ask the human to go live.
 
 ## Task skills
-`skills/mailcraft-send-email`, `skills/mailcraft-setup-domain`, `skills/mailcraft-build-automation`, `skills/mailcraft-write-templates`. Commands: `cli.md`. Errors: `errors/index.md`.
+`skills/mailcraft-send-email`, `skills/mailcraft-setup-domain`, `skills/mailcraft-build-automation`, `skills/mailcraft-write-templates`. Commands: `cli.md`. Errors: `errors/index.md`. Contact sources (pull contacts from another product's API) and lists: `CONTACT-SOURCES.md`.
 
 ## Email content rules
 - Transactional: no marketing content, no tracking, no unsubscribe header. Marketing/lifecycle: one-click unsubscribe is added automatically; do not remove the footer.
