@@ -26,3 +26,8 @@ A side panel (header button, Cmd/Ctrl+K) that drafts automations, broadcasts, te
 | `MAILCRAFT_ASSISTANT_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL; the offline mock uses it |
 
 For local work with no key: `node scripts/mock-api.mjs 18080`, then run the dashboard with `MAILCRAFT_ASSISTANT_BASE_URL=http://127.0.0.1:18080/openrouter/api/v1`. Free-model rule, tools, proposal flow, limits and troubleshooting: [docs/ASSISTANT.md](../docs/ASSISTANT.md).
+
+### Write with AI (New email dialog)
+
+**Write with AI** in the New email dialog drafts the subject and body (or, on the template tab, the template's variables) from one sentence, and the fields fill in live while the model writes. It uses the same key, free-model rule and fallback chain as the assistant (`POST /api/compose/write`, NDJSON), sends the model only contact names, never addresses, and treats template text as untrusted data. It never sends: Send stays yours, and **Stop**, **Regenerate** and **Undo AI** are always there.
+

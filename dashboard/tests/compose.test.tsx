@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/components/ui/toast", () => ({ toast: { success: vi.fn() } }));
+// The beam is an animation library that needs matchMedia, which jsdom lacks.
+vi.mock("border-beam", () => ({ BorderBeam: ({ children }: { children: unknown }) => children }));
 import { ComposeEmail } from "@/components/emails/compose";
 import { askableVars, composeBody, nestVars, parseRecipients, type Compose } from "@/lib/compose";
 

@@ -11,11 +11,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import type { ApiError } from "@/lib/api";
 import { askableVars, composeBody, type Compose, type Errors, type Mode } from "@/lib/compose";
-import { addRecipients, prefillVars, recipientProblem, splitAddresses, type ContactsApi, type Recipient } from "@/lib/recipients";
-import type { Sender } from "@/lib/senders";
+import { addRecipients, contactName, prefillVars, recipientProblem, splitAddresses, type ContactsApi, type Recipient } from "@/lib/recipients";
+import { findSender, type Sender } from "@/lib/senders";
 import { FromPicker } from "./from-picker";
 import { NewContactsStep, type NewRow } from "./new-contacts-step";
 import { RecipientPicker } from "./recipient-picker";
+import { Live, useWriteWithAI, WriteWithAI } from "./write-with-ai";
 
 export type ComposeTemplate = { id: string; name?: string; alias?: string; variables?: unknown };
 type Send = (body: Record<string, unknown>) => Promise<{ id?: string; status?: string; error?: ApiError }>;
@@ -35,15 +36,19 @@ export function ComposeEmail({ defaultFrom, senders, templates, send, contacts }
   const [draft, setDraft] = useState("");
   const [fresh, setFresh] = useState<NewRow[] | null>(null); // the "add new contacts" step; null = the message form
   const [freshError, setFreshError] = useState<ApiError | null>(null);
-  const set = (p: Partial<Compose>) => setC((x) => ({ ...x, ...p }));
+  const set = (p: Partial<Compose>) => { if ("subject" in p || "text" in p || "html" in p || "vars" in p) ai.edited(); setC((x) => ({ ...x, ...p })); };
   const changeTo = (r: Recipient[]) => { setTo(r); setErrors((e) => ({ ...e, to: undefined })); };
   const tpl = templates.find((t) => t.id === c.template);
   const vars = askableVars(tpl?.variables);
   const body = (rs: Recipient[]) => composeBody({ ...c, to: rs.map((r) => r.email).join(", "), vars: prefillVars(c.vars, vars, rs) });
   const varsShown = prefillVars(c.vars, vars, to);
+  // Write with AI: names of picked contacts and the sender's display name, never addresses.
+  const ai = useWriteWithAI(c, setC, { vars, count: to.length, names: to.flatMap((r) => (r.contact ? [contactName(r.contact)] : [])).filter(Boolean),
+    fromName: findSender(senders ?? [], c.from)?.display_name || /^([^<]+?)\s*<[^>]+>\s*$/.exec(c.from)?.[1] || undefined });
 
   function submit(ev: React.FormEvent) {
     ev.preventDefault();
+    if (ai.writing || ai.incomplete) return; // Send waits for the draft to finish (or Stop), and for a cut-off one to be edited or regenerated
     const rs = addRecipients(to, splitAddresses(draft)); // text still in the box counts
     const r = body(rs), problem = recipientProblem(rs);
     setApiError(null);
@@ -78,7 +83,7 @@ export function ComposeEmail({ defaultFrom, senders, templates, send, contacts }
     toast.success(pending ? "Sent for approval" : "Email queued", {
       description: pending ? <Link href="/approvals" className="underline">Open approvals</Link> : res.id ? <Link href={`/emails/${encodeURIComponent(res.id)}`} className="underline">View email</Link> : undefined,
     });
-    setOpen(false);
+    setOpen(false); ai.reset();
     setC(blank(defaultFrom)); setTo([]); setDraft(""); setFresh(null);
     router.refresh();
   }
@@ -100,7 +105,7 @@ export function ComposeEmail({ defaultFrom, senders, templates, send, contacts }
     });
   }
 
-  const onOpenChange = (o: boolean) => { setOpen(o); if (!o) setFresh(null); };
+  const onOpenChange = (o: boolean) => { setOpen(o); if (!o) { setFresh(null); ai.reset(); } };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -112,27 +117,28 @@ export function ComposeEmail({ defaultFrom, senders, templates, send, contacts }
           <Field label="To" description={contacts ? "Search your contacts, or type an address. Commas separate several." : "Separate several addresses with commas."} error={errors.to ?? recipientProblem(to)}>
             {(a) => <RecipientPicker {...a} recipients={to} onRecipients={changeTo} draft={draft} onDraft={setDraft} search={contacts?.search} />}
           </Field>
+          <WriteWithAI ai={ai} mode={c.mode} />
           <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
-            <Field label="Subject" description={c.mode === "template" ? "Optional: blank uses the template’s subject." : undefined} error={errors.subject}>{(a) => <Input {...a} value={c.subject} onChange={(e) => set({ subject: e.target.value })} />}</Field>
+            <Field label="Subject" description={c.mode === "template" ? "Optional: blank uses the template’s subject." : undefined} error={errors.subject}>{(a) => <Live ai={ai} field="subject" text={c.subject}><Input {...a} value={c.subject} readOnly={ai.active === "subject"} onChange={(e) => set({ subject: e.target.value })} /></Live>}</Field>
             <Field label="Stream">{(a) => <Select {...a} value={c.stream} onChange={(e) => set({ stream: e.target.value as Compose["stream"] })}><option value="transactional">Transactional</option><option value="marketing">Marketing</option></Select>}</Field>
           </div>
           <Tabs value={c.mode} onValueChange={(m) => set({ mode: m as Mode })}>
             <TabsList aria-label="Message content"><TabsTrigger value="text">Plain text</TabsTrigger><TabsTrigger value="html">HTML</TabsTrigger><TabsTrigger value="template">Use a template</TabsTrigger></TabsList>
-            <TabsContent value="text"><Field label="Message" error={errors.content}>{(a) => <Textarea {...a} rows={7} value={c.text} onChange={(e) => set({ text: e.target.value })} />}</Field></TabsContent>
-            <TabsContent value="html"><Field label="HTML" error={errors.content}>{(a) => <Textarea {...a} mono rows={7} value={c.html} onChange={(e) => set({ html: e.target.value })} />}</Field></TabsContent>
+            <TabsContent value="text"><Field label="Message" error={errors.content}>{(a) => <Live ai={ai} field="text" text={c.text} multiline><Textarea {...a} rows={7} value={c.text} readOnly={ai.active === "text"} onChange={(e) => set({ text: e.target.value })} /></Live>}</Field></TabsContent>
+            <TabsContent value="html"><Field label="HTML" error={errors.content}>{(a) => <Live ai={ai} field="html" text={c.html} multiline mono><Textarea {...a} mono rows={7} value={c.html} readOnly={ai.active === "html"} onChange={(e) => set({ html: e.target.value })} /></Live>}</Field></TabsContent>
             <TabsContent value="template" className="grid gap-4">
               <Field label="Template" error={errors.content} description={templates.length ? undefined : "No templates yet. Import one on the Templates page."}>
-                {(a) => <Select {...a} value={c.template} onChange={(e) => set({ template: e.target.value, vars: {} })}><option value="">Choose a template</option>{templates.map((t) => <option key={t.id} value={t.id}>{t.name ?? t.alias ?? t.id}</option>)}</Select>}
+                {(a) => <Select {...a} value={c.template} onChange={(e) => { ai.reset(); set({ template: e.target.value, vars: {} }); }}><option value="">Choose a template</option>{templates.map((t) => <option key={t.id} value={t.id}>{t.name ?? t.alias ?? t.id}</option>)}</Select>}
               </Field>
               {vars.map((v) => (
-                <Field key={v} label={<code className="text-[12.5px]">{v}</code>}>{(a) => <Input {...a} value={varsShown[v] ?? ""} onChange={(e) => set({ vars: { ...c.vars, [v]: e.target.value } })} />}</Field>
+                <Field key={v} label={<code className="text-[12.5px]">{v}</code>}>{(a) => <Live ai={ai} field={`var:${v}`} text={varsShown[v] ?? ""}><Input {...a} value={varsShown[v] ?? ""} readOnly={ai.active === `var:${v}`} onChange={(e) => set({ vars: { ...c.vars, [v]: e.target.value } })} /></Live>}</Field>
               ))}
             </TabsContent>
           </Tabs>
           {apiError && <ErrorState error={apiError} />}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" loading={busy}>Send email</Button>
+            <Button type="submit" loading={busy} disabled={ai.writing || ai.incomplete}>Send email</Button>
           </div>
         </form>
         )}

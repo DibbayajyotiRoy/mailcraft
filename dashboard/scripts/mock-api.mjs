@@ -349,11 +349,54 @@ function scripted(messages) {
   }
   return { text: "I can set up automations and broadcasts, fix templates, manage contacts and lists, and explain why an email bounced. What would you like to do?\nNEXT: Set up a welcome email | Fix a template | Why did an email bounce?" };
 }
+/** "Write with AI" in the New email dialog: the system prompt starts with COMPOSE_SYS and its 2nd line is `Mode: text|html|template`.
+ *  Streams ONE JSON object (3-5 chars / 30ms after a 400ms first-token delay). Prompt markers: `qa:hold` = send the subject and a bit of the
+ *  body (template mode: first variable done, second half-written), then stall until the client disconnects; `qa:fail` = HTTP 429. */
+const COMPOSE_SYS = "You write one email for the user.";
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+const TONE_LINE = { friendly: "I hope your week is going well.", short: "", formal: "I trust this message finds you well." };
+const SAMPLE_VAR = { amount: "$49.00", company: "Acme Corp", plan: "Pro", date: "Thursday", order_id: "A-1042" };
+async function compose(res, messages) {
+  const mode = /^Mode: (\w+)$/.exec(String(messages[0].content).split("\n")[1] ?? "")?.[1] ?? "text";
+  const m = /^Write: ([\s\S]*?)(?:\nTone: (.*))?\n<untrusted>([\s\S]*)<\/untrusted>/.exec(String(messages.at(-1)?.content ?? ""));
+  const prompt = m?.[1] ?? "";
+  if (prompt.includes("qa:fail")) { res.statusCode = 429; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ error: { message: "Rate limit exceeded: free-models-per-day" } })); return; }
+  let ctx = {}; try { ctx = JSON.parse(m?.[3] ?? "{}"); } catch { /* an unparsable context is treated as empty */ }
+  const first = String(ctx.recipients?.[0] ?? "").split(/\s+/)[0], name = first && !first.includes("@") ? first : "";
+  const hi = name ? `Hi ${name},` : "Hi there,", sender = ctx.sender ?? "Alex";
+  const topic = prompt.replace(/qa:\w+/g, "").trim() || "a quick note", paras = [TONE_LINE[/friendly|formal|short/.exec(m?.[2] ?? "")?.[0] ?? ""] ?? "", `Quick note about this: ${topic}.`, "Let me know if that works for you."].filter(Boolean);
+  const subject = topic.slice(0, 60);
+  let json, cut;
+  if (mode === "template") {
+    const vars = ctx.template?.variables ?? [], vals = vars.map((k) => (k === "first_name" ? name || "there" : SAMPLE_VAR[k] ?? `sample ${k.replace(/_/g, " ")}`));
+    const ents = vars.map((k, i) => `${JSON.stringify(k)}:${JSON.stringify(vals[i])}`), head = '{"subject":"","vars":{', half = vars.length > 1 ? 1 : 0;
+    json = `${head}${ents.join(",")}}}`;
+    cut = vars.length ? json.indexOf(ents[half]) + ents[half].length - 1 - Math.floor(vals[half].length / 2) : head.length;
+  } else {
+    const key = mode === "html" ? "html" : "text";
+    json = JSON.stringify({ subject, [key]: key === "html" ? `<p>${hi}</p>${paras.map((x) => `<p>${esc(x)}</p>`).join("")}<p>Thanks,<br>${esc(sender)}</p>` : `${hi}\n\n${paras.join("\n\n")}\n\nThanks,\n${sender}` });
+    cut = json.indexOf(`"${key}":"`) + key.length + 4 + 40;
+    if (json[cut - 1] === "\\") cut++; // never split a \n escape in the hold
+  }
+  const timers = new Set(); let closed = false;
+  res.on("close", () => { closed = true; timers.forEach(clearTimeout); });
+  const pause = (ms) => new Promise((r) => { if (closed) return r(); const t = setTimeout(() => { timers.delete(t); r(); }, ms); timers.add(t); });
+  res.setHeader("content-type", "text/event-stream");
+  res.flushHeaders();
+  await pause(400);
+  const out = prompt.includes("qa:hold") ? json.slice(0, cut) : json;
+  for (let i = 0, k = 0, n; i < out.length && !closed; i += n) { n = 3 + (k++ % 3); res.write(chunk({ content: out.slice(i, i + n) })); await pause(30); }
+  if (closed) return;
+  if (out !== json) { await new Promise((r) => res.once("close", r)); return; }
+  res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 310, completion_tokens: 95 } })}\n\n`);
+  res.end("data: [DONE]\n\n");
+}
 async function openrouter(req, res, p, input) {
   res.setHeader("content-type", "application/json");
   if (p.endsWith("/models")) return body(res, ORMODELS), true;
   if (p.endsWith("/key")) return body(res, { label: "sk-or-v1-mock…key", usage: 0, limit: null, limit_remaining: null, is_free_tier: true }), true;
   if (!p.endsWith("/chat/completions")) return false;
+  if (String(input.messages?.[0]?.content).startsWith(COMPOSE_SYS)) { await compose(res, input.messages); return true; }
   const step = scripted(input.messages ?? []);
   res.setHeader("content-type", "text/event-stream");
   await sleep(150);
