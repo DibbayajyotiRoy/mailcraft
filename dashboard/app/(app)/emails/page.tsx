@@ -15,7 +15,7 @@ import { RetryError } from "@/components/ui/error-state";
 import { MessagePreview } from "@/components/monitor/message-preview";
 import { emailsHref, type EmailQuery } from "@/components/monitor/helpers";
 import { initialFrom, sendersOf } from "@/lib/senders";
-import { sendEmail } from "./actions";
+import { createContact, findContact, searchContacts, sendEmail } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +34,7 @@ export default async function Emails({ searchParams }: { searchParams: Promise<E
     get("/v1/senders"),
   ]);
   const senders = sendersOf(snd);
-  const compose = <ComposeEmail defaultFrom={initialFrom(settings.data?.default_from, senders)} senders={senders} templates={Array.isArray(tpls.data) ? tpls.data : []} send={sendEmail} />;
+  const compose = <ComposeEmail defaultFrom={initialFrom(settings.data?.default_from, senders)} senders={senders} templates={Array.isArray(tpls.data) ? tpls.data : []} send={sendEmail} contacts={{ search: searchContacts, find: findContact, create: createContact }} />;
   const header = <PageHeader title="Emails" description="Every message you send, and what happened to it." action={compose} />;
   if (r.error) return <>{header}<EmailFilters query={query} /><RetryError error={r.error} /></>;
 

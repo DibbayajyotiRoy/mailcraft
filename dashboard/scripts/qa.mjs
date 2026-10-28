@@ -40,6 +40,8 @@ const pasteImport = async (p) => { await click("button", "Import CSV")(p); await
 const pickList = (value) => async (p) => { await p.getByLabel("List", { exact: true }).selectOption(value); await p.waitForTimeout(1400); };
 const tick = (email) => async (p) => { await p.getByRole("checkbox", { name: `Select ${email}` }).check(); };
 const filterRows = (name) => async (p) => { await p.getByRole("radio", { name }).click(); await p.waitForTimeout(900); };
+/** Opens New email and types into To (and waits out the 250ms suggestion debounce). */
+const composeTo = async (p, text, open = true) => { if (open) await click("button", "New email")(p); await p.getByRole("dialog").getByRole("combobox", { name: "To" }).pressSequentially(text); await p.waitForTimeout(450); };
 // [name, path, action?]  action = open a dialog/tab before the capture
 const ROUTES = [
   ["overview", "/"], ["overview-30d", "/?range=30d"],
@@ -132,6 +134,10 @@ const ROUTES = [
   ["assistant-slash", "/", typeInto("/")], ["assistant-mention", "/", typeInto("send @")],
   ["settings", "/settings"], ["settings-senders-edit", "/settings", click("button", /Edit addresses of dev@example.com/)], ["settings-senders-connect", "/settings", click("button", "Connect a mailbox")],
   ["email-compose-other-from", "/emails", async (p) => { await click("button", "New email")(p); await p.getByRole("dialog").getByLabel("From", { exact: true }).selectOption({ label: "Other address…" }); }],
+  ["email-compose-suggest", "/emails", async (p) => { await composeTo(p, "an"); await p.getByRole("option", { name: /Ana Silva/ }).waitFor(); await p.keyboard.press("ArrowDown"); }],
+  ["email-compose-chips", "/emails", async (p) => { await composeTo(p, "ana@example.com,"); await p.getByRole("dialog").getByLabel("To", { exact: true }).fill("nope,"); await p.waitForTimeout(200); }],
+  ["email-compose-suppressed", "/emails", async (p) => { await composeTo(p, "bounce"); await p.getByRole("option", { name: /bounce@example.com/ }).click(); }],
+  ["email-compose-new-contacts", "/emails", async (p) => { await composeTo(p, "new@example.com,"); await composeTo(p, "newer@example.com,", false); const d = p.getByRole("dialog"); await d.getByLabel("Subject").fill("Hello"); await d.getByLabel("Message", { exact: true }).fill("Hi there"); await d.getByRole("button", { name: "Send email" }).click(); await d.getByRole("button", { name: "Create 2 contacts and send" }).waitFor(); }],
   ["notfound", "/nope"], ["design", "/dev/design"],
 ].filter(([n]) => !only.length || only.some((o) => n.includes(o)));
 

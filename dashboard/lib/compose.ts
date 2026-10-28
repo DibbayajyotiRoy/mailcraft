@@ -13,6 +13,9 @@ export function parseRecipients(s: string): string[] {
   return s.split(/[,;\n]+/).map((x) => x.trim()).filter((x) => x && !seen.has(x.toLowerCase()) && seen.add(x.toLowerCase()));
 }
 
+/** The shape check behind every recipient (the API stays the judge of the rest). */
+export const isEmail = (s: string) => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(s);
+
 /** The platform fills these in at send time, so the form never asks for them. */
 const PLATFORM_VARS = /^(unsubscribe_url|preferences_url|workspace(\..*)?|slots(\..*|\[.*)?)$/;
 export const askableVars = (vars: unknown): string[] =>
@@ -38,7 +41,7 @@ export function composeBody(c: Compose): { body: Record<string, unknown> } | { e
   if (!c.from.trim()) errors.from = "Enter the address this is sent from.";
   if (!to.length) errors.to = "Add at least one recipient.";
   else if (to.length > 50) errors.to = "At most 50 recipients per email.";
-  else { const bad = to.find((a) => !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(a)); if (bad) errors.to = `“${bad}” is not an email address.`; }
+  else { const bad = to.find((a) => !isEmail(a)); if (bad) errors.to = `“${bad}” is not an email address.`; }
   if (c.mode !== "template" && !c.subject.trim()) errors.subject = "Add a subject.";
   if (c.mode === "text" && !c.text.trim()) errors.content = "Write the message.";
   if (c.mode === "html" && !c.html.trim()) errors.content = "Paste the HTML.";
