@@ -96,6 +96,11 @@ describe("mentionedSend", () => {
     expect(mentionedSend("Send @template:welcome to bipul@example.com and ana@example.com")).toEqual({ template: "welcome", to: ["bipul@example.com", "ana@example.com"] });
     expect(mentionedSend("Use @template:draft-only. Send it to Ana <ana@example.com>, thanks")).toEqual({ template: "draft-only", to: ["ana@example.com"] });
   });
+  it("an address after from/through/via is the sender, not a recipient", () => {
+    expect(mentionedSend("Send @template:welcome to bipul@example.com through partner@example.com")).toEqual({ template: "welcome", to: ["bipul@example.com"], from: "partner@example.com" });
+    expect(mentionedSend("From Acme <hello@example.com> send @template:welcome to ana@example.com")).toEqual({ template: "welcome", to: ["ana@example.com"], from: "hello@example.com" });
+    expect(mentionedSend("Send @template:welcome from partner@example.com")).toBeNull();
+  });
   it("is null unless both a template and an address are present", () => {
     expect(mentionedSend("Send @template:welcome to everyone")).toBeNull();
     expect(mentionedSend("Send a welcome to bipul@example.com")).toBeNull();

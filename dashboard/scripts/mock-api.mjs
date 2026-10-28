@@ -341,6 +341,11 @@ function scripted(messages) {
   const after = messages.slice(messages.findLastIndex((m) => m.role === "user") + 1).filter((m) => m.role === "tool");
   const sys = messages[0]?.content ?? "";
   const call = (name, args) => ({ tool: { name, args } });
+  if (/promo template|signup_link/i.test(lastUser)) { // a template send: the assistant drafts every variable itself and marks the one it must not invent
+    const fixed = /change signup_link to/i.test(lastUser);
+    if (!after.length) return call("propose_email", { to: ["ana@example.com"], from: "Acme <hello@mail.example.com>", template: { id: "promo", variables: { first_name: "Ana", signup_link: fixed ? "https://example.com/start" : "[add signup link]" } } });
+    return { text: fixed ? "Updated: the signup link is now https://example.com/start. Review it and press Apply." : "I drafted the promo email for Ana. I can't invent a signup URL, so I left a placeholder: tell me which link to use.\nNEXT: Change signup_link to https://example.com/start" };
+  }
   if (/bipul|go.?live|send it now/i.test(lastUser)) { // a single email: a normal proposal when the workspace is live, the go-live request when it is not
     if (!after.length) return call("propose_email", { to: ["bipul@example.com"], from: "partner@example.com", subject: "Hello from Acme", text: "Hi Bipul,\n\nHere is the note we talked about.\n\nAcme" });
     return after.some((m) => /go_live/.test(m.content))

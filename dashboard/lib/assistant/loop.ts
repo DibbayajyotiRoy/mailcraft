@@ -32,7 +32,8 @@ export async function* runTurn(i: TurnInput): AsyncGenerator<ChatEvent> {
   const t0 = Date.now(), deadline = AbortSignal.timeout(TURN_MS);
   const signal = i.signal ? AbortSignal.any([i.signal, deadline]) : deadline;
   const last = [...i.history].reverse().find((m) => m.role === "user")?.content ?? "";
-  const groups = routeGroups(last, i.path);
+  const sendOpen = i.history.slice(-6).some((m) => m.note && /proposed \(not applied\): (Send "|Broadcast ")/.test(m.note)); // "make it friendlier" has no send keyword but needs propose_email again
+  const groups = routeGroups(last, i.path, sendOpen ? ["broadcasts"] : []);
   yield { type: "phase", phase: "thinking", label: "Thinking…" };
 
   const page = await pageContext(i.path, last, i.ctx);

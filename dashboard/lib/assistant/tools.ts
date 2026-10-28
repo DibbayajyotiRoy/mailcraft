@@ -5,6 +5,7 @@ import { clip, compactGet, compactLint, compactList, untrusted } from "./compact
 import { apiErr, fail, read, type Ctx, type Out } from "./core";
 import { DOCS, DOC_TOPICS } from "./docs";
 import { errorLabel } from "./errors";
+import { sendContext } from "./prefetch";
 import { PROPOSE, PROPOSE_SCHEMAS } from "./propose";
 import type { Phase, Proposal } from "./types";
 
@@ -90,13 +91,13 @@ export type Group = (typeof GROUPS)[number];
 const GROUP_TOOLS: Record<Group, ToolDef[]> = {
   templates: [fromCat("template_preview"), fromCat("content_lint"), PROPOSE_SCHEMAS.propose_template],
   automations: [fromCat("automation_runs"), fromCat("automation_simulate"), PROPOSE_SCHEMAS.propose_automation, PROPOSE_SCHEMAS.propose_automation_state],
-  broadcasts: [PROPOSE_SCHEMAS.propose_broadcast, PROPOSE_SCHEMAS.propose_email],
+  broadcasts: [T("send_context", "Template, recipients' contact fields and sender name for a send, in one call.", S({ template: str, to: { type: "array", items: str }, from: str }, ["template"])), PROPOSE_SCHEMAS.propose_broadcast, PROPOSE_SCHEMAS.propose_email],
   contacts: [fromCat("segment_preview"), PROPOSE_SCHEMAS.propose_list, PROPOSE_SCHEMAS.propose_contacts],
 };
 const KEYWORDS: Record<Group, RegExp> = {
   templates: /templat|subject|html|mjml|lint|design|layout|copy|preheader|footer|wording|rewrite|fix/i,
   automations: /automat|flow|journey|workflow|trigger|drip|onboard|welcome|nudge|sequence|win-?back|lifecycle|signup|sign-up|abandon|reminder|step\b|runs?\b/i,
-  broadcasts: /broadcast|newsletter|blast|campaign|announce|\bsend\b|email (it|them|this)|webinar|launch/i,
+  broadcasts: /broadcast|newsletter|blast|campaign|announce|\bsend\b|email (it|them|this)|webinar|launch|@template:/i,
   contacts: /contact|\blists?\b|segment|audience|import|subscriber|people|upsert|@\w|customers?/i,
 };
 const PAGE: [RegExp, Group[]][] = [[/^\/templates/, ["templates"]], [/^\/automations/, ["automations", "templates"]], [/^\/broadcasts/, ["broadcasts"]], [/^\/contacts/, ["contacts"]]];
@@ -115,7 +116,7 @@ export const toolsFor = (groups: Iterable<Group>): ToolDef[] => [...CORE, ...[..
 const ACT: Record<string, string> = {
   get_docs: "Checking the docs", use_tools: "Getting ready", template_preview: "Rendering a preview", content_lint: "Checking lint", automation_runs: "Reading automation runs",
   automation_simulate: "Simulating the automation", segment_preview: "Counting matches", propose_template: "Drafting the template", propose_automation: "Drafting the automation",
-  propose_automation_state: "Preparing the automation change", propose_broadcast: "Preparing the broadcast preview", propose_email: "Preparing the email preview", propose_list: "Preparing the list change", propose_contacts: "Preparing the contacts",
+  propose_automation_state: "Preparing the automation change", send_context: "Reading the send details", propose_broadcast: "Preparing the broadcast preview", propose_email: "Preparing the email preview", propose_list: "Preparing the list change", propose_contacts: "Preparing the contacts",
 };
 export function activity(name: string, a: any): { phase: Phase; label: string } {
   if (name === "list") return { phase: "reading", label: `Reading ${NOUN[a?.kind] ?? "items"}…` };
@@ -142,6 +143,7 @@ export async function runTool(name: string, raw: string, ctx: Ctx, groups: Set<G
     switch (name) {
       case "list": return out(await list(a, ctx));
       case "get": return out(await get(a, ctx));
+      case "send_context": return out(await sendContext(a, ctx));
       case "get_docs": return DOCS[a.topic] ? { content: DOCS[a.topic], done: `Read docs: ${a.topic}` } : out(fail("invalid_request", `topic must be one of ${DOC_TOPICS.join(", ")}`));
       case "use_tools": {
         const gs = (Array.isArray(a.groups) ? a.groups : []).filter((x: string): x is Group => (GROUPS as readonly string[]).includes(x));

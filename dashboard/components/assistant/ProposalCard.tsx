@@ -12,6 +12,7 @@ import { diffLines, diffStat } from "@/lib/assistant/diff";
 import { goLiveNext } from "@/lib/assistant/errors";
 import type { ApplyResult, Proposal } from "@/lib/assistant/types";
 import type { Card } from "./useAssistant";
+import { hasPlaceholders, VariablesSection } from "./VariablesSection";
 
 const KIND: Record<Proposal["kind"], string> = { template: "Template draft", automation: "Automation draft", automation_state: "Automation", broadcast: "Broadcast", email: "Email", list: "List", contacts: "Contacts", go_live: "Go-live approval" };
 const PILL: Record<ApplyResult["status"], [string, "ok" | "info" | "warn" | "bad"]> = { completed: ["Completed", "ok"], queued: ["Queued", "info"], pending_approval: ["Waiting for approval", "warn"], failed: ["Failed", "bad"] };
@@ -75,7 +76,7 @@ export function TaskRow({ r }: { r: ApplyResult }) {
   );
 }
 
-export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; onApply: (confirmed: boolean) => void; onCancel: () => void; onEdit: () => void }) {
+export function ProposalCard({ card, onApply, onCancel, onEdit, onTweak }: { card: Card; onApply: (confirmed: boolean) => void; onCancel: () => void; onEdit: () => void; onTweak?: (draft: string) => void }) {
   const { proposal: p, state, result } = card;
   const [ask, setAsk] = useState(false), [, tick] = useState(0);
   // Apply must disable on time, not at the next unrelated render.
@@ -114,6 +115,7 @@ export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; 
             {p.lint.slice(0, 6).map((l, i) => <li key={i} className="flex items-start gap-2"><Badge size="sm" tone={l.sev === "error" ? "bad" : "warn"}>{l.sev}</Badge><span className="min-w-0 break-words">{l.msg}</span></li>)}
           </ul>
         )}
+        {p.variables && p.variables.length > 0 && <VariablesSection variables={p.variables} onTweak={state === "pending" ? onTweak : undefined} />}
         {p.diff && <Diff d={p.diff} />}
         {p.preview && <Preview p={p.preview} />}
       </div>
@@ -121,12 +123,14 @@ export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; 
         {waiting && <TaskRow r={{ status: "pending_approval", label: "A go-live request is already waiting", detail: goLiveNext(p.pending?.kind), href: "/approvals", hrefLabel: "Open Approvals" }} />}
         {open && !expired && !waiting && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button loading={state === "applying"} onClick={() => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
+            <Button loading={state === "applying"} disabled={hasPlaceholders(p.variables)} onClick={() => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
             <Button variant="secondary" disabled={state === "applying"} onClick={onEdit}>Edit</Button>
             <Button variant="ghost" disabled={state === "applying"} onClick={onCancel}>Cancel</Button>
             <span className="ml-auto text-xs text-muted">Nothing changes until you apply.</span>
           </div>
         )}
+        {open && !expired && !waiting && p.variables && <p className="mt-2 text-xs text-muted">Want changes? Just say what to change.</p>}
+        {state === "replaced" && <p className="text-sm text-muted">Replaced by a newer proposal.</p>}
         {expired && <p className="text-sm text-muted">This proposal expired. Ask the assistant to prepare it again.</p>}
         {state === "cancelled" && <p className="text-sm text-muted">Cancelled. Nothing was changed.</p>}
         {(state === "applied" || state === "failed") && result && <TaskRow r={result} />}

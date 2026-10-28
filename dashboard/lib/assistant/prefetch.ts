@@ -52,9 +52,11 @@ export async function sendContext(a: { template?: string; to?: string[] | string
   return { ok: packSendContext(tr.data, cs, row && { address: row.address, name: row.display_name ?? undefined }, typeof ws === "string" ? ws : undefined), done: "Read the send context" };
 }
 
-/** "Send @template:welcome to a@example.com and b@example.com" -> { template: "welcome", to: [...] }; null unless both are there. */
-export function mentionedSend(text: string): { template: string; to: string[] } | null {
+const ADDR = "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+";
+/** "Send @template:welcome to a@example.com through b@example.com" -> { template: "welcome", to: ["a@..."], from: "b@..." }; null unless a template and a recipient are there. */
+export function mentionedSend(text: string): { template: string; to: string[]; from?: string } | null {
   const template = /@template:([\w-]+(?:\.[\w-]+)*)/i.exec(text)?.[1];
-  const to = [...new Map((text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g) ?? []).map((e) => [e.toLowerCase(), e])).values()];
-  return template && to.length ? { template, to } : null;
+  const from = new RegExp(`\\b(?:from|through|via|using)\\s+(?:[^<\\n]{0,40}<)?(${ADDR})`, "i").exec(text)?.[1]; // the sender is not a recipient
+  const to = [...new Map((text.match(new RegExp(ADDR, "g")) ?? []).filter((e) => e.toLowerCase() !== from?.toLowerCase()).map((e) => [e.toLowerCase(), e])).values()];
+  return template && to.length ? { template, to, ...(from && { from }) } : null;
 }

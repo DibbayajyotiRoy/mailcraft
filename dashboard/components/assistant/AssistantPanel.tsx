@@ -63,9 +63,9 @@ function Setup({ status }: { status: Status }) {
   );
 }
 
-function Message({ m, last, busy, phase, onApply, onCancel, onEdit, onAsk }: {
+function Message({ m, last, busy, phase, onApply, onCancel, onEdit, onDraft, onAsk }: {
   m: Msg; last: boolean; busy: boolean; phase: ReturnType<typeof useAssistant>["phase"];
-  onApply: (pid: string, confirmed: boolean) => void; onCancel: (pid: string) => void; onEdit: (title: string) => void; onAsk: (t: string) => void;
+  onApply: (pid: string, confirmed: boolean) => void; onCancel: (pid: string) => void; onEdit: (title: string) => void; onDraft: (text: string) => void; onAsk: (t: string) => void;
 }) {
   if (m.role === "user") return <li className="flex justify-end"><p className="max-w-[85%] whitespace-pre-wrap break-words rounded-lg bg-surface-2 px-3 py-2 text-base">{m.text}</p></li>;
   const running = busy && last, { body, next } = splitNext(m.text);
@@ -81,7 +81,7 @@ function Message({ m, last, busy, phase, onApply, onCancel, onEdit, onAsk }: {
           <div role="alert" className="rounded-md bg-bad-bg px-3 py-2 text-sm text-bad"><p className="font-medium">{m.error.message}</p>{m.error.hint && <p>{m.error.hint}</p>}</div>
         )}
         {m.cards.map((c) => (
-          <ProposalCard key={c.proposal.id} card={c} onApply={(ok) => onApply(c.proposal.id, ok)} onCancel={() => onCancel(c.proposal.id)} onEdit={() => onEdit(c.proposal.title)} />
+          <ProposalCard key={c.proposal.id} card={c} onApply={(ok) => onApply(c.proposal.id, ok)} onCancel={() => onCancel(c.proposal.id)} onEdit={() => onEdit(c.proposal.title)} onTweak={onDraft} />
         ))}
         {last && !busy && next.length > 0 && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Suggested follow-ups">
@@ -100,6 +100,7 @@ export function AssistantLauncher() {
   const a = useAssistant(path, () => router.refresh());
   const status = useStatus(open);
   const input = useRef<HTMLTextAreaElement | null>(null), scroller = useRef<HTMLDivElement>(null), stick = useRef(true);
+  const draftFor = (t: string) => { setDraft(t); requestAnimationFrame(() => input.current?.focus()); };
 
   useEffect(() => {
     setMac(/Mac|iPhone|iPad/.test(navigator.platform));
@@ -149,7 +150,7 @@ export function AssistantLauncher() {
                 {a.msgs.map((m, i) => (
                   <Message key={m.id} m={m} last={i === a.msgs.length - 1} busy={a.busy} phase={a.phase} onAsk={(t) => void a.send(t)}
                     onApply={(pid, ok) => void a.apply(m.id, pid, ok)} onCancel={(pid) => a.cancel(m.id, pid)}
-                    onEdit={(title) => { setDraft(`Change the proposal "${title}": `); requestAnimationFrame(() => input.current?.focus()); }} />
+                    onEdit={(title) => draftFor(`Change the proposal "${title}": `)} onDraft={draftFor} />
                 ))}
               </ol></div>
             )}

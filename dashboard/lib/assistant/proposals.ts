@@ -18,6 +18,7 @@ const prune = () => { const now = Date.now(); for (const [id, s] of store) if (s
 
 export function putProposal(sid: string, { calls, link, linkKind, ...card }: Spec): Proposal {
   prune();
+  if (card.key) for (const [id, s] of store) if (s.sid === sid && s.card.key === card.key) store.delete(id); // a re-proposal replaces the older pending one
   const p = freeze({ ...card, id: randomBytes(16).toString("hex"), expires_at: Date.now() + TTL_MS }) as Proposal;
   store.set(p.id, { sid, card: p, calls: freeze(structuredClone(calls)), link, linkKind });
   return p;
@@ -33,6 +34,8 @@ const sub = (v: unknown, prev: any): unknown => (typeof v === "string" ? v.repla
 export async function applyProposal(sid: string, id: string, a: { base: string; key: string }, confirmed: boolean): Promise<ApplyResult> {
   const s = find(sid, id);
   if (!s) return err("proposal_expired", "This proposal expired or was already used.", "Ask the assistant to prepare it again.");
+  const stuck = s.card.variables?.filter((v) => v.placeholder).map((v) => v.name) ?? [];
+  if (stuck.length) return err("placeholder_values", `Replace the placeholder value${stuck.length > 1 ? "s" : ""} first: ${stuck.join(", ")}.`, "Tell the assistant what to use; it prepares the send again."); // not consumed: the card stays
   if (s.card.confirm && !confirmed) return err("confirmation_required", "This needs an explicit confirmation.", s.card.confirm);
   store.delete(s.card.id); // one-shot, even when a call fails: a retry is a new proposal
   let prev: any, status: ApplyResult["status"] = "completed";
