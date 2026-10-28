@@ -1,7 +1,7 @@
 # Deploy to a LAN VM (systemd, no Docker)
 
 ```bash
-./scripts/deploy-vm.sh ubuntu@10.0.0.200
+./scripts/deploy-vm.sh user@your-vm
 ```
 
 Builds on this machine, uploads, puts the release in place, restarts only the mailcraft units, health-checks
@@ -53,7 +53,7 @@ from here"). A separate nftables table with an `accept` rule does not help: ever
 hook is evaluated and any one of them may drop, so the port has to be added to the allow-list of the table
 that drops (its file under `/etc/nftables.d/`). Until then, tunnel over SSH (port 22 is open):
 
-    ssh -L 18095:127.0.0.1:<api port> -L 13095:127.0.0.1:<dashboard port> ubuntu@10.0.0.200   # then http://localhost:13095
+    ssh -L 18095:127.0.0.1:<api port> -L 13095:127.0.0.1:<dashboard port> user@your-vm   # then http://localhost:13095
 
 ## Automatic deploys
 
