@@ -225,7 +225,7 @@ describe("unknown address", () => {
     await press("Create contact and send");
     expect((await screen.findByRole("alert")).textContent).toContain("domain_not_verified");
     expect(screen.getByRole("button", { name: "Remove new@example.com" })).toBeTruthy();
-    sendBtn(); // retry: the address is a contact now
+    await press("Send email"); // retry once the form is enabled again: the address is a contact now
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
     expect(contacts.create).toHaveBeenCalledTimes(1);
   });
