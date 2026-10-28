@@ -894,7 +894,7 @@ paths:
     patch:
       operationId: template_update
       summary: Rename, change alias or stream, and/or add a new draft version (scope manage)
-      description: Each call with content adds a version; `subject` / `preheader` apply to that version (empty `preheader` clears). Changing `alias` breaks sends and automations that reference the old one. 409 `template_exists` when the alias is taken.
+      description: Each call with content adds a version. For `html` / `mjml`, `subject` overrides the document title and `preheader` sets the preview text (empty clears; a full html document ignores it); `json` carries both inside the tree. Changing `alias` breaks sends and automations that reference the old one. 409 `template_exists` when the alias is taken.
       parameters: [{ $ref: "#/components/parameters/Id" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PatchTemplate" } } } }
       responses:
