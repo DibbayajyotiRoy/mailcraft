@@ -3,6 +3,7 @@
 import type { Schema } from "./catalogue";
 import { clip, compactLint } from "./compact";
 import { apiErr, fail, read, type Ctx, type Out } from "./core";
+import { GO_LIVE_SUMMARY, GO_LIVE_TITLE, goLiveNext, isGoLive } from "./errors";
 import { putProposal, type Step } from "./proposals";
 import type { Proposal } from "./types";
 
@@ -12,6 +13,7 @@ const isStr = (v: unknown): v is string => typeof v === "string" && v.trim() !==
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const lines = (s: string) => s.split("\n").length;
+const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s); // for text a person reads (clip() adds a "[+N]" marker for the model)
 
 type Draft = Omit<Proposal, "id" | "expires_at" | "warnings"> & { warnings?: string[]; calls: Step[]; link?: string; linkKind?: string };
 /** Stores the proposal and returns the short note the model gets: it must not claim anything was changed. */
@@ -141,6 +143,23 @@ async function senderWarning(ctx: Ctx, from: string): Promise<string[]> {
 }
 
 // ---- broadcasts and single emails ----------------------------------------------------------------------------------
+/** The send was refused because the workspace is not approved for live sending. That is not a failure to report: the way forward
+ *  is a go-live request a person approves. Proposes it (keeping the send as `pending`), or says one is already waiting. */
+async function goLive(ctx: Ctx, kind: "email" | "broadcast", args: unknown, what: string): Promise<Out> {
+  const ap = await read(ctx, "GET", "/v1/approvals?status=pending&limit=50", undefined, 0); // fresh: the API does not de-duplicate requests
+  const waiting = !ap.error && Array.isArray(ap.data) && ap.data.some((x: any) => x.kind === "go_live" && (x.status ?? "pending") === "pending");
+  const pending = { kind, what, args };
+  const next = goLiveNext(kind), tell = `Say in one sentence that the workspace needs a person's go-live approval before it can send real mail; mention ${what}. Then say: ${next} Never suggest test keys. End with NEXT: Send it now`;
+  if (waiting) return propose(ctx, {
+    kind: "go_live", risk: "safe", warnings: [], calls: [], link: "/approvals", pending, waiting: true, items: [what],
+    title: "Waiting for go-live approval", summary: "A go-live request is already waiting for a person to approve it in Approvals. There is nothing more to apply.",
+  }, { reason: "go_live_request_already_pending", note: "A go-live request is already waiting in Approvals; nothing to apply and no second request is made. " + tell });
+  return propose(ctx, {
+    kind: "go_live", risk: "safe", warnings: [], pending, link: "/approvals", items: [what],
+    calls: [{ method: "POST", path: "/v1/go-live-requests", body: { note: cut(`Requested from the dashboard assistant. The user wants to send ${what}.`, 400) }, label: GO_LIVE_TITLE }],
+    title: GO_LIVE_TITLE, summary: GO_LIVE_SUMMARY,
+  }, { reason: "go_live_required", note: "Nothing has changed yet; the user must press Apply to request go-live approval. Do not say it was done. " + tell });
+}
 const skippedTally = (skipped: any[] = []) => Object.entries(skipped.reduce((m: any, s) => ((m[s.reason] = (m[s.reason] ?? 0) + 1), m), {})).map(([reason, n]) => ({ reason, n: n as number }));
 const proposeBroadcast: Builder = async (a, ctx) => {
   if (!isStr(a?.template)) return fail("invalid_request", "template (id or alias) is required.");
@@ -156,6 +175,7 @@ const proposeBroadcast: Builder = async (a, ctx) => {
   const base = { template_id: t.data.id ?? a.template, from, stream: "marketing", ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.max_per_day > 0 && { max_per_day: Math.floor(a.max_per_day) }) };
   const body = { ...base, ...(list ? { list_id: list } : { recipients: emails.map((email) => ({ email })) }) };
   const dry = await read(ctx, "POST", "/v1/broadcasts", { ...body, dry_run: true }, 0);
+  if (isGoLive(dry.error)) return goLive(ctx, "broadcast", a, `broadcast of "${cut(a.template, 40)}" to ${list ? `list "${cut(list, 40)}"` : plural(emails.length, "address")}`);
   if (dry.error) return apiErr(dry.error);
   const n: number = dry.data.queued ?? 0, sk = skippedTally(dry.data.skipped);
   if (!n) return fail("empty_audience", "Nobody would receive this.", sk.map((s) => `${s.n} ${s.reason}`).join(", ") || "The audience is empty.");
@@ -183,6 +203,7 @@ const proposeEmail: Builder = async (a, ctx) => {
   if (!a.template && !a.html && !a.text) return fail("invalid_request", "Give template, html or text.");
   const body: Record<string, unknown> = { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.template && { template: a.template }), ...(isStr(a.html) && { html: a.html }), ...(isStr(a.text) && { text: a.text }) };
   const dry = await read(ctx, "POST", "/v1/emails", { ...body, dry_run: true }, 0);
+  if (isGoLive(dry.error)) return goLive(ctx, "email", a, `email to ${cut(to.join(", "), 80)}${isStr(a.from) ? ` from ${cut(a.from, 60)}` : ""}${isStr(a.subject) ? ` ("${cut(a.subject, 50)}")` : ""}`);
   if (dry.error) return apiErr(dry.error);
   const d = dry.data ?? {}, html = d.html ?? d.rendered?.html ?? d.preview?.html ?? (isStr(a.html) ? a.html : ""), subject = d.subject ?? d.rendered?.subject ?? a.subject ?? "";
   const lint = (d.lint ?? d.rendered?.lint ?? []).map((l: any) => ({ sev: l.severity, msg: `${l.rule}: ${l.message}` }));

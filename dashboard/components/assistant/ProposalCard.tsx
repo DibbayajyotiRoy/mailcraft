@@ -9,10 +9,11 @@ import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogContent } from "@/components/ui/dialog";
 import { cn } from "@/lib/cn";
 import { diffLines, diffStat } from "@/lib/assistant/diff";
+import { goLiveNext } from "@/lib/assistant/errors";
 import type { ApplyResult, Proposal } from "@/lib/assistant/types";
 import type { Card } from "./useAssistant";
 
-const KIND: Record<Proposal["kind"], string> = { template: "Template draft", automation: "Automation draft", automation_state: "Automation", broadcast: "Broadcast", email: "Email", list: "List", contacts: "Contacts" };
+const KIND: Record<Proposal["kind"], string> = { template: "Template draft", automation: "Automation draft", automation_state: "Automation", broadcast: "Broadcast", email: "Email", list: "List", contacts: "Contacts", go_live: "Go-live approval" };
 const PILL: Record<ApplyResult["status"], [string, "ok" | "info" | "warn" | "bad"]> = { completed: ["Completed", "ok"], queued: ["Queued", "info"], pending_approval: ["Waiting for approval", "warn"], failed: ["Failed", "bad"] };
 const FOLD = 14;
 
@@ -67,7 +68,7 @@ export function TaskRow({ r }: { r: ApplyResult }) {
         <p className="font-medium">{r.label}</p>
         {r.detail && <p className="text-muted">{r.detail}</p>}
         {r.error && <p className="text-bad">{r.error.message}{r.error.hint ? ` ${r.error.hint}` : ""}</p>}
-        {r.href && <Link href={r.href} className="mt-1 inline-block text-accent underline underline-offset-2">Open</Link>}
+        {r.href && <Link href={r.href} className="mt-1 inline-block text-accent underline underline-offset-2">{r.hrefLabel ?? "Open"}</Link>}
       </div>
       <Badge tone={tone} size="sm">{label}</Badge>
     </div>
@@ -84,7 +85,8 @@ export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; 
     const t = setTimeout(() => tick((n) => n + 1), Math.min(ms + 50, 2 ** 31 - 1));
     return () => clearTimeout(t);
   }, [state, p.expires_at]);
-  const expired = state === "pending" && Date.now() > p.expires_at;
+  const waiting = !!p.waiting && state === "pending"; // a go-live request is already in Approvals: nothing to apply, so no buttons and no expiry
+  const expired = state === "pending" && !waiting && Date.now() > p.expires_at;
   const open = state === "pending" || state === "applying";
   return (
     <section aria-label={p.title} className="overflow-hidden rounded-lg border border-border bg-surface">
@@ -116,7 +118,8 @@ export function ProposalCard({ card, onApply, onCancel, onEdit }: { card: Card; 
         {p.preview && <Preview p={p.preview} />}
       </div>
       <footer className="border-t border-border bg-bg px-3 py-2.5">
-        {open && !expired && (
+        {waiting && <TaskRow r={{ status: "pending_approval", label: "A go-live request is already waiting", detail: goLiveNext(p.pending?.kind), href: "/approvals", hrefLabel: "Open Approvals" }} />}
+        {open && !expired && !waiting && (
           <div className="flex flex-wrap items-center gap-2">
             <Button loading={state === "applying"} onClick={() => (p.confirm ? setAsk(true) : onApply(false))}>Apply</Button>
             <Button variant="secondary" disabled={state === "applying"} onClick={onEdit}>Edit</Button>

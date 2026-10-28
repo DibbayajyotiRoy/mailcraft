@@ -4,6 +4,7 @@ import { CAT, buildCall, oneLine, slim, type Schema } from "./catalogue";
 import { clip, compactGet, compactLint, compactList, untrusted } from "./compact";
 import { apiErr, fail, read, type Ctx, type Out } from "./core";
 import { DOCS, DOC_TOPICS } from "./docs";
+import { errorLabel } from "./errors";
 import { PROPOSE, PROPOSE_SCHEMAS } from "./propose";
 import type { Phase, Proposal } from "./types";
 
@@ -132,7 +133,7 @@ export function parseArgs(raw: string): { ok: true; v: any } | { ok: false } {
 export async function runTool(name: string, raw: string, ctx: Ctx, groups: Set<Group>): Promise<Outcome> {
   const p = parseArgs(raw);
   const out = (o: Out, label = ACT[name] ?? name): Outcome =>
-    "error" in o ? { content: JSON.stringify({ error: o.error }), done: `${label} failed: ${clip(o.error.message, 80)}`, error: true, detail: o.error.message }
+    "error" in o ? { content: JSON.stringify({ error: o.error }), done: errorLabel(o.error) ?? `${label} failed`, error: true, detail: [o.error.message, o.error.hint].filter(Boolean).join(" ") }
       : "proposal" in o ? { content: untrusted(o.model), done: `Prepared: ${o.proposal.title}`, proposal: o.proposal }
       : { content: untrusted(o.ok), done: o.done ?? label };
   if (!p.ok) return out(fail("invalid_arguments", "Arguments were not a JSON object.", "Call the tool again with valid JSON."));

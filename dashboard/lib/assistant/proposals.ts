@@ -2,6 +2,7 @@
 // until the signed-in user presses Apply. Bound to the session (hash of key+base), one-shot, short-lived.
 import { createHash, randomBytes } from "node:crypto";
 import { request } from "@/lib/api";
+import { goLiveNext } from "./errors";
 import type { ApplyResult, Proposal } from "./types";
 
 export const TTL_MS = 15 * 60_000;
@@ -43,6 +44,7 @@ export async function applyProposal(sid: string, id: string, a: { base: string; 
   }
   const lid = prev?.id ?? prev?.template_id;
   const href = s.link ?? (s.linkKind && lid ? `/${s.linkKind}/${encodeURIComponent(lid)}` : undefined);
+  if (s.card.kind === "go_live") return { status: "pending_approval", label: "Go-live approval requested", href, hrefLabel: "Open Approvals", detail: goLiveNext(s.card.pending?.kind) }; // the API answers {status: "pending"}: a person still has to decide
   const detail = status === "pending_approval" ? "Waiting for a human to approve it in Approvals." : status === "queued" ? "Queued for sending." : undefined;
   return { status, label: s.card.title, href, detail };
 }

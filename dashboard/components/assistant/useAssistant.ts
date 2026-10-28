@@ -34,7 +34,10 @@ export function toHistory(msgs: Msg[]): ChatMsg[] {
   return msgs.map((m) => {
     const notes = [
       m.steps.length ? `tools: ${m.steps.map((s) => s.label).slice(0, 6).join("; ")}` : "",
-      ...m.cards.map((c) => (c.state === "applied" ? `applied: ${c.proposal.title}` : c.state === "cancelled" ? `cancelled: ${c.proposal.title}` : c.state === "pending" ? `proposed (not applied): ${c.proposal.title}` : "")),
+      ...m.cards.map((c) => {
+        const t = c.proposal.title, redo = c.proposal.pending ? ` (once a person approves go-live, prepare it again: ${c.proposal.pending.what})` : "";
+        return c.state === "applied" ? `applied: ${t}${redo}` : c.state === "cancelled" ? `cancelled: ${t}` : c.state === "pending" ? `proposed (not applied): ${t}${redo}` : "";
+      }),
     ].filter(Boolean).join("; ");
     return { role: m.role, content: m.text, ...(notes && { note: notes }) };
   });
