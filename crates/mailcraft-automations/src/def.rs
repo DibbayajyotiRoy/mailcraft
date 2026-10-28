@@ -68,7 +68,7 @@ pub const MAX_STEP_INSTRUCTIONS: usize = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SendCfg {
-    /// Template alias.
+    /// Template alias or id (alias wins if both could match).
     pub template: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
@@ -518,7 +518,7 @@ pub async fn install(pool: &PgPool, workspace_id: Uuid, def: &Definition) -> Res
     for s in &def.steps {
         if let StepKind::SendEmail(c) = &s.kind {
             let doc: Option<Value> = sqlx::query_scalar(
-                "SELECT v.doc FROM templates t JOIN template_versions v ON v.id = t.current_version_id WHERE t.workspace_id = $1 AND t.alias = $2",
+                "SELECT v.doc FROM templates t JOIN template_versions v ON v.id = t.current_version_id WHERE t.workspace_id = $1 AND (t.alias = $2 OR t.id::text = $2) ORDER BY (t.alias = $2) DESC LIMIT 1",
             )
             .bind(workspace_id)
             .bind(&c.template)

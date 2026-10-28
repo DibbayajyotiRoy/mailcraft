@@ -244,7 +244,8 @@ async fn every_openapi_route_is_mounted() {
             }
             let uri = path
                 .replace("{id}", &Uuid::nil().to_string())
-                .replace("{version}", "1");
+                .replace("{version}", "1")
+                .replace("{run}", &Uuid::nil().to_string());
             let (s, _, b) = call_on(&app, &m.to_uppercase(), &uri, None, &[], None).await;
             assert_eq!(
                 s,

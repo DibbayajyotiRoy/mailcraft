@@ -163,7 +163,15 @@ pub fn router(st: AppState) -> Router {
         .route("/v1/automations/{id}/publish", post(automations::publish))
         .route("/v1/automations/{id}/pause", post(automations::pause))
         .route("/v1/automations/{id}/resume", post(automations::resume))
+        .route("/v1/automations/{id}/archive", post(automations::archive))
+        .route(
+            "/v1/automations/{id}/unarchive",
+            post(automations::unarchive),
+        )
+        .route("/v1/automations/{id}/test", post(automations::test_run))
         .route("/v1/automations/{id}/runs", get(automations::runs))
+        .route("/v1/automations/{id}/runs/{run}", get(automations::run_get))
+        .route("/v1/events/names", get(automations::event_names))
         // emails
         .route("/v1/emails", post(emails::send).get(emails::list))
         .route("/v1/emails/batch", post(emails::batch))
