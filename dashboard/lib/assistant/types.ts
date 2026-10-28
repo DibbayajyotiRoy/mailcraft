@@ -31,7 +31,7 @@ export type ApplyResult = {
 
 export type Phase = "thinking" | "reading" | "writing";
 
-export type DoneStats = { model: string; prompt: number; completion: number; rounds: number; ttft_ms: number; total_ms: number; est_input: number };
+export type DoneStats = { model: string; prompt: number; completion: number; rounds: number; ttft_ms: number; total_ms: number; est_input: number; failed?: string[] };
 
 /** One line of the NDJSON stream from POST /api/assistant. */
 export type ChatEvent =

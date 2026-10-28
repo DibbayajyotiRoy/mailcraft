@@ -242,7 +242,8 @@ const strs = s("array", { items: s("string") });
 export const PROPOSE_SCHEMAS = {
   propose_template: T("propose_template", "Propose a template draft (new, or change id). Prefer edits (exact find/replace patches) to fixes. Never publishes.",
     o({ id: s("string"), name: s("string"), format: s("string", { enum: ["html", "mjml"] }), content: s("string"), edits: s("array", { items: o({ find: s("string"), replace: s("string") }, ["find", "replace"]) }), subject: s("string"), preheader: s("string") })),
-  propose_automation: T("propose_automation", "Propose creating/updating an automation (draft, not activated). Send the full definition.", o({ definition: s("object") }, ["definition"])),
+  propose_automation: T("propose_automation", "Propose creating/updating an automation (draft, not activated). Send the full definition; trigger is an event name.",
+    o({ definition: o({ name: s("string"), trigger: s("string"), entry_rule: s("string"), goal: s("object"), approval: s("string"), steps: s("array", { items: o({ key: s("string"), type: s("string"), config: s("object"), next: {} }, ["key", "type"]) }) }, ["name", "steps"]) }, ["definition"])),
   propose_automation_state: T("propose_automation_state", "Propose activating, pausing or resuming an automation.", o({ id: s("string"), action: s("string", { enum: ["activate", "pause", "resume"] }), backfill_suppress: s("boolean") }, ["id", "action"])),
   propose_broadcast: T("propose_broadcast", "Propose sending a published template to a list or emails (dry run shown first).", o({ template: s("string"), from: s("string"), subject: s("string"), list: s("string"), emails: strs, max_per_day: s("integer") }, ["template"])),
   propose_email: T("propose_email", "Propose sending one email to 1-5 addresses.", o({ to: strs, from: s("string"), subject: s("string"), template: o({ id: s("string"), variables: s("object") }), html: s("string"), text: s("string") }, ["to"])),

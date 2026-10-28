@@ -40,7 +40,7 @@ export async function* runTurn(i: TurnInput): AsyncGenerator<ChatEvent> {
   const estInput = () => estTokens(messages) + estTokens(toolsFor(groups));
   const stats = { prompt: 0, completion: 0, rounds: 0, ttft: 0 };
   let mi = 0, model = i.chain[0];
-  const names: string[] = [];
+  const names: string[] = [], failed: string[] = [];
 
   for (let round = 0; round <= MAX_ROUNDS; round++) {
     if (signal.aborted) return;
@@ -74,6 +74,7 @@ export async function* runTurn(i: TurnInput): AsyncGenerator<ChatEvent> {
       }
       lastErr = out.e instanceof UpstreamError ? out.e : new UpstreamError(r ? "empty_completion" : "upstream_error", r ? "The model returned nothing." : (out.e as Error)?.message);
       if (!sawFirst) recordModel(model, null);
+      failed.push(`${model}:${lastErr.code}${lastErr.status ? lastErr.status : ""}`);
       if (lastErr.code === "unauthorized" || lastErr.code === "payment_required") break;
       mi++; // next free model
     }
@@ -101,7 +102,7 @@ export async function* runTurn(i: TurnInput): AsyncGenerator<ChatEvent> {
   }
 
   const total = Date.now() - t0;
-  i.log?.(JSON.stringify({ evt: "assistant_turn", model, rounds: stats.rounds, prompt_tokens: stats.prompt, completion_tokens: stats.completion, ttft_ms: stats.ttft, total_ms: total, tools: names.length, est_input: estInput() }));
-  yield { type: "done", stats: { model, prompt: stats.prompt, completion: stats.completion, rounds: stats.rounds, ttft_ms: stats.ttft, total_ms: total, est_input: estInput() } };
+  i.log?.(JSON.stringify({ evt: "assistant_turn", model, rounds: stats.rounds, prompt_tokens: stats.prompt, completion_tokens: stats.completion, ttft_ms: stats.ttft, total_ms: total, tools: names.length, est_input: estInput(), failed }));
+  yield { type: "done", stats: { model, prompt: stats.prompt, completion: stats.completion, rounds: stats.rounds, ttft_ms: stats.ttft, total_ms: total, est_input: estInput(), failed } };
 }
 const safe = (s: string) => { try { return JSON.parse(s || "{}"); } catch { return {}; } };
