@@ -122,3 +122,36 @@ test("a broadcast dry run surfaces queued, skipped and schedule; pending_approva
   const b = mk(() => json({ ok: true, data: { id: "b1", status: "pending_approval", queued: 2, skipped: [], approval_id: "ap1" } }, 202));
   expect((await b.mc.broadcasts.create({ template_id: "t", from: "a@b.co", recipients: [{ email: "x@y.co" }] })).data?.approval_id).toBe("ap1");
 });
+
+test("senders.list GETs /v1/senders; transport_id rides on send, batch and broadcast", async () => {
+  const T = "0192f3a0-7b1c-7a10-8000-0000000000a1";
+  const { f, mc } = mk(() => json({ ok: true, data: [{ address: "ana@example.com", display_name: "Ana", kind: "login", transport_id: T, transport: "zoho", is_default: true, status: "ready" }] }));
+  const r = await mc.senders.list();
+  expect(r.data?.[0]).toMatchObject({ address: "ana@example.com", transport: "zoho", status: "ready" });
+  await mc.emails.send({ from: "ana@example.com", to: ["x@y.co"], text: "t", transport_id: T });
+  await mc.emails.batch([{ to: ["x@y.co"], text: "t", transport_id: T }]);
+  await mc.broadcasts.create({ template_id: "welcome", from: "ana@example.com", recipients: [{ email: "x@y.co" }], transport_id: T, dry_run: true });
+  expect(f.mock.calls.map((c) => `${c[1]?.method} ${c[0]}`)).toEqual([
+    "GET http://api.test/v1/senders", "POST http://api.test/v1/emails", "POST http://api.test/v1/emails/batch", "POST http://api.test/v1/broadcasts",
+  ]);
+  const body = (i: number) => JSON.parse(f.mock.calls[i][1]?.body as string);
+  expect(body(1).transport_id).toBe(T);
+  expect(body(2).emails[0].transport_id).toBe(T);
+  expect(body(3).transport_id).toBe(T);
+});
+
+test("transports.update and domains.update PATCH with the documented bodies (null unbinds)", async () => {
+  const T = "0192f3a0-7b1c-7a10-8000-0000000000a1";
+  const D = "0192f3a0-7b1c-7a10-8000-0000000000d1";
+  const { f, mc } = mk(() => json({ ok: true, data: { id: T, aliases: ["sales@example.com"], display_names: { "sales@example.com": "Sales" }, transport_id: null } }));
+  const t = await mc.transports.update(T, { aliases: ["sales@example.com"], display_names: { "sales@example.com": "Sales" } });
+  expect(t.data?.aliases).toEqual(["sales@example.com"]);
+  await mc.domains.update(D, { transport_id: T });
+  const d = await mc.domains.update(D, { transport_id: null });
+  expect(d.data?.transport_id).toBeNull();
+  expect(f.mock.calls.map((c) => [c[1]?.method, c[0], JSON.parse(c[1]?.body as string)])).toEqual([
+    ["PATCH", `http://api.test/v1/transports/${T}`, { aliases: ["sales@example.com"], display_names: { "sales@example.com": "Sales" } }],
+    ["PATCH", `http://api.test/v1/domains/${D}`, { transport_id: T }],
+    ["PATCH", `http://api.test/v1/domains/${D}`, { transport_id: null }],
+  ]);
+});

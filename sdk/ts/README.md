@@ -50,14 +50,24 @@ const progress = await mailcraft.broadcasts.get(sent.data!.id!); // counts + per
 
 Test keys sandbox every broadcast. `broadcasts.preview({ template_id, recipient })` renders one recipient exactly as it would be sent.
 
+### Several senders
+
+`senders.list()` returns the From addresses you can pick (`address`, `display_name`, `transport`, `status`: `ready` | `needs_domain` | `transport_missing`). It is derived and read-only: a mailbox relay's login and its aliases, so add addresses with `transports.update(id, { aliases, display_names })`. A send is routed by its `from`: an explicit `transport_id`, else the mailbox relay with that login or alias, else the transport bound to the From domain (`domains.update(id, { transport_id })`), else the default.
+
+```ts
+const { data: senders } = await mailcraft.senders.list();
+await mailcraft.emails.send({ from: "sales@example.com", to: ["ana@example.org"], text: "Hi", transport_id: "0192f3a0-7b1c-7a10-8000-0000000000a1" });
+```
+
 Resources and methods:
 
 | Resource | Methods |
 |---|---|
 | `emails` | `send` `batch` `get` `list` (filters `status` `stream` `env` `q` `from` `to`) `events` `cancel` |
 | `broadcasts` | `create` (`dry_run`) `list` `get` `preview` |
-| `domains` | `create` `verify` `list` `get` `remove` (records carry `checked_at` `detail` `found`; domains `last_checked_at` `relay_sender`) |
-| `transports` | `create` (`config.mailbox_sender`) `list` `test` `remove` |
+| `domains` | `create` `verify` `list` `get` `update` (`{ transport_id }`, null unbinds) `remove` (records carry `checked_at` `detail` `found`; domains `last_checked_at` `relay_sender` `relay_senders` `transport_id`) |
+| `senders` | `list` (the From addresses you can pick; read-only, derived) |
+| `transports` | `create` (`config.mailbox_sender` `aliases` `display_names`) `list` `test` `update` (`{ aliases, display_names }`) `remove` |
 | `templates` | `create` `get` (adds `source_format` + `source`) `list` `update` (alias, stream, preheader) `publish` (`{ version }`) `preview` (saved `version` or unsaved `draft` content) `versions` `version` `restore` `discardDraft` `import` `export` |
 | `contacts` | `upsert` `get` `list` (`q`) `update` `remove` `activity` `import` (up to 5000, bad rows come back in `failed`) |
 | `segments` | `create` `list` `preview` `update` `remove` `addMembers` |

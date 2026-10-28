@@ -187,3 +187,30 @@ test("broadcast_send caps recipients at 5000 and requires from + template", asyn
   expect(none.isError).toBe(true);
   expect(seen).toEqual([]);
 });
+
+test("sender_list is a read-only GET /v1/senders and survives --read-only", async () => {
+  seen = [];
+  const senders = [{ address: "ana@example.com", display_name: "Ana", kind: "login", transport: "zoho", is_default: true, status: "ready" }];
+  respond = () => [200, { ok: true, data: senders, request_id: "req_s" }];
+  const c = await client({ readOnly: true });
+  const tools = (await c.listTools()).tools;
+  expect(tools.find((t) => t.name === "sender_list")!.annotations!.readOnlyHint).toBe(true);
+  const r: any = await c.callTool({ name: "sender_list", arguments: {} });
+  respond = () => [200, { ok: true, data: {}, request_id: "req_1" }];
+  expect(seen[0].method).toBe("GET");
+  expect(seen[0].url).toBe("/v1/senders");
+  expect(JSON.parse(r.content[0].text)).toMatchObject({ ok: true, schema: 1, data: senders });
+});
+
+test("email_send forwards transport_id; no tool changes transports, aliases or domain bindings", async () => {
+  seen = [];
+  const T = "0192f3a0-7b1c-7a10-8000-0000000000a1";
+  const c = await client();
+  await c.callTool({ name: "email_send", arguments: { from: "ana@example.com", to: ["a@b.co"], text: "x", transport_id: T } });
+  expect(JSON.parse(seen[0].body)).toEqual({ from: "ana@example.com", to: ["a@b.co"], text: "x", transport_id: T });
+  seen = [];
+  await c.callTool({ name: "broadcast_send", arguments: { template_id: "welcome", from: "ana@example.com", transport_id: T, recipients: [{ email: "x@y.co" }], dry_run: true } });
+  expect(JSON.parse(seen[0].body)).toMatchObject({ transport_id: T, dry_run: true });
+  for (const t of TOOLS) expect(t.path).not.toMatch(/^\/v1\/transports/);
+  expect(TOOLS.filter((t) => t.path.startsWith("/v1/domains") && t.method === "PATCH")).toEqual([]);
+});
