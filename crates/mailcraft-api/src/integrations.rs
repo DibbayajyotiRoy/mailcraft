@@ -72,12 +72,32 @@ pub async fn domains_add(
     r
 }
 
+/// Marks a domain whose mailbox the default relay logs in as (`relay_sender`): sends from that
+/// address need no domain records (see `emails::mailbox_relay_sender`).
+async fn with_relay(st: &AppState, ws: Uuid, mut d: Value) -> ApiResult<Value> {
+    if let Some(m) = crate::emails::mailbox_relay_sender(st, ws).await? {
+        let dom = mailcraft_core::address::domain_of(&m).to_ascii_lowercase();
+        let mark = |v: &mut Value| {
+            if v["name"]
+                .as_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case(&dom))
+            {
+                v["relay_sender"] = json!(m);
+            }
+        };
+        match d.as_array_mut() {
+            Some(a) => a.iter_mut().for_each(mark),
+            None => mark(&mut d),
+        }
+    }
+    Ok(d)
+}
+
 pub async fn domains_list(State(st): State<AppState>, auth: Auth) -> ApiResult {
     auth.require(Scope::Read)?;
-    Ok(envelope_list(
-        st.domains.list(auth.0.workspace_id).await?,
-        None,
-    ))
+    let ws = auth.0.workspace_id;
+    let list = serde_json::to_value(st.domains.list(ws).await?).unwrap_or_default();
+    Ok(envelope_list(with_relay(&st, ws, list).await?, None))
 }
 
 pub async fn domains_get(
@@ -86,10 +106,9 @@ pub async fn domains_get(
     Path(id): Path<Uuid>,
 ) -> ApiResult {
     auth.require(Scope::Read)?;
-    Ok(envelope(
-        StatusCode::OK,
-        st.domains.get(auth.0.workspace_id, id).await?,
-    ))
+    let ws = auth.0.workspace_id;
+    let d = serde_json::to_value(st.domains.get(ws, id).await?).unwrap_or_default();
+    Ok(envelope(StatusCode::OK, with_relay(&st, ws, d).await?))
 }
 
 pub async fn domains_verify(

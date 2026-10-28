@@ -29,12 +29,12 @@ export function Badge({ tone, size, className, children, ...p }: ComponentProps<
 }
 
 /** Colour is never the only signal: dot + the status text. The tone name is also a class (`tone-warn`) for tests/styling hooks. */
-export function StatusBadge({ status, size, pulse }: { status: string; size?: "sm" | "md"; pulse?: boolean }) {
+export function StatusBadge({ status, size, pulse, label }: { status: string; size?: "sm" | "md"; pulse?: boolean; label?: string }) {
   const tone = TONE[status] ?? "neutral";
   return (
     <Badge tone={tone} size={size} className={`tone-${tone}`} title={MEANING[status]}>
       <span aria-hidden className={cn("size-1.5 rounded-full bg-current", pulse && tone === "warn" && "animate-pulse-dot")} />
-      {status.replace(/_/g, " ")}
+      {label ?? status.replace(/_/g, " ")}
     </Badge>
   );
 }

@@ -233,6 +233,23 @@ async fn blocked(st: &AppState, key: &ApiKey, rule: &str, e: Error, record: bool
     ApiError(e)
 }
 
+/// The login address of the workspace's default transport when it is an smtp-relay in
+/// `mailbox_sender` mode.
+pub(crate) async fn mailbox_relay_sender(st: &AppState, ws: Uuid) -> ApiResult<Option<String>> {
+    let row: Option<(Uuid, Vec<u8>)> = sqlx::query_as(
+        "SELECT id, config_enc FROM transports WHERE workspace_id = $1 AND kind = 'smtp-relay' \
+         ORDER BY is_default DESC, created_at LIMIT 1",
+    )
+    .bind(ws)
+    .fetch_optional(&st.db)
+    .await?;
+    Ok(row.and_then(|(id, enc)| {
+        let c: Value = serde_json::from_slice(&st.secrets.open(&enc, id.as_bytes()).ok()?).ok()?;
+        c["mailbox_sender"].as_bool().filter(|b| *b)?;
+        c["username"].as_str().map(String::from)
+    }))
+}
+
 async fn plan(st: &AppState, key: &ApiKey, p: &Prepared, record: bool) -> ApiResult<Plan> {
     let (kill, live, legal, postal): (bool, bool, Option<String>, Option<String>) = sqlx::query_as(
         "SELECT kill_switch, live_enabled, legal_name, postal_address FROM workspaces WHERE id = $1",
@@ -273,7 +290,17 @@ async fn plan(st: &AppState, key: &ApiKey, p: &Prepared, record: bool) -> ApiRes
             .bind(&p.from_domain)
             .fetch_optional(&st.db)
             .await?;
-            let Some(dom) = dom else {
+            // A mailbox relay (Zoho, Workspace, Outlook) only sends as the address it logged in
+            // with and signs with the provider's own SPF/DKIM, so that login is the proof of
+            // ownership: mailcraft's own domain records add nothing there.
+            let mailbox_ok = dom.is_none()
+                && mailbox_relay_sender(st, key.workspace_id)
+                    .await?
+                    .is_some_and(|m| {
+                        address::parse_mailbox(&p.from)
+                            .is_some_and(|(_, a)| a.eq_ignore_ascii_case(&m))
+                    });
+            let Some(dom) = dom.or(mailbox_ok.then(Uuid::nil)) else {
                 return Err(err("domain_not_verified", 422, format!("cannot send from {}: domain is not verified", p.from_domain))
                     .field("from")
                     .hint_in("add it with POST /v1/domains and publish the returned DNS records, then verify"));
@@ -293,7 +320,7 @@ async fn plan(st: &AppState, key: &ApiKey, p: &Prepared, record: bool) -> ApiRes
                 )
                 .await);
             }
-            domain_id = Some(dom);
+            domain_id = (!dom.is_nil()).then_some(dom);
             if p.stream == Stream::Marketing && (legal.is_none() || postal.is_none()) {
                 return Err(invalid(
                     "marketing sends need the workspace legal name and postal address",
