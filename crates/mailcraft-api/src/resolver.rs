@@ -52,6 +52,7 @@ pub fn build(
                 username: str_of(c, "username").map(String::from),
                 password: str_of(c, "password").map(String::from),
                 timeout: Duration::from_secs(30),
+                mailbox_sender: c["mailbox_sender"].as_bool().unwrap_or(false),
             };
             Ok(Arc::new(
                 SmtpRelay::new(&cfg).map_err(|e| bad(e.to_string()))?,

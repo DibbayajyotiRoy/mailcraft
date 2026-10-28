@@ -102,3 +102,13 @@ Open the printed URL, approve, and the CLI receives the callback on the loopback
 ## Bring your own relay
 
 `mailcraft connect relay <preset>` with credentials for SES, Postmark, Mailgun, Brevo, SMTP2GO or any SMTP server you own. mailcraft never routes your mail through project-run infrastructure.
+
+A mailbox you already have (Zoho, Google Workspace, Outlook) works too. Those servers only accept the
+signed-in address as the sender, so add `--mailbox-sender`. Bounces then land in that inbox instead of
+being tracked by mailcraft, and the provider's daily sending cap applies:
+
+```sh
+export MAILCRAFT_SMTP_PASSWORD='<app password>'
+mailcraft connect relay custom --host smtppro.zoho.in --port 587 \
+  --username dev@example.com --mailbox-sender
+```

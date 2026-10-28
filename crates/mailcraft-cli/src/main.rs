@@ -163,6 +163,10 @@ enum ConnectCmd {
         /// Prefer env MAILCRAFT_SMTP_PASSWORD so it stays out of shell history.
         #[arg(long)]
         password: Option<String>,
+        /// Mailbox relay (Zoho, Gmail/Workspace, Outlook): send as the --username address.
+        /// Bounces then go to that mailbox instead of mailcraft.
+        #[arg(long)]
+        mailbox_sender: bool,
     },
 }
 
@@ -504,12 +508,16 @@ fn run(cli: &Cli) -> R {
                     port,
                     username,
                     password,
+                    mailbox_sender,
                 } => {
                     let pw = password
                         .clone()
                         .or_else(|| std::env::var("MAILCRAFT_SMTP_PASSWORD").ok());
+                    // `custom` means no preset: host/port come from the flags.
+                    let preset = (preset != "custom").then_some(preset);
                     let body = json!({"kind": "smtp-relay", "preset": preset,
-                        "config": {"host": host, "port": port, "username": username, "password": pw}});
+                        "config": {"host": host, "port": port, "username": username, "password": pw,
+                            "mailbox_sender": mailbox_sender}});
                     ok(api.post("/v1/transports", &body, None)?)
                 }
             }

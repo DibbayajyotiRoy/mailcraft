@@ -10,7 +10,7 @@ import { toast } from "@/components/ui/toast";
 import { addRelay, gmailStart, testTransport, type Result } from "./actions";
 
 export type Transport = { id: string; kind: string; name?: string; label?: string; is_default?: boolean; status?: string; from?: string | null; detail?: Record<string, unknown> };
-export const PRESETS = ["postmark", "mailgun", "resend", "brevo", "smtp2go", "ses"] as const;
+export const PRESETS = ["postmark", "mailgun", "resend", "brevo", "smtp2go", "ses", "custom"] as const;
 const KIND: Record<string, string> = { sandbox: "Sandbox inbox", "gmail-oauth": "Gmail", "smtp-relay": "SMTP relay", ses: "Amazon SES", direct: "Direct from this server" };
 
 /** Test button with its result inline (aria-live) so a failure is read out, not just coloured. */
@@ -44,6 +44,14 @@ function AddRelay({ canEdit }: { canEdit: boolean }) {
             {(a) => <Input {...a} name="username" mono autoComplete="off" />}
           </Field>
           <Field label="Password or API key">{(a) => <Input {...a} name="password" type="password" mono required autoComplete="new-password" />}</Field>
+          {preset === "custom" && <div className="grid grid-cols-[1fr_7rem] gap-3">
+            <Field label="SMTP host">{(a) => <Input {...a} name="host" mono required placeholder="smtppro.zoho.in" autoComplete="off" />}</Field>
+            <Field label="Port">{(a) => <Input {...a} name="port" type="number" inputMode="numeric" min={1} max={65535} defaultValue={587} required />}</Field>
+          </div>}
+          {preset === "custom" && <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" name="mailbox_sender" className="mt-0.5 size-4 accent-[var(--accent)]" />
+            <span><span className="font-medium">Send as this mailbox</span><span className="block text-muted">For Zoho, Google Workspace or Outlook, which only accept the username as sender. Bounces go to that inbox.</span></span>
+          </label>}
           {preset === "ses" && <Field label="AWS region">{(a) => <Input {...a} name="region" placeholder="us-east-1" autoComplete="off" />}</Field>}
           {s.error && <p role="alert" className="text-sm font-medium text-bad">{s.error}</p>}
           <div className="flex justify-end gap-2">
