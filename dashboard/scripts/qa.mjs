@@ -42,6 +42,17 @@ const tick = (email) => async (p) => { await p.getByRole("checkbox", { name: `Se
 const filterRows = (name) => async (p) => { await p.getByRole("radio", { name }).click(); await p.waitForTimeout(900); };
 /** Opens New email and types into To (and waits out the 250ms suggestion debounce). */
 const composeTo = async (p, text, open = true) => { if (open) await click("button", "New email")(p); await p.getByRole("dialog").getByRole("combobox", { name: "To" }).pressSequentially(text); await p.waitForTimeout(450); };
+// "Write with AI" in the New email dialog: needs the same dashboard start as the assistant routes (OPENROUTER_API_KEY=mock, MAILCRAFT_ASSISTANT_BASE_URL=<mock-api>/openrouter/api/v1).
+// In the mock, `qa:hold` stalls the stream mid-body (the "writing" state stays on screen) and `qa:fail` answers 429.
+const AI_BOX = "What should this email say?";
+const aiOpen = async (p, template) => {
+  await click("button", "New email")(p);
+  if (template) { await dlg(p).getByRole("tab", { name: "Use a template" }).click(); await dlg(p).getByLabel("Template", { exact: true }).selectOption(template); }
+  await dlg(p).getByRole("button", { name: "Write with AI" }).click();
+  await dlg(p).getByLabel(AI_BOX).waitFor();
+};
+const aiPrompt = async (p) => { await aiOpen(p); for (const t of ["Friendly", "Short", "Formal"]) await dlg(p).getByRole("button", { name: t, exact: true }).waitFor(); };
+const aiWrite = (prompt, until, template) => async (p) => { await aiOpen(p, template); await dlg(p).getByLabel(AI_BOX).fill(prompt); await dlg(p).getByLabel(AI_BOX).press("Enter"); await until(p); };
 // [name, path, action?]  action = open a dialog/tab before the capture
 const ROUTES = [
   ["overview", "/"], ["overview-30d", "/?range=30d"],
@@ -138,6 +149,11 @@ const ROUTES = [
   ["email-compose-chips", "/emails", async (p) => { await composeTo(p, "ana@example.com,"); await p.getByRole("dialog").getByLabel("To", { exact: true }).fill("nope,"); await p.waitForTimeout(200); }],
   ["email-compose-suppressed", "/emails", async (p) => { await composeTo(p, "bounce"); await p.getByRole("option", { name: /bounce@example.com/ }).click(); }],
   ["email-compose-new-contacts", "/emails", async (p) => { await composeTo(p, "new@example.com,"); await composeTo(p, "newer@example.com,", false); const d = p.getByRole("dialog"); await d.getByLabel("Subject").fill("Hello"); await d.getByLabel("Message", { exact: true }).fill("Hi there"); await d.getByRole("button", { name: "Send email" }).click(); await d.getByRole("button", { name: "Create 2 contacts and send" }).waitFor(); }],
+  ["email-compose-ai-prompt", "/emails", aiPrompt],
+  ["email-compose-ai-writing", "/emails", aiWrite("Invite Ana to Thursday's demo qa:hold", (p) => p.getByText("Writing body…").first().waitFor())],
+  ["email-compose-ai-template-writing", "/emails", aiWrite("Invite Ana to Thursday's demo qa:hold", (p) => p.getByText(/^Filling /).first().waitFor(), "t2")], // t2 "Receipt" has two variables (first_name, amount)
+  ["email-compose-ai-done", "/emails", aiWrite("Invite Ana to Thursday's demo", (p) => p.getByRole("button", { name: "Regenerate" }).waitFor())],
+  ["email-compose-ai-error", "/emails", aiWrite("qa:fail", (p) => p.getByRole("alert").filter({ hasText: /\S/ }).first().waitFor())], // not the empty Next route announcer
   ["notfound", "/nope"], ["design", "/dev/design"],
 ].filter(([n]) => !only.length || only.some((o) => n.includes(o)));
 

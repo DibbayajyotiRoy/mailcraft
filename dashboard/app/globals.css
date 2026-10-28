@@ -31,6 +31,7 @@
   --animate-slide-in-left: slide-in-left var(--dur-slow) var(--ease-out);
   --animate-shimmer: shimmer 1.6s linear infinite;
   --animate-diff-in: diff-in 700ms var(--ease-out) both;
+  --animate-caret: caret-blink 1.1s steps(1) infinite;
 }
 
 @keyframes pulse-dot { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
@@ -39,6 +40,8 @@
 @keyframes slide-in-left { from { transform: translateX(-100%) } to { transform: none } }
 /* DiffTable: a proposed value settles in from a ringed, slightly raised state. Only shadow and position move, never text or background colour, so contrast holds mid-animation; the global reduced-motion rule shortens it. */
 @keyframes diff-in { from { box-shadow: 0 0 0 4px var(--ok); transform: translateY(-3px) } to { box-shadow: 0 0 0 0 transparent; transform: none } }
+/* Write with AI: the caret at the end of the field being written. */
+@keyframes caret-blink { 50% { opacity: 0 } }
 @keyframes shimmer { from { background-position: 200% 0 } to { background-position: -200% 0 } }
 
 @layer base {

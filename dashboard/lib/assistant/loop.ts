@@ -18,13 +18,14 @@ export type TurnInput = {
   signal?: AbortSignal; fetchImpl?: typeof fetch; log?: (line: string) => void; firstTokenMs?: number;
 };
 
-const failure = (e: UpstreamError): ChatEvent => {
+export const failure = (e: UpstreamError): ChatEvent => {
   const day = /per-day|daily/i.test(e.message);
   switch (e.code) {
     case "unauthorized": return { type: "error", code: e.code, message: "OpenRouter rejected the API key.", hint: "Check OPENROUTER_API_KEY on the dashboard server." };
     case "rate_limited": return { type: "error", code: e.code, message: day ? "The free-model daily request limit is used up." : "Free models are rate-limited right now.", hint: day ? "It resets daily (UTC). Settings → AI usage shows your key's status." : "Wait a minute and try again." };
     case "payment_required": return { type: "error", code: e.code, message: "OpenRouter asked for credits, which free models should not need.", hint: "Check the key on openrouter.ai." };
-    default: return { type: "error", code: e.code, message: e.message || "The model could not be reached.", hint: "Try again; the assistant moves to the next free model automatically." };
+    // Only messages written here reach the browser: an upstream body can echo headers, so it is never relayed.
+    default: return { type: "error", code: e.code, message: e.code === "first_token_timeout" || e.code === "empty_completion" ? e.message || "The model could not be reached." : "The model could not be reached.", hint: "Try again; the assistant moves to the next free model automatically." };
   }
 };
 
