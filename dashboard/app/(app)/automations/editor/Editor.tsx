@@ -139,7 +139,7 @@ export function Editor({ initial, mode, id, status, version, options, stats }: {
         <h2 id="flow-h" className="mb-2 text-md font-semibold">Flow</h2>
         <p role="status" aria-live="polite" className="sr-only">{live}</p>
         <ol aria-label="Automation steps" className="grid justify-items-center rounded-lg bg-surface-2 p-3 sm:p-6 [background-image:radial-gradient(var(--border-strong)_1px,transparent_1px)] [background-size:16px_16px]">
-          <li id={`step-${d.triggerKey}`} tabIndex={-1} className="w-full">
+          <li id={`step-${d.triggerKey}`} tabIndex={-1} aria-label="Trigger" className="w-full">
             <CardShell icon={Zap} title="Trigger">
               {stats && <StepStats stat={stats[d.triggerKey] ?? NO_STAT} />}
               <SegmentedControl label="Start when" value={d.trigger.kind} onValueChange={(kind) => dispatch({ t: "trigger", patch: { kind } })}
@@ -248,10 +248,10 @@ export function Editor({ initial, mode, id, status, version, options, stats }: {
       </AlertDialog>
     </form>
     {wide && (
-      <aside aria-labelledby="flow-preview-h" className="sticky top-16 grid max-h-[calc(100dvh-5rem)] gap-2 overflow-y-auto">
-        <h2 id="flow-preview-h" className="text-md font-semibold">Live preview</h2>
+      <div className="sticky top-16 grid max-h-[calc(100dvh-5rem)] gap-2 overflow-y-auto">
+        <h2 className="text-md font-semibold">Live preview</h2>
         <FlowPreview definition={definition} stats={stats} />
-      </aside>
+      </div>
     )}
     </div>
   );

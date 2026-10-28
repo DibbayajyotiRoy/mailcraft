@@ -16,7 +16,7 @@ export function SegmentedControl<T extends string>({ label, value, onValueChange
       {options.map(({ value: v, label: l, icon: Icon }) => (
         <ToggleGroup.Item key={v} value={v} aria-label={iconOnly ? l : undefined}
           className={cn("relative grid h-7 place-items-center rounded-sm text-xs font-medium text-muted transition-colors duration-[var(--dur-fast)] after:absolute after:-inset-0.5 after:content-[''] hover:text-fg " +
-            "data-[state=on]:bg-bg data-[state=on]:text-fg data-[state=on]:shadow-[0_0_0_1px_var(--border-strong)] pointer-coarse:h-10", iconOnly ? "w-8 pointer-coarse:w-10" : "min-w-10 px-2.5")}>
+            "data-[state=on]:bg-bg data-[state=on]:text-fg data-[state=on]:shadow-[0_0_0_1px_var(--border-strong)] forced-colors:data-[state=on]:bg-[Highlight] forced-colors:data-[state=on]:text-[HighlightText] pointer-coarse:h-10", iconOnly ? "w-8 pointer-coarse:w-10" : "min-w-10 px-2.5")}>
           {Icon && <Icon aria-hidden className="size-4" />}
           {!iconOnly && l}
         </ToggleGroup.Item>

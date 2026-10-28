@@ -104,7 +104,7 @@ export function StepFlow({ automation, slots, stats }: { automation: any; slots:
   return (
     <ol aria-label="Automation steps" className="mx-auto grid max-w-[560px] justify-items-center rounded-lg bg-surface-2 p-4 sm:p-8 [background-image:radial-gradient(var(--border-strong)_1px,transparent_1px)] [background-size:16px_16px]">
       {steps.map((s, i) => (
-        <li key={s.key + i} id={`step-${s.key}`} tabIndex={-1} className="grid w-full scroll-mt-20 justify-items-center rounded-lg focus:outline-2 focus:outline-offset-4 focus:outline-accent">
+        <li key={s.key + i} id={`step-${s.key}`} tabIndex={-1} aria-label={`${TYPE_LABEL[s.type] ?? s.type} ${s.key}`} className="grid w-full scroll-mt-20 justify-items-center rounded-lg focus:outline-2 focus:outline-offset-4 focus:outline-accent">
           {i > 0 && <div aria-hidden className="flex h-8 flex-col items-center text-border-strong"><span className="w-0.5 flex-1 bg-current" /><ArrowDown className="-mt-1 size-3.5" /></div>}
           <StepNode s={s} slots={slots[s.config?.template]} />
           {stats && <StepStats stat={stats[s.key]} className="mt-2 [&_dl]:justify-center" />}

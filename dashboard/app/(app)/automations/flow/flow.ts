@@ -2,7 +2,7 @@
 //   buildFlow(automation, stats)  stored definition (or the editor's toDefinition output) -> nodes + labelled edges
 //   layoutFlow(graph)             deterministic top-down layout: rows by longest path, branches as columns
 // The connector curve (vertical tangents, handle length 0.55 of the drop, clamped 24..84) is adapted from Beautiful UI's
-// Flowchart primitive, MIT License, Copyright (c) 2026 Turbo (https://beautifului.dev); the licence text is in Flowchart.tsx.
+// Flowchart primitive, MIT License, Copyright (c) 2026 Shane Levine (https://www.beautifului.dev/license); the licence text is in Flowchart.tsx.
 import { ruleWords } from "@/lib/rules";
 import { durationWords, flowSteps, type Step } from "../[id]/steps";
 import { NO_STAT, type StepStat } from "../editor/StepStats";
@@ -204,9 +204,12 @@ export function layoutFlow(g: FlowGraph): FlowLayout {
   return { width: PAD * 2 + Math.max(1, free) * PITCH - GAP_X, height: PAD * 2 + maxRow * rowPitch + PILL_H + cardH, cardH, nodes, edges };
 }
 
+/** Whether to say the kind before the title: not when the title already starts with it ("Wait 2 days") or is itself the end ("Run ends"). */
+export const saysKind = (n: FlowNode) => n.kind !== "exit" && !n.title.startsWith(n.label);
+
 /** The words a screen reader gets for where a step leads: "Yes: Send email welcome. No: Run ends." */
 export function leadsTo(g: FlowGraph, id: string): string {
-  const title = (k: string) => { const n = g.nodes.find((x) => x.id === k)!; return `${n.label} ${n.title}`; };
+  const title = (k: string) => { const n = g.nodes.find((x) => x.id === k)!; return saysKind(n) ? `${n.label} ${n.title}` : n.title; };
   return g.edges.filter((e) => e.from === id).map((e) => `${e.label ? `${e.label}: ` : "Then: "}${title(e.to)}.`).join(" ");
 }
 

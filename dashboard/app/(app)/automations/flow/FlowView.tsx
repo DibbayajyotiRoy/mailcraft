@@ -20,12 +20,19 @@ const stored = (): View | null => {
  */
 export function FlowView({ automation, stats, steps }: { automation: unknown; stats: Record<string, StepStat> | null; steps: ReactNode }) {
   const graph = useMemo(() => buildFlow(automation, stats), [automation, stats]);
-  const [view, setView] = useState<View | null>(null), [target, setTarget] = useState<string | null>(null);
+  const [view, setView] = useState<View | null>(null), [target, setTarget] = useState<string | null>(null), [note, setNote] = useState("");
 
-  useEffect(() => { setView(stored() ?? (window.matchMedia?.("(min-width: 1024px)").matches === false ? "steps" : "flow")); }, []);
-  useEffect(() => { if (view === "steps" && target) { jumpToStep(target); setTarget(null); } }, [view, target]);
+  // Phones get the list whatever was saved (a saved "flow" came from a wide screen); a saved "steps" wins everywhere.
+  useEffect(() => { setView(stored() === "steps" || window.matchMedia?.("(min-width: 1024px)").matches === false ? "steps" : "flow"); }, []);
+  useEffect(() => {
+    if (view !== "steps" || !target) return;
+    jumpToStep(target);
+    const n = graph.nodes.find((x) => x.id === target);
+    setNote(n ? `Showing ${n.label} ${n.title} in the step list.` : "");
+    setTarget(null);
+  }, [view, target, graph]);
 
-  const choose = (v: View) => { setView(v); try { localStorage.setItem(KEY, v); } catch { /* private mode: the choice lasts for this visit */ } };
+  const choose = (v: View) => { setView(v); setNote(""); try { localStorage.setItem(KEY, v); } catch { /* private mode: the choice lasts for this visit */ } };
   const pre = view === null;
   return (
     <div>
@@ -34,6 +41,7 @@ export function FlowView({ automation, stats, steps }: { automation: unknown; st
         <SegmentedControl label="Show the automation as" value={view ?? "flow"} onValueChange={choose} className="ml-auto"
           options={[{ value: "flow", label: "Flow" }, { value: "steps", label: "Steps" }]} />
       </div>
+      <p role="status" className="sr-only">{note}</p>
       {(pre || view === "flow") && <div className={pre ? "max-lg:hidden" : undefined}><Flowchart graph={graph} onSelect={(key) => { setView("steps"); setTarget(key); }} /></div>}
       {(pre || view === "steps") && <div className={pre ? "lg:hidden" : undefined}>{steps}</div>}
     </div>

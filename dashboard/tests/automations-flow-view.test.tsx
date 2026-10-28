@@ -48,7 +48,7 @@ describe("Flowchart", () => {
     expect(mail.textContent).toContain("From hello@example.com");
     const desc = (b: HTMLElement) => b.getAttribute("aria-describedby")!.split(" ").map((id) => document.getElementById(id)?.textContent).join(" ");
     expect(desc(mail)).toContain("10 entered, 1 active, 7 completed, 2 failed, 0 exited.");
-    expect(desc(buttons[2])).toContain("Yes: Send email winback. No: End Run ends.");
+    expect(desc(buttons[2])).toContain("Yes: Send email winback. No: Run ends.");
     // the failing step is marked by more than colour: the word and a count
     expect(within(mail).getByText("Failed").parentElement!.textContent).toContain("2");
   });
@@ -83,6 +83,24 @@ describe("Flowchart", () => {
   });
 });
 
+describe("Flowchart accessibility details", () => {
+  it("keeps focus on a zoom button that has reached its limit, and does not say a kind twice", () => {
+    render(<Flowchart graph={buildFlow({ steps: [{ key: "t", type: "trigger", config: { event: "x" }, next: "d" }, { key: "d", type: "delay", config: { duration: "2d" } }] })} />);
+    const out = screen.getByRole("button", { name: "Zoom out" });
+    out.focus();
+    for (let i = 0; i < 6; i++) fireEvent.click(out); // 100% down to the 40% floor
+    expect(screen.getByText(/%$/).textContent).toBe("40%");
+    expect(out.getAttribute("aria-disabled")).toBe("true");
+    expect(out.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(out);
+    fireEvent.click(out); // a click at the limit does nothing
+    expect(screen.getByText(/%$/).textContent).toBe("40%");
+    const wait = screen.getByRole("button", { name: /Wait 2 days/ });
+    expect(wait.textContent).toContain("Wait 2 days");
+    expect(wait.textContent?.match(/Wait/g)).toHaveLength(1);
+  });
+});
+
 describe("FlowView toggle", () => {
   it("shows the flow by default on a wide screen, and switches to the steps and remembers it", () => {
     media((q) => q.includes("1024"));
@@ -105,15 +123,23 @@ describe("FlowView toggle", () => {
     expect(localStorage.getItem("mc_automation_view")).toBeNull();
   });
 
-  it("uses the remembered choice over the screen size, and ignores junk", () => {
+  it("honours a remembered 'steps' everywhere, a remembered 'flow' only on a wide screen, and ignores junk", () => {
     media(() => false);
     localStorage.setItem("mc_automation_view", "flow");
     view();
+    expect(radio("Steps").getAttribute("aria-checked")).toBe("true"); // phones get the list whatever a desktop saved
+    cleanup();
+    media((q) => q.includes("1024"));
+    view();
     expect(radio("Flow").getAttribute("aria-checked")).toBe("true");
+    cleanup();
+    localStorage.setItem("mc_automation_view", "steps");
+    view();
+    expect(radio("Steps").getAttribute("aria-checked")).toBe("true");
     cleanup();
     localStorage.setItem("mc_automation_view", "sideways");
     view();
-    expect(radio("Steps").getAttribute("aria-checked")).toBe("true");
+    expect(radio("Flow").getAttribute("aria-checked")).toBe("true");
   });
 
   it("works when storage is blocked", () => {
@@ -136,6 +162,9 @@ describe("FlowView toggle", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "center", behavior: "smooth" });
     expect(document.activeElement).toBe(li);
     expect(localStorage.getItem("mc_automation_view")).toBeNull(); // a jump is not a preference
+    // the target is named, and the move is announced
+    expect(li.getAttribute("aria-label")).toBe("Send email mail");
+    expect(screen.getByRole("status").textContent).toBe("Showing Send email welcome in the step list.");
   });
 
   it("does not animate the jump when reduced motion is asked for", () => {

@@ -101,6 +101,10 @@ describe("buildFlow", () => {
   it("describes where a step leads for screen readers", () => {
     const g = buildFlow({ steps: [{ ...trig, next: "c" }, { key: "c", type: "condition", config: {}, next: { true: "a", false: "b" } }, mail("a"), mail("b")] });
     expect(leadsTo(g, "c")).toBe("Yes: Send email a. No: Send email b.");
+    // the kind is not said twice ("Wait Wait 2 days") and an end is just "Run ends"
+    const w = buildFlow({ steps: [{ ...trig, next: "d" }, { key: "d", type: "delay", config: { duration: "2d" }, next: "x" }, { key: "x", type: "exit", config: {} }] });
+    expect(leadsTo(w, "t")).toBe("Then: Wait 2 days.");
+    expect(leadsTo(w, "d")).toBe("Then: Run ends.");
     expect(leadsTo(g, "t")).toBe("Then: Condition If no rule yet.");
     expect(leadsTo(g, "a")).toBe("");
   });
