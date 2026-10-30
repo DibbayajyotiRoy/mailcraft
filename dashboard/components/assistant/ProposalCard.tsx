@@ -14,7 +14,7 @@ import type { ApplyResult, Proposal } from "@/lib/assistant/types";
 import type { Card } from "./useAssistant";
 import { hasPlaceholders, VariablesSection } from "./VariablesSection";
 
-const KIND: Record<Proposal["kind"], string> = { template: "Template draft", automation: "Automation draft", automation_state: "Automation", broadcast: "Broadcast", email: "Email", list: "List", contacts: "Contacts", go_live: "Go-live approval" };
+const KIND: Record<Proposal["kind"], string> = { template: "Template draft", automation: "Automation draft", automation_state: "Automation", broadcast: "Broadcast", email: "Email", list: "List", contacts: "Contacts", go_live: "Go-live approval", import: "Import", email_body: "Email body" };
 const PILL: Record<ApplyResult["status"], [string, "ok" | "info" | "warn" | "bad"]> = { completed: ["Completed", "ok"], queued: ["Queued", "info"], pending_approval: ["Waiting for approval", "warn"], failed: ["Failed", "bad"] };
 const FOLD = 14;
 
@@ -34,6 +34,44 @@ function Diff({ d }: { d: NonNullable<Proposal["diff"]> }) {
         ))}
       </div>
       {rows.length > FOLD && <button type="button" onClick={() => setAll(!all)} className="mt-1 text-xs text-accent underline underline-offset-2">{all ? "Show less" : `Show all ${rows.length} lines`}</button>}
+    </div>
+  );
+}
+
+function ImportSummary({ imp }: { imp: NonNullable<Proposal["import"]> }) {
+  const s = imp.summary;
+  return (
+    <div className="space-y-2">
+      <dl className="flex flex-wrap gap-2 text-sm">
+        <div className="rounded-md bg-surface-2 px-2.5 py-1.5"><dt className="text-xs text-muted">New</dt><dd className="text-md font-semibold tabular-nums">{s.new}</dd></div>
+        <div className="rounded-md bg-surface-2 px-2.5 py-1.5"><dt className="text-xs text-muted">Updated</dt><dd className="text-md font-semibold tabular-nums">{s.update}</dd></div>
+        <div className="rounded-md bg-surface-2 px-2.5 py-1.5"><dt className="text-xs text-muted">Unchanged</dt><dd className="text-md font-semibold tabular-nums">{s.unchanged}</dd></div>
+        <div className="rounded-md bg-surface-2 px-2.5 py-1.5"><dt className="text-xs text-muted">Skipped</dt><dd className="text-md font-semibold tabular-nums">{s.skipped}</dd></div>
+      </dl>
+      {imp.list && <p className="text-sm text-muted">List: {imp.list.name}{imp.list.exists ? " (existing)" : " (will be created)"}</p>}
+      {imp.rows.length > 0 && (
+        <ul className="max-h-40 space-y-0.5 overflow-auto rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs" tabIndex={0} aria-label="Import preview">
+          {imp.rows.map((r) => <li key={r.index} className="truncate">{r.email} — {r.status}{r.reason ? ` (${r.reason})` : ""}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function DraftEdits({ draft }: { draft: NonNullable<Proposal["draft"]> }) {
+  return (
+    <div className="rounded-md border border-border bg-surface-2 px-3 py-2">
+      <p className="mb-1.5 text-xs font-medium text-muted">Edited for this send — template unchanged</p>
+      <ul className="space-y-1 text-sm" aria-label="Draft edits">
+        {draft.edits.map((e, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <span className={cn("mt-0.5 size-4 shrink-0 rounded-full text-[10px] flex items-center justify-center", e.applied ? "bg-ok text-on-ok" : "bg-bad text-on-bad")}>{e.applied ? "✓" : "×"}</span>
+            <span className={cn("min-w-0", !e.applied && "text-muted line-through")}>{e.instruction}</span>
+            {e.note && <span className="ml-auto shrink-0 text-xs text-bad">{e.note}</span>}
+          </li>
+        ))}
+      </ul>
+      {draft.unmatched && <p className="mt-2 text-xs text-bad">That change could not be found in the email. Check the wording and try again.</p>}
     </div>
   );
 }
@@ -117,6 +155,8 @@ export function ProposalCard({ card, onApply, onCancel, onEdit, onTweak }: { car
           </ul>
         )}
         {p.variables && p.variables.length > 0 && <VariablesSection variables={p.variables} onTweak={state === "pending" ? onTweak : undefined} gapId={gapId} showGap={state === "pending"} />}
+        {p.draft && <DraftEdits draft={p.draft} />}
+        {p.import && <ImportSummary imp={p.import} />}
         {p.diff && <Diff d={p.diff} />}
         {p.preview && <Preview p={p.preview} />}
       </div>

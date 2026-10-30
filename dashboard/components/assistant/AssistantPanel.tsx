@@ -68,7 +68,18 @@ function Message({ m, last, busy, phase, onApply, onCancel, onEdit, onDraft, onA
   m: Msg; last: boolean; busy: boolean; phase: ReturnType<typeof useAssistant>["phase"];
   onApply: (pid: string, confirmed: boolean) => void; onCancel: (pid: string) => void; onEdit: (title: string) => void; onDraft: (text: string) => void; onAsk: (t: string) => void;
 }) {
-  if (m.role === "user") return <li className="flex justify-end"><p className="max-w-[85%] whitespace-pre-wrap break-words rounded-lg bg-surface-2 px-3 py-2 text-base">{m.text}</p></li>;
+  if (m.role === "user") return (
+    <li className="flex justify-end">
+      <div className="max-w-[85%] space-y-1.5">
+        {m.text && <p className="whitespace-pre-wrap break-words rounded-lg bg-surface-2 px-3 py-2 text-base">{m.text}</p>}
+        {m.attachments?.map((a, i) => (
+          <p key={i} className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted">
+            {a.kind === "csv" ? `📎 ${a.name} (${a.count} contacts)` : a.kind === "json" ? `📎 ${a.name} (JSON)` : `📎 ${a.name} (${a.kind})`}
+          </p>
+        ))}
+      </div>
+    </li>
+  );
   const running = busy && last, { body, next } = splitNext(m.text);
   return (
     <li className="flex gap-2.5">
@@ -159,7 +170,7 @@ export function AssistantLauncher() {
           <div className="sr-only" role="status" aria-live="polite">{announce}</div>
 
           <footer className={cn("space-y-2 border-t border-border px-3 pb-3 pt-2.5")}>
-            <Composer busy={a.busy} disabled={off} model={status?.model?.chain?.[0]} draft={draft} setDraft={setDraft} onSend={(t) => void a.send(t)} onStop={a.stop} inputRef={input} />
+            <Composer busy={a.busy} disabled={off} model={status?.model?.chain?.[0]} draft={draft} setDraft={setDraft} onSend={(t, atts) => void a.send(t, atts)} onStop={a.stop} inputRef={input} />
             <UsageLine stats={lastStats} status={status} />
           </footer>
         </D.Content>

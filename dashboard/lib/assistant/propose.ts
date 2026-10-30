@@ -4,9 +4,11 @@ import type { Schema } from "./catalogue";
 import { clip, compactLint } from "./compact";
 import { apiErr, fail, read, type Ctx, type Out } from "./core";
 import { createHash } from "node:crypto";
+import { applyDraftEdits, normalizeDraftEdits, type DraftState } from "./draft";
 import { GO_LIVE_SUMMARY, GO_LIVE_TITLE, goLiveNext, isGoLive } from "./errors";
-import { goLivePending, putProposal, type Step } from "./proposals";
-import type { Proposal } from "./types";
+import { findPendingByKey, goLivePending, putProposal, type Step } from "./proposals";
+import type { HtmlAttachment, JsonAttachment, MjmlAttachment, TextAttachment } from "./attachments";
+import type { Attachment, Proposal } from "./types";
 import { findPlaceholders, plainValues, varNames, type Val } from "./variables";
 
 const enc = encodeURIComponent;
@@ -198,7 +200,34 @@ const proposeBroadcast: Builder = async (a, ctx) => {
   let from = isStr(a.from) ? a.from.trim() : undefined;
   if (!from) { const s = await read(ctx, "GET", "/v1/settings"); from = s.data?.default_from || undefined; }
   if (!from) return fail("missing_sender", "No from address given and no default sender is set.", "Ask the user which sender to use.");
-  const base = { template_id: t.data.id ?? a.template, from, stream: "marketing", ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.max_per_day > 0 && { max_per_day: Math.floor(a.max_per_day) }) };
+
+  // Draft editing: apply natural-language edits to the rendered HTML, then import it as a one-off template.
+  const rawEdits: string[] = Array.isArray(a?.draft_edits) ? a.draft_edits.filter((x: unknown) => isStr(x)) : [];
+  let draft: DraftState | undefined;
+  const key = `send:broadcast:${a.template}:${from.toLowerCase()}:${list ? `list:${list}` : emails.map((e) => e.toLowerCase()).sort().join(",")}`;
+  let templateId = t.data.id ?? a.template;
+  if (rawEdits.length) {
+    const prev = findPendingByKey(ctx.sid, key);
+    const prevDraft = prev?.card.draft;
+    let recipient: any = emails.length ? { email: emails[0], first_name: "Alex" } : { email: "preview@example.com", first_name: "Alex" };
+    if (!emails.length) { const c = await read(ctx, "GET", `/v1/contacts?list=${enc(list!)}&limit=1`); if (c.data?.[0]) recipient = { email: c.data[0].email, first_name: c.data[0].first_name, last_name: c.data[0].last_name }; }
+    const pv = await read(ctx, "POST", "/v1/broadcasts/preview", { template_id: t.data.id, stream: "marketing", recipient });
+    const original = pv.error ? "" : (pv.data?.html ?? "");
+    const norm = normalizeDraftEdits(prevDraft, rawEdits);
+    if (norm.reset) {
+      draft = { original, current: original, edits: [{ instruction: "start from the template again", applied: true, note: "Reset to the template." }] };
+    } else {
+      const allEdits = prevDraft && !norm.undo ? [...prevDraft.edits.filter((e) => e.applied).map((e) => e.instruction), ...norm.instructions] : norm.instructions;
+      draft = await applyDraftEdits(ctx, original, allEdits);
+    }
+    if (draft.current) {
+      const name = `Draft edit of ${t.data.name ?? t.data.alias}`;
+      const imp = await read(ctx, "POST", "/v1/templates/import", { format: "html", name, content: draft.current, stream: "marketing" });
+      if (!imp.error) templateId = imp.data?.id ?? templateId;
+    }
+  }
+
+  const base = { template_id: templateId, from, stream: "marketing", ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(a.max_per_day > 0 && { max_per_day: Math.floor(a.max_per_day) }) };
   const dcols = plainValues(a.data, "data");
   if ("error" in dcols) return fail("invalid_request", dcols.error, "Give each column text, a number or true/false (an empty string hides an optional one).");
   const data = dcols.ok, hasData = !list && Object.keys(data).length > 0; // shared columns for explicit recipients: {{ data.x }}
@@ -214,17 +243,20 @@ const proposeBroadcast: Builder = async (a, ctx) => {
   const pv = await read(ctx, "POST", "/v1/broadcasts/preview", { template_id: base.template_id, ...(base.subject && { subject: base.subject }), stream: "marketing", recipient });
   const sch = dry.data.schedule, when = sch?.first_at ? `${String(sch.first_at).slice(0, 16).replace("T", " ")} to ${String(sch.last_at).slice(0, 16).replace("T", " ")}` : "";
   const dv = draftedVariables(hasData ? Object.keys(data).map((k) => `data.${k}`) : [], Object.fromEntries(Object.entries(hasData ? data : {}).map(([k, v]) => [`data.${k}`, v])), { subject: a.subject, from });
-  const warnings = [...(await senderWarning(ctx, from)), ...(pv.error ? [`Preview failed: ${pv.error.message}`] : []), ...(sample ? ["Preview uses a sample recipient."] : []), ...sandbox(ctx),
+  const warnings: string[] = [...(await senderWarning(ctx, from)), ...(pv.error ? [`Preview failed: ${pv.error.message}`] : []), ...(sample ? ["Preview uses a sample recipient."] : []), ...sandbox(ctx),
     ...(sch?.daily_cap ? [`Paced at ${sch.daily_cap} per day.`] : []), ...dv.warnings];
+  if (draft) warnings.unshift("Edited for this send — template unchanged.");
   return propose(ctx, {
-    kind: "broadcast", risk: "sends", warnings, link: undefined, linkKind: "broadcasts", variables: dv.variables.length ? dv.variables : undefined, key: `send:broadcast:${a.template}:${from.toLowerCase()}:${list ? `list:${list}` : emails.map((e) => e.toLowerCase()).sort().join(",")}`,
+    kind: "broadcast", risk: "sends", warnings, link: undefined, linkKind: "broadcasts", variables: dv.variables.length ? dv.variables : undefined, key,
     confirm: liveConfirm(ctx, `This will email ${plural(n, "real person").replace("persons", "people")}.`),
     calls: [{ method: "POST", path: "/v1/broadcasts", body: { ...body, dry_run: false }, label: "Send broadcast" }],
     title: `Broadcast "${t.data.name ?? t.data.alias}" to ${list ? `list "${list}"` : plural(emails.length, "address")}`,
-    summary: `Sends from ${from} to ${plural(n, "recipient")}${when ? `, spread over ${when}` : ""}. Approvals, go-live and the kill switch still apply.`,
+    summary: draft ? `Sends the edited broadcast now. ${draft.edits.filter((e) => e.applied).length} edit${draft.edits.filter((e) => e.applied).length === 1 ? "" : "s"} applied.` : `Sends from ${from} to ${plural(n, "recipient")}${when ? `, spread over ${when}` : ""}. Approvals, go-live and the kill switch still apply.`,
     audience: { count: n, skipped: sk, schedule: when || undefined },
     preview: pv.error ? undefined : { subject: pv.data.subject, html: pv.data.html },
-  }, { audience: n, skipped: sk, schedule: when || undefined, ...(dv.variables.length && varNote(dv.variables, dv.placeholders)) });
+    draft,
+    diff: draft ? { label: "Rendered HTML", before: draft.original, after: draft.current } : undefined,
+  }, { audience: n, skipped: sk, schedule: when || undefined, ...(dv.variables.length && varNote(dv.variables, dv.placeholders)), ...(draft && { draft_edits: draft.edits.map((e) => ({ instruction: e.instruction, applied: e.applied })) }) });
 };
 
 const proposeEmail: Builder = async (a, ctx) => {
@@ -249,30 +281,62 @@ const proposeEmail: Builder = async (a, ctx) => {
   }
   const used = names.length ? Object.fromEntries(Object.entries(given).filter(([k]) => names.includes(k))) : given; // values the template never reads are not sent
   const tref = tid ? { id: tid, ...(Object.keys(used).length && { variables: used }) } : undefined;
-  const body: Record<string, unknown> = { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(tref && { template: tref }), ...(isStr(a.html) && { html: a.html }), ...(isStr(a.text) && { text: a.text }) };
+  const baseBody: Record<string, unknown> = { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), ...(tref && { template: tref }), ...(isStr(a.html) && { html: a.html }), ...(isStr(a.text) && { text: a.text }) };
+
+  // Draft editing: apply natural-language edits to the rendered HTML for this send only.
+  const rawEdits: string[] = Array.isArray(a?.draft_edits) ? a.draft_edits.filter((x: unknown) => isStr(x)) : [];
+  let draft: DraftState | undefined;
+  const key = `send:email:${tid ?? hash(isStr(a.subject) ? a.subject : "")}:${isStr(a.from) ? a.from.toLowerCase() : ""}:${to.map((e) => e.toLowerCase()).sort().join(",")}`;
+  if (rawEdits.length) {
+    const prev = findPendingByKey(ctx.sid, key);
+    const prevDraft = prev?.card.draft;
+    const original = prevDraft?.original ?? (await renderEmailHtml(ctx, tid, used, a.html));
+    const norm = normalizeDraftEdits(prevDraft, rawEdits);
+    if (norm.reset) {
+      draft = { original, current: original, edits: [{ instruction: "start from the template again", applied: true, note: "Reset to the template." }] };
+    } else {
+      const allEdits = prevDraft && !norm.undo ? [...prevDraft.edits.filter((e) => e.applied).map((e) => e.instruction), ...norm.instructions] : norm.instructions;
+      draft = await applyDraftEdits(ctx, original, allEdits);
+    }
+  }
+
+  const body: Record<string, unknown> = draft ? { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.transport_id) && { transport_id: a.transport_id }), ...(isStr(a.subject) && { subject: a.subject }), html: draft.current } : baseBody;
   const dry = await read(ctx, "POST", "/v1/emails", { ...body, dry_run: true }, 0);
   if (isGoLive(dry.error)) return goLive(ctx, "email", `email to ${cut(to.join(", "), 80)}${isStr(a.from) ? ` from ${cut(a.from, 60)}` : ""}${isStr(a.subject) ? ` ("${cut(a.subject, 50)}")` : ""}`);
   if (dry.error) return apiErr(dry.error);
   let d = dry.data ?? {};
-  if (tid) { // a dry run does not render templates (the worker does, at send time): render with the drafted variables, as the recipient will see it
+  if (tid && !draft) { // a dry run does not render templates (the worker does, at send time): render with the drafted variables, as the recipient will see it
     const r = await read(ctx, "POST", `/v1/templates/${enc(tid)}/preview`, { variables: used }, 0);
     if (r.error) return fail(r.error.code, `The template does not render with these variables: ${r.error.message}`, "Give every variable a value (an empty string hides an optional one), then propose again.");
     d = { ...d, ...r.data, rendered: undefined };
     if (!names.length) names = varNames(r.data?.variables);
   }
-  const html = d.html ?? d.rendered?.html ?? d.preview?.html ?? (isStr(a.html) ? a.html : ""), subject = (isStr(a.subject) ? a.subject : undefined) ?? d.subject ?? d.rendered?.subject ?? "";
+  const html = draft ? draft.current : (d.html ?? d.rendered?.html ?? d.preview?.html ?? (isStr(a.html) ? a.html : ""));
+  const subject = (isStr(a.subject) ? a.subject : undefined) ?? d.subject ?? d.rendered?.subject ?? "";
   const lint = (d.lint ?? d.rendered?.lint ?? []).map((l: any) => ({ sev: l.severity, msg: `${l.rule}: ${l.message}` }));
-  const dv = draftedVariables(names, given, { subject: a.subject, from: a.from, text: a.text, html: a.html });
+  const dv = draftedVariables(names, given, { subject: a.subject, from: a.from, text: a.text, html: draft ? draft.current : a.html });
+  const warnings: string[] = [...(isStr(a.from) ? await senderWarning(ctx, a.from) : []), ...sandbox(ctx), ...dv.warnings];
+  if (draft) warnings.unshift("Edited for this send — template unchanged.");
   return propose(ctx, {
-    kind: "email", risk: "sends", lint, warnings: [...(isStr(a.from) ? await senderWarning(ctx, a.from) : []), ...sandbox(ctx), ...dv.warnings], link: undefined,
-    variables: dv.variables.length ? dv.variables : undefined, key: `send:email:${tid ?? hash(subject)}:${isStr(a.from) ? a.from.toLowerCase() : ""}:${to.map((e) => e.toLowerCase()).sort().join(",")}`,
+    kind: "email", risk: "sends", lint, warnings, link: undefined,
+    variables: dv.variables.length ? dv.variables : undefined, key,
     confirm: liveConfirm(ctx, `This will email ${to.length === 1 ? "1 real person" : `${to.length} real people`}.`),
     calls: [{ method: "POST", path: "/v1/emails", body, label: "Send email" }],
     title: `Send "${clip(subject || "(template subject)", 50)}" to ${to[0]}${to.length > 1 ? ` and ${to.length - 1} more` : ""}`,
-    summary: "Sends one email now. Approvals, go-live and the kill switch still apply.",
-    preview: html ? { subject, html } : undefined, items: to,
-  }, { lint_issues: lint.length, ...(dv.variables.length && varNote(dv.variables, dv.placeholders)) });
+    summary: draft ? `Sends the edited email now. ${draft.edits.filter((e) => e.applied).length} edit${draft.edits.filter((e) => e.applied).length === 1 ? "" : "s"} applied.` : "Sends one email now. Approvals, go-live and the kill switch still apply.",
+    preview: html ? { subject, html } : undefined, items: to, draft,
+    diff: draft ? { label: "Rendered HTML", before: draft.original, after: draft.current } : undefined,
+  }, { lint_issues: lint.length, ...(dv.variables.length && varNote(dv.variables, dv.placeholders)), ...(draft && { draft_edits: draft.edits.map((e) => ({ instruction: e.instruction, applied: e.applied })) }) });
 };
+
+async function renderEmailHtml(ctx: Ctx, tid: string | undefined, variables: Record<string, Val>, directHtml?: unknown): Promise<string> {
+  if (isStr(directHtml)) return directHtml;
+  if (tid) {
+    const r = await read(ctx, "POST", `/v1/templates/${enc(tid)}/preview`, { variables }, 0);
+    return r.error ? "" : (r.data?.html ?? "");
+  }
+  return "";
+}
 
 // ---- lists and contacts --------------------------------------------------------------------------------------------
 const proposeList: Builder = async (a, ctx) => {
@@ -316,9 +380,101 @@ const proposeContacts: Builder = async (a, ctx) => {
   });
 };
 
+function contactsFromCsv(rows: Record<string, string>[]): any[] {
+  return rows.map((r) => {
+    const out: Record<string, unknown> = { email: r.email };
+    if (r.first_name) out.first_name = r.first_name;
+    if (r.last_name) out.last_name = r.last_name;
+    if (r.timezone) out.timezone = r.timezone;
+    const props = Object.fromEntries(Object.entries(r).filter(([k]) => !["email", "first_name", "last_name", "timezone"].includes(k)));
+    if (Object.keys(props).length) out.properties = props;
+    return out;
+  });
+}
+
+const proposeImport: Builder = async (a, ctx) => {
+  const csvs = (ctx.attachments ?? []).filter((at): at is Extract<Attachment, { kind: "csv" }> => at.kind === "csv");
+  if (!csvs.length) return fail("no_attachment", "No CSV file is attached.", "Attach a CSV with an 'email' column first.");
+  const listName = isStr(a.list_name) ? a.list_name.trim() : undefined;
+  const rows = contactsFromCsv(csvs[0].rows);
+  if (!rows.length) return fail("empty_attachment", "The attached CSV has no importable rows.");
+  if (rows.length > 5000) return fail("too_large", "At most 5000 contacts per import.");
+  const body: Record<string, unknown> = { contacts: rows, dry_run: true };
+  if (listName) body.list_name = listName;
+  const dry = await read(ctx, "POST", "/v1/contacts/import", body, 0);
+  if (dry.error) return apiErr(dry.error);
+  const summary = dry.data?.summary ?? { new: 0, update: 0, unchanged: 0, skipped: 0 };
+  const list = dry.data?.list;
+  const rawRows = dry.data?.rows ?? [];
+  const importRows: { index: number; email: string; status: string; reason?: string }[] = rawRows.slice(0, 20).map((r: any) => ({ index: r.index, email: r.email, status: r.status, reason: r.reason }));
+  return propose(ctx, {
+    kind: "import", risk: "safe", warnings: [], link: "/contacts",
+    title: listName ? `Import ${rows.length} contacts into list "${listName}"` : `Import ${rows.length} contacts`,
+    summary: `Adds ${summary.new} new, updates ${summary.update}, skips ${summary.skipped}. The template is unchanged.`,
+    calls: [{ method: "POST", path: "/v1/contacts/import", body: { contacts: rows, ...(listName && { list_name: listName }) }, label: "Import contacts" }],
+    import: { summary, list, rows: importRows, dry_run: true },
+  });
+};
+
+const proposeEmailBody: Builder = async (a, ctx) => {
+  const to: string[] = Array.isArray(a?.to) ? a.to.map(String) : [];
+  if (!to.length || to.length > 5 || to.some((e) => !EMAIL.test(e))) return fail("invalid_request", "to must be 1-5 valid addresses.");
+  const files = ctx.attachments ?? [];
+  const htmlFile = files.find((at): at is HtmlAttachment => at.kind === "html");
+  const mjmlFile = files.find((at): at is MjmlAttachment => at.kind === "mjml");
+  const textFile = files.find((at): at is TextAttachment => at.kind === "text");
+  const html = htmlFile ?? mjmlFile;
+  const text = textFile;
+  if (!html && !text) return fail("no_attachment", "No HTML, MJML or text file is attached.", "Attach a file to use as the email body.");
+  const htmlContent = html?.content;
+  const textContent = text?.content;
+  const body: Record<string, unknown> = { to, ...(isStr(a.from) && { from: a.from }), ...(isStr(a.subject) && { subject: a.subject }) };
+  if (htmlContent) body.html = htmlContent;
+  if (textContent) body.text = textContent;
+  const dry = await read(ctx, "POST", "/v1/emails", { ...body, dry_run: true }, 0);
+  if (isGoLive(dry.error)) return goLive(ctx, "email", `email to ${cut(to.join(", "), 80)}${isStr(a.from) ? ` from ${cut(a.from, 60)}` : ""}${isStr(a.subject) ? ` ("${cut(a.subject, 50)}")` : ""}`);
+  if (dry.error) return apiErr(dry.error);
+  const d = dry.data ?? {};
+  const subject = (isStr(a.subject) ? a.subject : undefined) ?? d.subject ?? "";
+  const previewHtml = htmlContent ?? "";
+  const kindLabel = html ? (html.kind === "html" ? "HTML" : "MJML") : "text";
+  return propose(ctx, {
+    kind: "email_body", risk: "sends", warnings: [...(isStr(a.from) ? await senderWarning(ctx, a.from) : []), ...sandbox(ctx)], link: undefined, key: `send:email:body:${isStr(a.from) ? a.from.toLowerCase() : ""}:${to.map((e) => e.toLowerCase()).sort().join(",")}`,
+    confirm: liveConfirm(ctx, `This will email ${to.length === 1 ? "1 real person" : `${to.length} real people`}.`),
+    calls: [{ method: "POST", path: "/v1/emails", body, label: "Send email" }],
+    title: `Send attached ${kindLabel} to ${to[0]}${to.length > 1 ? ` and ${to.length - 1} more` : ""}`,
+    summary: "Sends the attached file as the email body. Nothing is saved as a template.",
+    preview: previewHtml ? { subject, html: previewHtml } : undefined, items: to,
+  });
+};
+
+const proposeTemplateImport: Builder = async (a, ctx) => {
+  const name = isStr(a?.name) ? a.name.trim() : undefined;
+  if (!name) return fail("invalid_request", "name is required for the new template draft.");
+  const files = ctx.attachments ?? [];
+  const htmlFile = files.find((at): at is HtmlAttachment => at.kind === "html");
+  const mjmlFile = files.find((at): at is MjmlAttachment => at.kind === "mjml");
+  const jsonFile = files.find((at): at is JsonAttachment => at.kind === "json");
+  if (!htmlFile && !mjmlFile && !jsonFile) return fail("no_attachment", "No HTML, MJML or JSON file is attached.", "Attach a file to save as a template draft.");
+  let format: "html" | "mjml" | "json", content: string;
+  if (htmlFile) { format = "html"; content = htmlFile.content; }
+  else if (mjmlFile) { format = "mjml"; content = mjmlFile.content; }
+  else { format = "json"; content = JSON.stringify(jsonFile!.content); }
+  const lint = await read(ctx, "POST", "/v1/content/lint", { format, [format]: content, ...(isStr(a.subject) && { subject: a.subject }) });
+  const lintIssues = lint.error ? [] : (lint.data?.lint ?? []).map((l: any) => ({ sev: l.severity, msg: `${l.rule}: ${l.message}` }));
+  return propose(ctx, {
+    kind: "template", risk: "safe", warnings: [], linkKind: "templates",
+    title: `Create template draft "${name}"`,
+    summary: `Imports the attached ${format.toUpperCase()} file as a new template draft. Nothing is published; sends keep using the live version.`,
+    calls: [{ method: "POST", path: "/v1/templates/import", body: { format, name, content, ...(isStr(a.subject) && { subject: a.subject }) }, label: "Create template draft" }],
+    lint: lintIssues.length ? lintIssues : undefined,
+  });
+};
+
 export const PROPOSE: Record<string, Builder> = {
   propose_template: proposeTemplate, propose_automation: proposeAutomation, propose_automation_state: proposeAutomationState,
   propose_broadcast: proposeBroadcast, propose_email: proposeEmail, propose_list: proposeList, propose_contacts: proposeContacts,
+  propose_import: proposeImport, propose_email_body: proposeEmailBody, propose_template_import: proposeTemplateImport,
 };
 
 const s = (type: string, extra: Partial<Schema> = {}): Schema => ({ type, ...extra });
@@ -331,8 +487,11 @@ export const PROPOSE_SCHEMAS = {
   propose_automation: T("propose_automation", "Propose creating/updating an automation (draft, not activated). Send the full definition; trigger is an event name.",
     o({ definition: o({ name: s("string"), trigger: s("string"), entry_rule: s("string"), goal: s("object"), approval: s("string"), steps: s("array", { items: o({ key: s("string"), type: s("string"), config: s("object"), next: {} }, ["key", "type"]) }) }, ["name", "steps"]) }, ["definition"])),
   propose_automation_state: T("propose_automation_state", "Propose activating, pausing or resuming an automation.", o({ id: s("string"), action: s("string", { enum: ["activate", "pause", "resume"] }), backfill_suppress: s("boolean") }, ["id", "action"])),
-  propose_broadcast: T("propose_broadcast", "Propose sending a published template to a list or emails (dry run shown first). from: an address from list kind=sender. data: extra columns for emails, used as {{ data.x }}.", o({ template: s("string"), from: s("string"), transport_id: s("string"), subject: s("string"), list: s("string"), emails: strs, data: s("object"), max_per_day: s("integer") }, ["template"])),
-  propose_email: T("propose_email", "Propose sending one email to 1-5 addresses. from: an address from list kind=sender. For a template give template.variables with a value for every variable.", o({ to: strs, from: s("string"), transport_id: s("string"), subject: s("string"), template: o({ id: s("string"), variables: s("object") }), html: s("string"), text: s("string") }, ["to"])),
+  propose_broadcast: T("propose_broadcast", "Propose sending a published template to a list or emails (dry run shown first). from: an address from list kind=sender. data: extra columns for emails, used as {{ data.x }}. For follow-up edits to the rendered body, include all previous successful draft_edits plus the new instruction; to reset, omit draft_edits.", o({ template: s("string"), from: s("string"), transport_id: s("string"), subject: s("string"), list: s("string"), emails: strs, data: s("object"), max_per_day: s("integer"), draft_edits: s("array", { items: s("string"), description: "Natural-language edits to apply to the rendered HTML for this send only; the template is unchanged." }) }, ["template"])),
+  propose_email: T("propose_email", "Propose sending one email to 1-5 addresses. from: an address from list kind=sender. For a template give template.variables with a value for every variable. For follow-up edits to the rendered body, include all previous successful draft_edits plus the new instruction; to reset, omit draft_edits.", o({ to: strs, from: s("string"), transport_id: s("string"), subject: s("string"), template: o({ id: s("string"), variables: s("object") }), html: s("string"), text: s("string"), draft_edits: s("array", { items: s("string"), description: "Natural-language edits to apply to the rendered HTML for this send only; the template is unchanged." }) }, ["to"])),
   propose_list: T("propose_list", "Propose creating/updating a contact list or rule segment, optionally adding emails.", o({ id: s("string"), name: s("string"), filter: s("object"), emails: strs })),
   propose_contacts: T("propose_contacts", "Propose creating/updating up to 50 contacts by email.", o({ contacts: s("array", { items: o({ email: s("string"), first_name: s("string"), last_name: s("string"), timezone: s("string"), properties: s("object") }, ["email"]) }) }, ["contacts"])),
+  propose_import: T("propose_import", "Propose importing contacts from an attached CSV. Use when the user attaches a CSV and says import, or after an import says 'send the welcome template to that list'.", o({ list_name: s("string") })),
+  propose_email_body: T("propose_email_body", "Propose sending an attached HTML, MJML or text file as a single email body.", o({ to: strs, from: s("string"), subject: s("string") }, ["to"])),
+  propose_template_import: T("propose_template_import", "Propose saving an attached HTML, MJML or JSON file as a new template draft.", o({ name: s("string"), subject: s("string") }, ["name"])),
 };

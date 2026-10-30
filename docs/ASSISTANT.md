@@ -10,6 +10,8 @@ It runs on free, open-weight OpenRouter models only. Nothing paid is ever called
 - Type `/` for commands (`/automation`, `/broadcast`, `/fix-template`, `/contacts`, `/bounce`) and `@template:name`, `@list:name`, `@automation:name` to name existing items.
 - A proposal card shows what Apply will do: a line diff (templates, automations, rules), a sandboxed preview of the email, lint findings, and for sends the audience count, skipped rows and schedule from a server-side dry run. **Review the card, not the chat text**: the card is built by the server from the real API responses.
 - **Edit** puts the card title in the composer so you can ask for a change; **Cancel** drops it. A card expires after 15 minutes.
+- **Edit a send draft without changing the template.** After a send is proposed, say things like "remove the benefits section" or "shorten the intro". The assistant edits the rendered copy for this one send, the card shows "Edited for this send — template unchanged" with a diff, and Apply sends the edited version. Follow-up changes add to the same draft; say "undo the last change" or "start from the template again" to revert. If the requested change can't be found in the email, the card says so instead of skipping it quietly.
+- **Attach files** with the paperclip button, drag-and-drop, or paste. CSV, HTML, MJML, plain text and JSON are supported (up to 5 MB each, 3 at a time). CSVs are read in your browser; the AI sees a short summary with emails masked, then you get an import card showing new, updated and skipped contacts plus the list they'll go into. HTML/MJML can be sent as this email's body or saved as a new template draft. JSON files can be saved as template drafts.
 - The footer shows the model, tokens in/out, requests and timings of the last reply. **AI usage** links to Settings.
 - The conversation lives in your browser tab (sessionStorage); clear it with the bin icon.
 
@@ -42,12 +44,12 @@ Generated from [`lib/assistant/tools.ts`](../dashboard/lib/assistant/tools.ts) a
 | Group (when exposed) | Read (automatic) | Write (proposal only) |
 |---|---|---|
 | core (every turn) | `list` (template, automation, email, contact, approval, broadcast, list, event, domain, sender), `get` (template, automation, email, contact, approval, broadcast, domain, account, health, settings), `get_docs` (personalization, automations, broadcasts, deliverability, contacts), `use_tools` | none |
-| `templates` | `template_preview`, `content_lint` | `propose_template` (new draft, or find/replace edits to an existing one) |
+| `templates` | `template_preview`, `content_lint` | `propose_template` (new draft, or find/replace edits to an existing one), `propose_template_import` (save an attached HTML/MJML/JSON as a draft) |
 | `automations` (implies `templates`) | `automation_runs`, `automation_simulate` | `propose_automation` (draft), `propose_automation_state` (activate, pause, resume) |
-| `broadcasts` | `send_context` (template variables, recipients, sender in one read) | `propose_broadcast` (template to a list or up to 200 addresses, optional shared `data` columns; dry run first), `propose_email` (1 to 5 addresses; `template.variables` drafted by the assistant) |
-| `contacts` | `segment_preview` | `propose_list` (list or rule segment, optional members), `propose_contacts` (up to 50 upserts) |
+| `broadcasts` | `send_context` (template variables, recipients, sender in one read) | `propose_broadcast` (template to a list or up to 200 addresses, optional shared `data` columns; dry run first), `propose_email` (1 to 5 addresses; `template.variables` drafted by the assistant), `propose_email_body` (send an attached HTML/MJML/text as one email) |
+| `contacts` | `segment_preview` | `propose_list` (list or rule segment, optional members), `propose_contacts` (up to 50 upserts), `propose_import` (CSV import from an attached file) |
 
-`propose_broadcast`, `propose_email` and `propose_automation_state` (activate/resume) are risk "sends". Everything else cannot email anyone.
+`propose_broadcast`, `propose_email`, `propose_email_body` and `propose_automation_state` (activate/resume) are risk "sends". Everything else cannot email anyone. Draft edits on `propose_email`/`propose_broadcast` are still risk "sends" but do not modify the underlying template.
 
 ## Architecture
 

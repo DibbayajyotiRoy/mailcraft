@@ -1,9 +1,10 @@
 // Shared by the read tools and the proposal builders: one API-call helper with a short per-session read cache.
 import { request } from "@/lib/api";
 import { clip } from "./compact";
+import type { Attachment } from "./attachments";
 import type { Proposal } from "./types";
 
-export type Ctx = { base: string; key: string; sid: string; env: "test" | "live" };
+export type Ctx = { base: string; key: string; sid: string; env: "test" | "live"; attachments?: Attachment[] };
 /** A tool's result: an error, data for the model, or a proposal (`model` is the short text the model gets back). */
 export type Out =
   | { error: { code: string; message: string; hint?: string } }

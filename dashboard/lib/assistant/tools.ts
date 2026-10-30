@@ -89,10 +89,10 @@ const CORE: ToolDef[] = [
 export const GROUPS = ["templates", "automations", "broadcasts", "contacts"] as const;
 export type Group = (typeof GROUPS)[number];
 const GROUP_TOOLS: Record<Group, ToolDef[]> = {
-  templates: [fromCat("template_preview"), fromCat("content_lint"), PROPOSE_SCHEMAS.propose_template],
+  templates: [fromCat("template_preview"), fromCat("content_lint"), PROPOSE_SCHEMAS.propose_template, PROPOSE_SCHEMAS.propose_template_import],
   automations: [fromCat("automation_runs"), fromCat("automation_simulate"), PROPOSE_SCHEMAS.propose_automation, PROPOSE_SCHEMAS.propose_automation_state],
-  broadcasts: [T("send_context", "Template, recipients' contact fields and sender name for a send, in one call.", S({ template: str, to: { type: "array", items: str }, from: str }, ["template"])), PROPOSE_SCHEMAS.propose_broadcast, PROPOSE_SCHEMAS.propose_email],
-  contacts: [fromCat("segment_preview"), PROPOSE_SCHEMAS.propose_list, PROPOSE_SCHEMAS.propose_contacts],
+  broadcasts: [T("send_context", "Template, recipients' contact fields and sender name for a send, in one call.", S({ template: str, to: { type: "array", items: str }, from: str }, ["template"])), PROPOSE_SCHEMAS.propose_broadcast, PROPOSE_SCHEMAS.propose_email, PROPOSE_SCHEMAS.propose_email_body],
+  contacts: [fromCat("segment_preview"), PROPOSE_SCHEMAS.propose_list, PROPOSE_SCHEMAS.propose_contacts, PROPOSE_SCHEMAS.propose_import],
 };
 const KEYWORDS: Record<Group, RegExp> = {
   templates: /templat|subject|html|mjml|lint|design|layout|copy|preheader|footer|wording|rewrite|fix/i,
@@ -117,6 +117,7 @@ const ACT: Record<string, string> = {
   get_docs: "Checking the docs", use_tools: "Getting ready", template_preview: "Rendering a preview", content_lint: "Checking lint", automation_runs: "Reading automation runs",
   automation_simulate: "Simulating the automation", segment_preview: "Counting matches", propose_template: "Drafting the template", propose_automation: "Drafting the automation",
   propose_automation_state: "Preparing the automation change", send_context: "Reading the send details", propose_broadcast: "Preparing the broadcast preview", propose_email: "Preparing the email preview", propose_list: "Preparing the list change", propose_contacts: "Preparing the contacts",
+  propose_import: "Preparing the contact import", propose_email_body: "Preparing the email body", propose_template_import: "Importing the template",
 };
 export function activity(name: string, a: any): { phase: Phase; label: string } {
   if (name === "list") return { phase: "reading", label: `Reading ${NOUN[a?.kind] ?? "items"}…` };
