@@ -32,7 +32,8 @@ function maskEmail(email: string): string {
 }
 
 function parseCsv(text: string, name: string): CsvAttachment | ParseError {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+  const cleaned = text.replace(/^\uFEFF/, ""); // strip UTF-8 BOM
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim() !== "");
   if (!lines.length) return { name, reason: "empty", message: "The CSV file is empty." };
   // Simple RFC 4180-ish parser: respects quoted fields with commas/newlines.
   const row = (line: string): string[] => {
