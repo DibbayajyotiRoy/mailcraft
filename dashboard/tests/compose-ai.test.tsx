@@ -215,6 +215,14 @@ describe("Write with AI", () => {
     expect(box("first_name").value).toBe("");
   });
 
+  it("the daily free-request cap names when it resets, from the resetAt the route sends", async () => {
+    const s = stream(); vi.stubGlobal("fetch", s.fetch);
+    setup();
+    fireEvent.keyDown(ask(), { key: "Enter" });
+    await s.feed({ error: { code: "rate_limited", message: "Today's free AI requests are used up.", hint: "Settings → AI usage shows where your key stands.", resetAt: Date.now() + (4 * 60 + 30) * 60_000 } });
+    expect((await within(dialog()).findByRole("alert")).textContent).toMatch(/Today's free AI requests are used up\. They reset at \d{1,2}:\d{2}.* \(in 4h (29|30)m\)\./);
+  });
+
   it("an error keeps what was written and offers Regenerate; with nothing written it returns to the prompt", async () => {
     const s = stream(); vi.stubGlobal("fetch", s.fetch);
     setup();

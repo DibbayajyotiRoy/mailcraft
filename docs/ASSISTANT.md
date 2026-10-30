@@ -97,9 +97,14 @@ Order: pinned model first (if any), then by measured speed, the fastest healthy 
 
 ### Free-tier limits
 
-Free models have per-minute and per-day request allowances, shared by everything using the key. mailcraft does not hard-code them; it shows what OpenRouter reports. **Settings → AI usage** (and `GET /api/assistant/status`) reads OpenRouter's key endpoint (`GET /key`, cached 60 s) and displays, as returned: label, credits used (total, today, week, month), credit limit, remaining, limit reset, `is_free_tier`, and the rate limit when OpenRouter reports a positive one (it reports `-1` and marks the field deprecated). The panel footer adds "N left on the key" when `limit_remaining` is a number.
+Free models have per-minute and per-day request allowances, shared by everything using the key. mailcraft does not hard-code them; it shows what OpenRouter reports. **Settings → AI usage** (and `GET /api/assistant/status`) reads OpenRouter's key endpoint (`GET /key`, cached 60 s) and displays, as returned: label, credits used (total, today, week, month), credit limit, **credit limit left**, credit limit reset, `is_free_tier`, and the rate limit when OpenRouter reports a positive one (it reports `-1` and marks the field deprecated).
 
-OpenRouter does not report how many requests were used today, so **Requests today** is a local tally of requests this dashboard process sent since 00:00 UTC. It resets on restart and does not include the API server's email-writing calls. Treat it as approximate.
+Two different numbers, never mixed up:
+
+- **Credit limit left** (`limit_remaining`) is *spend* on the key (a null limit hides it). It says nothing about free requests. The panel footer shows it as "Credit limit left: N" and only when it is a number.
+- **Free requests today** is the daily free-model allowance (50 per UTC day below 10 purchased credits, more above; not hard-coded). Source, in order: the `X-RateLimit-Limit/Remaining/Reset` of the latest OpenRouter response when it is newer than the cached `/key` (OpenRouter sends them on 429s; successful responses carry none, but if they ever do they are recorded too; a 429 body's `error.metadata.headers` is read as well), else `/key`'s `free_model_daily_requests` (`used`, `limit`, `remaining` for the UTC day). A free-models-per-day 429 forces remaining to 0 with the reset time from OpenRouter, or the next 00:00 UTC. Footer and card: "Free requests today: N of LIMIT left (from OpenRouter)", then the reset in the viewer's local time and relative ("resets 05:30 · in 9h 12m"). No extra requests are made; the numbers are per process and are lost on restart.
+
+When OpenRouter has given neither, the footer falls back to **~N used today (counted here)**: a local tally of requests this dashboard process sent since 00:00 UTC (it resets on restart and does not include the API server's email-writing calls). Treat it as approximate; it resets at 00:00 UTC.
 
 ## Token efficiency
 
@@ -146,7 +151,7 @@ In compose, point the dashboard at a mock on the host with `MAILCRAFT_ASSISTANT_
 | "The assistant is off" / `not_configured` (503) | `OPENROUTER_API_KEY` is not set on the dashboard server. Set it and restart the dashboard. Settings → AI usage says the same |
 | "OpenRouter rejected the API key" / `unauthorized` | The key is wrong, revoked or from another account. Settings → AI usage shows "OpenRouter rejected the key (401)". (A 401 `unauthenticated` from `/api/assistant` is your dashboard sign-in, not OpenRouter: sign in again) |
 | "Free models are rate-limited right now" / `rate_limited` | Per-minute limit: wait a minute. The key's allowance is shared with email writing |
-| "The free-model daily request limit is used up" | Daily allowance spent; it resets daily (UTC). Check Settings → AI usage. The assistant will not switch to a paid model; adding credits to the key does not change that |
+| "Today's free AI requests are used up. They reset at …" | Daily allowance spent; the message names the reset in your local time (OpenRouter's reset, else 00:00 UTC). Check Settings → AI usage. The assistant will not switch to a paid model; adding credits to the key does not change that |
 | "The assistant cannot start" / `model_not_free` | `MAILCRAFT_ASSISTANT_MODEL` is not in the allowed set. Unset it, or pick an id from the hint (the free list changes, models expire). `no_free_model`: none available right now, try later |
 | `model_unavailable`, `upstream_error`, `empty_completion`, `first_token_timeout` | That model failed; the assistant moves to the next one automatically. If every model fails, retry later: free providers are often busy |
 | "OpenRouter asked for credits" / `payment_required` | The key has a problem on openrouter.ai; free models should not need credits |

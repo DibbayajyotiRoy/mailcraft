@@ -91,8 +91,8 @@ export async function POST(req: Request) {
         if (last) console.warn(JSON.stringify({ evt: "compose_write_failed", code: last.code, status: last.status, detail: redact(last.message) }));
         if (last?.code === "truncated") send({ error: { code: "truncated", message: last.message, hint: "What was written is kept. Edit it, or Regenerate (a shorter request helps)." } });
         else {
-          const f = failure(last ?? new UpstreamError("upstream_error", "No model answered.")) as { code: string; message: string; hint?: string }; // always an error event
-          send({ error: { code: f.code, message: clip(f.message, 200), hint: f.hint } });
+          const f = failure(last ?? new UpstreamError("upstream_error", "No model answered.")) as { code: string; message: string; hint?: string; resetAt?: number }; // always an error event
+          send({ error: { code: f.code, message: clip(f.message, 200), hint: f.hint, resetAt: f.resetAt } }); // resetAt: the dialog words the daily-cap message in the viewer's time zone
         }
       } finally {
         try { c.close(); } catch { /* already closed */ }

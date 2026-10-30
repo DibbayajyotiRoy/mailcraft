@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { cn } from "@/lib/cn";
+import { nextUtcMidnight, resetLine, shown } from "@/lib/assistant/reset";
 import type { DoneStats } from "@/lib/assistant/types";
 import { Composer } from "./Composer";
 import { Markdown, splitNext } from "./Markdown";
@@ -29,15 +30,20 @@ export function starters(path: string): string[] {
 const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 const secs = (ms: number) => `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
 
-/** Footer line: model, tokens, requests and times of the last turn, plus the locally counted daily requests. */
-function UsageLine({ stats, status }: { stats?: DoneStats; status: Status | null }) {
+/** Footer line: model, tokens, requests and times of the last turn, then today's free requests (OpenRouter's number when it
+ *  has given one, else this dashboard's own tally, marked approximate) with the reset time, then the key's credit limit.
+ *  The credit limit is spend, not requests: it is never worded as requests left. */
+export function UsageLine({ stats, status, now = Date.now() }: { stats?: DoneStats; status: Status | null; now?: number }) {
+  const f = status?.free, tally = status?.requests_today, credit = status?.key?.limit_remaining;
+  const today = f ? `Free requests today: ${f.limit != null ? `${f.remaining} of ${f.limit}` : f.remaining} left (from OpenRouter)` : tally ? `~${tally} used today (counted here)` : "";
   const bits = [
     stats ? `${k(stats.prompt || stats.est_input)} in / ${k(stats.completion)} out` : "",
     stats ? `${stats.rounds} request${stats.rounds === 1 ? "" : "s"}` : "",
     stats?.ttft_ms ? `first token ${secs(stats.ttft_ms)}` : "",
     stats ? `${secs(stats.total_ms)} total` : "",
-    status?.requests_today ? `${status.requests_today} today (counted here)` : "",
-    typeof status?.key?.limit_remaining === "number" ? `${status.key.limit_remaining} left on the key` : "",
+    today,
+    today && resetLine(f?.resetAt ?? nextUtcMidnight(now), now),
+    typeof credit === "number" ? `Credit limit left: ${credit}` : "",
   ].filter(Boolean);
   return (
     <p className="flex flex-wrap items-center gap-x-2 text-xs text-subtle" aria-label="Usage of the last reply">
@@ -80,7 +86,7 @@ function Message({ m, last, busy, phase, onApply, onCancel, onEdit, onDraft, onA
       </div>
     </li>
   );
-  const running = busy && last, { body, next } = splitNext(m.text);
+  const running = busy && last, { body, next } = splitNext(m.text), err = m.error && shown(m.error);
   return (
     <li className="flex gap-2.5">
       {/* still avatar: the live one is in the header, and the orb below is this message's only moving part */}
@@ -89,8 +95,8 @@ function Message({ m, last, busy, phase, onApply, onCancel, onEdit, onDraft, onA
         <Steps steps={m.steps} running={running} phase={phase} />
         {body && <Markdown text={body} />}
         {m.stopped && <p className="text-sm text-muted">Stopped.</p>}
-        {m.error && (
-          <div role="alert" className="rounded-md bg-bad-bg px-3 py-2 text-sm text-bad"><p className="font-medium">{m.error.message}</p>{m.error.hint && <p>{m.error.hint}</p>}</div>
+        {err && (
+          <div role="alert" className="rounded-md bg-bad-bg px-3 py-2 text-sm text-bad"><p className="font-medium">{err.message}</p>{err.hint && <p>{err.hint}</p>}</div>
         )}
         {m.cards.map((c) => (
           <ProposalCard key={c.proposal.id} card={c} onApply={(ok) => onApply(c.proposal.id, ok)} onCancel={() => onCancel(c.proposal.id)} onEdit={() => onEdit(c.proposal.title)} onTweak={onDraft} />
@@ -125,7 +131,7 @@ export function AssistantLauncher() {
   const off = status?.configured === false || !!status?.model?.error;
   const lastStats = [...a.msgs].reverse().find((m) => m.stats)?.stats;
   const lastBot = a.msgs.at(-1);
-  const announce = a.busy ? a.phase?.label ?? "Thinking…" : lastBot?.role === "assistant" ? (lastBot.cards.length ? `Proposal ready: ${lastBot.cards.at(-1)!.proposal.title}${hasPlaceholders(lastBot.cards.at(-1)!.proposal.variables) ? ". It needs a value before it can be sent." : ""}` : lastBot.error ? lastBot.error.message : lastBot.text ? "Reply ready" : "") : "";
+  const announce = a.busy ? a.phase?.label ?? "Thinking…" : lastBot?.role === "assistant" ? (lastBot.cards.length ? `Proposal ready: ${lastBot.cards.at(-1)!.proposal.title}${hasPlaceholders(lastBot.cards.at(-1)!.proposal.variables) ? ". It needs a value before it can be sent." : ""}` : lastBot.error ? shown(lastBot.error).message : lastBot.text ? "Reply ready" : "") : "";
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

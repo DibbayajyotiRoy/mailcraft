@@ -7,10 +7,12 @@ export type CardState = "pending" | "applying" | "applied" | "failed" | "cancell
 export type Card = { proposal: Proposal; state: CardState; result?: ApplyResult };
 export type Msg = {
   id: string; role: "user" | "assistant"; text: string; steps: Step[]; cards: Card[];
-  error?: { code: string; message: string; hint?: string }; stats?: DoneStats; stopped?: boolean;
+  error?: { code: string; message: string; hint?: string; resetAt?: number }; stats?: DoneStats; stopped?: boolean;
   attachments?: import("@/lib/assistant/types").Attachment[];
 };
-export type Status = { configured: boolean; model?: { chain?: string[]; source?: string; error?: { message: string; hint: string } }; key?: { is_free_tier?: boolean; usage?: number; limit_remaining?: number | null; error?: string }; requests_today?: number };
+export type Status = { configured: boolean; model?: { chain?: string[]; source?: string; error?: { message: string; hint: string } }; key?: { is_free_tier?: boolean; usage?: number; limit_remaining?: number | null; error?: string }; requests_today?: number;
+  /** Free-model requests left today according to OpenRouter (epoch ms reset); absent when it has not said. */
+  free?: { limit: number | null; remaining: number; resetAt: number } | null };
 
 const STORE = "mailcraft.assistant.v1";
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -24,7 +26,7 @@ export function reduce(m: Msg, e: ChatEvent): Msg {
       return { ...m, steps: m.steps.some((x) => x.id === e.id) ? m.steps.map((x) => (x.id === e.id ? s : x)) : [...m.steps, s] };
     }
     case "proposal": return { ...m, cards: [...m.cards, { proposal: e.proposal, state: "pending" }] };
-    case "error": return { ...m, error: { code: e.code, message: e.message, hint: e.hint } };
+    case "error": return { ...m, error: { code: e.code, message: e.message, hint: e.hint, resetAt: e.resetAt } };
     case "done": return { ...m, stats: e.stats };
     default: return m;
   }

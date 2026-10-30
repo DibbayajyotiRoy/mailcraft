@@ -2,7 +2,8 @@
 // compact results back, repeat up to MAX_ROUNDS. Write tools only ever produce proposals; nothing here can execute one.
 import { openai } from "./openai-shape";
 import { recordModel } from "./models";
-import { streamChat, UpstreamError, type Streamed } from "./openrouter";
+import { isDailyCap, streamChat, UpstreamError, type Streamed } from "./openrouter";
+import { nextUtcMidnight } from "./reset";
 import { buildHistory, estTokens, pageContext, system } from "./prompt";
 import { routeGroups, runTool, toolsFor, type Group, type Outcome } from "./tools";
 import { countRequest } from "./usage";
@@ -19,10 +20,13 @@ export type TurnInput = {
 };
 
 export const failure = (e: UpstreamError): ChatEvent => {
-  const day = /per-day|daily/i.test(e.message);
+  const day = isDailyCap(e.message);
   switch (e.code) {
     case "unauthorized": return { type: "error", code: e.code, message: "OpenRouter rejected the API key.", hint: "Check OPENROUTER_API_KEY on the dashboard server." };
-    case "rate_limited": return { type: "error", code: e.code, message: day ? "The free-model daily request limit is used up." : "Free models are rate-limited right now.", hint: day ? "It resets daily (UTC). Settings → AI usage shows your key's status." : "Wait a minute and try again." };
+    // The daily-cap sentence is finished in the browser (shown() in reset.ts), which knows the viewer's time zone; resetAt is epoch ms.
+    case "rate_limited": return day
+      ? { type: "error", code: e.code, message: "Today's free AI requests are used up.", hint: "Settings → AI usage shows where your key stands.", resetAt: e.resetAt ?? nextUtcMidnight() }
+      : { type: "error", code: e.code, message: "Free models are rate-limited right now.", hint: "Wait a minute and try again." };
     case "payment_required": return { type: "error", code: e.code, message: "OpenRouter asked for credits, which free models should not need.", hint: "Check the key on openrouter.ai." };
     // Only messages written here reach the browser: an upstream body can echo headers, so it is never relayed.
     default: return { type: "error", code: e.code, message: e.code === "first_token_timeout" || e.code === "empty_completion" ? e.message || "The model could not be reached." : "The model could not be reached.", hint: "Try again; the assistant moves to the next free model automatically." };

@@ -53,6 +53,9 @@ async function get(a: any, ctx: Ctx): Promise<Out> {
   const e = encodeURIComponent(id);
   const [r, x1] = await Promise.all([read(ctx, main.method, main.path),
     kind === "email" ? sib(`/v1/emails/${e}/events`) : kind === "template" ? sib(`/v1/templates/${e}/preview`, "POST", {}) : kind === "contact" ? sib(buildCall(CAT.get("contact_activity")!, { id_or_email: id }).path) : undefined]);
+  if (r.error?.code === "not_found" && kind === "contact")
+    return { ok: { exists: false, email: id, note: "Not a contact yet: an email can still be sent to this address." }, done: `No contact for ${clip(id, 40)} yet` };
+  if (r.error?.code === "not_found") return apiErr({ ...r.error, message: `No ${kind} "${clip(id, 40)}" exists.` });
   if (r.error) return apiErr(r.error);
   const extra = kind === "email" ? { events: x1 } : kind === "template" ? { lint: (x1 as any)?.lint } : kind === "contact" ? { activity: x1 } : {};
   const d = r.data;

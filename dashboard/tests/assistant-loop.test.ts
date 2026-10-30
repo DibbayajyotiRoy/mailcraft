@@ -207,7 +207,7 @@ test("a slow first token moves on to the next model", async () => {
 test("if every model is rate limited the user gets a plain error with a hint", async () => {
   fakeWorld([orError(429, "Rate limit exceeded: free-models-per-day")]);
   const ev = await turn(user("hi"));
-  expect(ev.at(-1)).toMatchObject({ type: "error", code: "rate_limited", message: expect.stringMatching(/daily/) });
+  expect(ev.at(-1)).toMatchObject({ type: "error", code: "rate_limited", message: "Today's free AI requests are used up.", resetAt: expect.any(Number) });
 });
 
 test("a rejected key stops at once with an actionable error", async () => {
