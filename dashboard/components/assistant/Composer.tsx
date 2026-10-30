@@ -127,7 +127,7 @@ export function Composer({ busy, disabled, model, draft, setDraft, onSend, onSto
           {files.map((f, i) => (
             <div key={i} className={cn("flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", "kind" in f ? "border-border bg-surface" : "border-bad bg-bad-bg text-bad")}>
               <span className="truncate max-w-[180px]">{"kind" in f ? f.name : f.name}</span>
-              {"kind" in f ? <span className="text-muted">({f.kind})</span> : <span title={f.message}>!</span>}
+              {"kind" in f ? <span className="text-muted">({f.kind})</span> : <span className="max-w-[200px] truncate" title={f.message}>{f.message}</span>}
               <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="ml-1 rounded-full hover:bg-surface-2" aria-label={`Remove ${"kind" in f ? f.name : f.name}`}><X className="size-3" /></button>
             </div>
           ))}
