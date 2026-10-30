@@ -253,12 +253,11 @@ pub(crate) async fn plan(
     p: &Prepared,
     record: bool,
 ) -> ApiResult<Plan> {
-    let (kill, live, legal, postal): (bool, bool, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT kill_switch, live_enabled, legal_name, postal_address FROM workspaces WHERE id = $1",
-    )
-    .bind(key.workspace_id)
-    .fetch_one(&st.db)
-    .await?;
+    let (kill, live): (bool, bool) =
+        sqlx::query_as("SELECT kill_switch, live_enabled FROM workspaces WHERE id = $1")
+            .bind(key.workspace_id)
+            .fetch_one(&st.db)
+            .await?;
     if kill || key.paused {
         let scope = if kill { "workspace" } else { "this API key" };
         return Err(blocked(
@@ -319,13 +318,6 @@ pub(crate) async fn plan(
                 .await);
             }
             domain_id = (!dom.is_nil()).then_some(dom);
-            if p.stream == Stream::Marketing && (legal.is_none() || postal.is_none()) {
-                return Err(invalid(
-                    "marketing sends need the workspace legal name and postal address",
-                )
-                .field("stream")
-                .hint_in("set them on the workspace (CAN-SPAM footer requirement)"));
-            }
             if let Some(al) = &key.allowlist {
                 if let Some(bad) = p.to.iter().find(|t| !address::allowlist_matches(al, t)) {
                     return Err(blocked(

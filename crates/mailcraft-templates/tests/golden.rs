@@ -62,12 +62,11 @@ fn marketing_always_gets_footer_and_unsubscribe() {
 }
 
 #[test]
-fn marketing_without_address_or_unsubscribe_url_refuses() {
+fn marketing_without_address_or_unsubscribe_url() {
     let no_addr = RenderOptions::marketing(Footer::default());
-    assert!(matches!(
-        render(&welcome(), &vars(), &no_addr),
-        Err(RenderError::Footer(_))
-    ));
+    let r = render(&welcome(), &vars(), &no_addr).unwrap();
+    assert!(!r.text.contains("Springfield"));
+    assert!(r.html.contains("Unsubscribe"));
     let mut v = vars();
     v.as_object_mut().unwrap().remove("unsubscribe_url");
     assert!(matches!(
@@ -246,13 +245,13 @@ fn lint_catches_problems() {
         2,
         "{issues:?}"
     );
-    // marketing without an address
+    // marketing without an address still lints cleanly
     let m = lint(
         &welcome(),
         &RenderOptions::marketing(Footer::default()),
         None,
     );
-    assert!(m.iter().any(|i| i.code == "missing_postal_address"));
+    assert!(!m.iter().any(|i| i.code == "missing_postal_address"));
 }
 
 #[test]

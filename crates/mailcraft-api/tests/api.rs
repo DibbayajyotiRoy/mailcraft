@@ -717,11 +717,12 @@ async fn live_requires_go_live_verified_domain_allowlist_and_suppression() {
         .execute(&c.st.db)
         .await
         .unwrap();
-    // 5. marketing needs compliance info
+    // 5. marketing no longer requires compliance info
     let mut m = mail.clone();
     m["stream"] = json!("marketing");
-    let (st_, ..) = c.call("POST", "/v1/emails", Some(&k), &[], Some(m)).await;
-    assert_eq!(st_, StatusCode::BAD_REQUEST);
+    let (st_, _, b) = c.call("POST", "/v1/emails", Some(&k), &[], Some(m)).await;
+    assert_eq!(st_, StatusCode::ACCEPTED, "{b}");
+    assert_eq!(b["data"]["status"], "queued");
     // 6. finally ok, queued live with the verified domain id
     let (st_, _, b) = c
         .call("POST", "/v1/emails", Some(&k), &[], Some(mail))
@@ -729,7 +730,7 @@ async fn live_requires_go_live_verified_domain_allowlist_and_suppression() {
     assert_eq!(st_, StatusCode::ACCEPTED, "{b}");
     assert_eq!(b["data"]["status"], "queued");
     let (env, dom, status): (String, Option<Uuid>, String) =
-        sqlx::query_as("SELECT env, domain_id, status FROM emails")
+        sqlx::query_as("SELECT env, domain_id, status FROM emails WHERE stream = 'transactional'")
             .fetch_one(&c.st.db)
             .await
             .unwrap();
