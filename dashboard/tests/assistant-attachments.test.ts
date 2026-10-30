@@ -30,7 +30,72 @@ describe("parseFile", () => {
     }
   });
 
-  test("rejects CSV without email column", async () => {
+  test("auto-detects one email per line", async () => {
+    const f = file("list.csv", "a@example.com\nb@example.com\nc@example.com\n");
+    const r = await parseFile(f);
+    expect("kind" in r && r.kind === "csv").toBe(true);
+    if ("kind" in r && r.kind === "csv") {
+      expect(r.count).toBe(3);
+      expect(r.columns).toEqual(["email"]);
+      expect(r.rows.map((row) => row.email)).toEqual(["a@example.com", "b@example.com", "c@example.com"]);
+    }
+  });
+
+  test("auto-detects alternating name/email lines", async () => {
+    const f = file("pairs.csv", "Alice\na@example.com\nBob Smith\nb@example.com\n");
+    const r = await parseFile(f);
+    expect("kind" in r && r.kind === "csv").toBe(true);
+    if ("kind" in r && r.kind === "csv") {
+      expect(r.count).toBe(2);
+      expect(r.columns).toEqual(["name", "email"]);
+      expect(r.rows).toEqual([
+        { name: "Alice", email: "a@example.com" },
+        { name: "Bob Smith", email: "b@example.com" },
+      ]);
+    }
+  });
+
+  test("handles a real-world username/email list", async () => {
+    const content = [
+      "Lyksel",
+      "000lmueller@gmail.com",
+      "0779697309",
+      "0779697309@outlook.com",
+      "Sasha",
+      "0974363950dima@gmail.com",
+      "Quasar Crypto",
+      "0xquasarcrypto@gmail.com",
+      "admin",
+      "admin@captchas.io",
+      "a.queen.zou",
+      "a.queen.zou@gmail.xn--cp-pka",
+    ].join("\n");
+    const f = file("nocaptcha_emails.csv", content);
+    const r = await parseFile(f);
+    expect("kind" in r && r.kind === "csv").toBe(true);
+    if ("kind" in r && r.kind === "csv") {
+      expect(r.count).toBe(6);
+      expect(r.columns).toEqual(["name", "email"]);
+      expect(r.rows[0]).toEqual({ name: "Lyksel", email: "000lmueller@gmail.com" });
+      expect(r.rows[5]).toEqual({ name: "a.queen.zou", email: "a.queen.zou@gmail.xn--cp-pka" });
+    }
+  });
+
+  test("auto-detects headerless two-column CSV", async () => {
+    const f = file("two-col.csv", "Alice,a@example.com\nBob,b@example.com\n");
+    const r = await parseFile(f);
+    expect("kind" in r && r.kind === "csv").toBe(true);
+    if ("kind" in r && r.kind === "csv") {
+      expect(r.count).toBe(2);
+      expect(r.columns).toEqual(["name", "email"]);
+      expect(r.rows).toEqual([
+        { name: "Alice", email: "a@example.com" },
+        { name: "Bob", email: "b@example.com" },
+      ]);
+    }
+  });
+
+  test("rejects files with no emails", async () => {
     const f = file("bad.csv", "name\nAlice\n");
     const r = await parseFile(f);
     expect("kind" in r).toBe(false);
