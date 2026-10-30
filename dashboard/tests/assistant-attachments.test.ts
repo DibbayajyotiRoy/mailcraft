@@ -20,6 +20,16 @@ describe("parseFile", () => {
     }
   });
 
+  test("strips a UTF-8 BOM from the CSV header", async () => {
+    const f = file("bom.csv", "\uFEFFemail,first_name\na@example.com,Alice\n");
+    const r = await parseFile(f);
+    expect("kind" in r && r.kind === "csv").toBe(true);
+    if ("kind" in r && r.kind === "csv") {
+      expect(r.columns).toEqual(["email", "first_name"]);
+      expect(r.count).toBe(1);
+    }
+  });
+
   test("rejects CSV without email column", async () => {
     const f = file("bad.csv", "name\nAlice\n");
     const r = await parseFile(f);
