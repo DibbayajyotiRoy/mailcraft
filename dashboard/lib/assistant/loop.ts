@@ -36,9 +36,15 @@ export const failure = (e: UpstreamError): ChatEvent => {
 export async function* runTurn(i: TurnInput): AsyncGenerator<ChatEvent> {
   const t0 = Date.now(), deadline = AbortSignal.timeout(TURN_MS);
   const signal = i.signal ? AbortSignal.any([i.signal, deadline]) : deadline;
-  const last = [...i.history].reverse().find((m) => m.role === "user")?.content ?? "";
+  const lastMsg = [...i.history].reverse().find((m) => m.role === "user");
+  const last = lastMsg?.content ?? "";
   const sendOpen = i.history.slice(-6).some((m) => m.note && /proposed \(not applied\): (Send "|Broadcast ")/.test(m.note)); // "make it friendlier" has no send keyword but needs propose_email again
-  const groups = routeGroups(last, i.path, sendOpen ? ["broadcasts"] : []);
+  const attachmentGroups: Group[] = [];
+  if (lastMsg?.attachments?.some((a) => a.kind === "csv")) attachmentGroups.push("contacts");
+  if (lastMsg?.attachments?.some((a) => a.kind === "html" || a.kind === "mjml" || a.kind === "text")) { attachmentGroups.push("broadcasts", "templates"); }
+  if (lastMsg?.attachments?.some((a) => a.kind === "json")) attachmentGroups.push("templates");
+  const extraGroups: Group[] = [...(sendOpen ? ["broadcasts" as const] : []), ...attachmentGroups];
+  const groups = routeGroups(last, i.path, extraGroups);
   yield { type: "phase", phase: "thinking", label: "Thinking…" };
 
   const page = await pageContext(i.path, last, i.ctx);

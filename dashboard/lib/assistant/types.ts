@@ -3,9 +3,18 @@
 export type Risk = "safe" | "sends";
 
 /** What the panel shows for a write the model asked for. The executable part (`calls`) never leaves the server. */
+export type DraftEdit = { instruction: string; applied: boolean; note?: string };
+export type DraftState = {
+  original: string;
+  current: string;
+  edits: DraftEdit[];
+  /** True when the last instruction could not be matched (the card says so). */
+  unmatched?: boolean;
+};
+
 export type Proposal = {
   id: string;
-  kind: "template" | "automation" | "automation_state" | "broadcast" | "email" | "list" | "contacts" | "go_live";
+  kind: "template" | "automation" | "automation_state" | "broadcast" | "email" | "list" | "contacts" | "go_live" | "import" | "email_body";
   title: string;
   summary: string;
   /** "sends" = Apply can email people (still subject to approvals, go-live and the kill switch). */
@@ -25,8 +34,12 @@ export type Proposal = {
   /** Template sends: every variable with the value the assistant drafted for it. `placeholder` marks a stand-in such as "[add signup link]"
    *  that a person must replace; Apply stays disabled (and the server refuses) while any is left. */
   variables?: { name: string; value: string; placeholder?: boolean }[];
-  /** Same key = a newer proposal replaces the older pending one (the assistant re-proposed after "make it friendlier"). */
+  /** Same key = a newer proposal with the same `key` replaces the older pending one (the assistant re-proposed after "make it friendlier"). */
   key?: string;
+  /** Edits applied to the rendered email body for this send only; the template is unchanged. */
+  draft?: DraftState;
+  /** import only: summary of rows that would be imported. */
+  import?: { summary: { new: number; update: number; unchanged: number; skipped: number }; list?: { id: string; name: string; exists: boolean } | null; rows: { index: number; email: string; status: string; reason?: string }[]; dry_run: boolean };
   expires_at: number;
 };
 
@@ -54,4 +67,6 @@ export type ChatEvent =
   | { type: "done"; stats: DoneStats };
 
 export type PageCtx = { path: string };
-export type ChatMsg = { role: "user" | "assistant"; content: string; note?: string };
+import type { Attachment } from "./attachments";
+export { type Attachment } from "./attachments";
+export type ChatMsg = { role: "user" | "assistant"; content: string; note?: string; attachments?: Attachment[] };

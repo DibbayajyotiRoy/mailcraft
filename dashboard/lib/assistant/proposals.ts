@@ -26,6 +26,17 @@ export function putProposal(sid: string, { calls, link, linkKind, ...card }: Spe
 const find = (sid: string, id: string) => { prune(); const s = store.get(String(id)); return s && s.sid === sid ? s : undefined; };
 export const peekProposal = (sid: string, id: string) => find(sid, id);
 export function cancelProposal(sid: string, id: string) { const s = find(sid, id); if (s) store.delete(s.card.id); return !!s; }
+/** Find the newest still-stored proposal with this session + key, if any. Used to accumulate draft edits across turns. */
+export function findPendingByKey(sid: string, key: string): Stored | undefined {
+  prune();
+  let latest: Stored | undefined;
+  for (const s of store.values()) {
+    if (s.sid === sid && s.card.key === key) {
+      if (!latest || s.card.expires_at > latest.card.expires_at) latest = s;
+    }
+  }
+  return latest;
+}
 
 const err = (code: string, message: string, hint?: string): ApplyResult => ({ status: "failed", label: message, error: { code, message, hint } });
 const sub = (v: unknown, prev: any): unknown => (typeof v === "string" ? v.replace(/\$prev\.(\w+)/g, (_, k) => String(prev?.[k] ?? "")) : Array.isArray(v) ? v.map((x) => sub(x, prev)) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x, prev)])) : v);

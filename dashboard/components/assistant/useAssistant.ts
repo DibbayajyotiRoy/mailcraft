@@ -8,6 +8,7 @@ export type Card = { proposal: Proposal; state: CardState; result?: ApplyResult 
 export type Msg = {
   id: string; role: "user" | "assistant"; text: string; steps: Step[]; cards: Card[];
   error?: { code: string; message: string; hint?: string; resetAt?: number }; stats?: DoneStats; stopped?: boolean;
+  attachments?: import("@/lib/assistant/types").Attachment[];
 };
 export type Status = { configured: boolean; model?: { chain?: string[]; source?: string; error?: { message: string; hint: string } }; key?: { is_free_tier?: boolean; usage?: number; limit_remaining?: number | null; error?: string }; requests_today?: number;
   /** Free-model requests left today according to OpenRouter (epoch ms reset); absent when it has not said. */
@@ -49,7 +50,7 @@ export function toHistory(msgs: Msg[]): ChatMsg[] {
         return c.state === "applied" ? `applied: ${t}${redo}` : c.state === "cancelled" ? `cancelled: ${t}` : c.state === "replaced" ? `replaced by a newer proposal: ${t}` : c.state === "pending" ? `proposed (not applied): ${t}${redo}${vars}` : "";
       }),
     ].filter(Boolean).join("; ");
-    return { role: m.role, content: m.text, ...(notes && { note: notes }) };
+    return { role: m.role, content: m.text, ...(notes && { note: notes }), ...(m.attachments?.length && { attachments: m.attachments }) };
   });
 }
 
@@ -68,10 +69,10 @@ export function useAssistant(path: string, onApplied?: () => void) {
 
   const patch = useCallback((id: string, f: (m: Msg) => Msg) => setMsgs((all) => all.map((m) => (m.id === id ? f(m) : m))), []);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, attachments?: Msg["attachments"]) => {
     const t = text.trim();
-    if (!t || busy) return;
-    const user: Msg = { id: uid(), role: "user", text: t, steps: [], cards: [] };
+    if ((!t && !attachments?.length) || busy) return;
+    const user: Msg = { id: uid(), role: "user", text: t, steps: [], cards: [], ...(attachments?.length && { attachments }) };
     const bot: Msg = { id: uid(), role: "assistant", text: "", steps: [], cards: [] };
     const history = toHistory([...live.current, user]);
     setMsgs((all) => [...all, user, bot]);
