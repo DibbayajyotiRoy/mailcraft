@@ -177,7 +177,7 @@ const FOOTER_HTML: &str = "<div style=\"font-size:12px;color:#6b7280;text-align:
 <a href=\"{{ unsubscribe_url }}\" style=\"color:#6b7280\">Unsubscribe</a>\
 {% if preferences_url is defined %} | <a href=\"{{ preferences_url }}\" style=\"color:#6b7280\">Manage preferences</a>{% endif %}</div>";
 
-fn validate(t: &Template, o: &RenderOptions) -> Result<(), RenderError> {
+fn validate(t: &Template) -> Result<(), RenderError> {
     t.check_version()?;
     for s in t.slots() {
         if let Block::Slot { name, .. } = s {
@@ -192,16 +192,6 @@ fn validate(t: &Template, o: &RenderOptions) -> Result<(), RenderError> {
                 ));
             }
         }
-    }
-    if o.stream == Stream::Marketing
-        && o.footer
-            .postal_address
-            .as_deref()
-            .is_none_or(|a| a.trim().is_empty())
-    {
-        return Err(RenderError::Footer(
-            "marketing sends require the workspace postal address (CAN-SPAM)".into(),
-        ));
     }
     Ok(())
 }
@@ -240,7 +230,7 @@ fn build_mjml(t: &Template, footer: bool, export: bool) -> String {
 /// Deterministic block tree -> MJML source (still containing `{{ }}` expressions).
 /// Marketing templates get the renderer-owned footer appended.
 pub fn to_mjml(t: &Template, o: &RenderOptions) -> Result<String, RenderError> {
-    validate(t, o)?;
+    validate(t)?;
     Ok(build_mjml(t, o.stream == Stream::Marketing, false))
 }
 
@@ -360,7 +350,7 @@ fn inject_footer(doc: &str) -> String {
 
 /// Render to subject + HTML + auto plain text. Missing variables are an error ("Hi null" never ships).
 pub fn render(t: &Template, vars: &Value, o: &RenderOptions) -> Result<Rendered, RenderError> {
-    validate(t, o)?;
+    validate(t)?;
     let ctx = context(t, vars, o)?;
     let env = html_env();
     let marketing = o.stream == Stream::Marketing;

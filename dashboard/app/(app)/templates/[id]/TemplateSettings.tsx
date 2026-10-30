@@ -39,7 +39,7 @@ export function TemplateSettings({ template: t }: { template: any }) {
           <Field label="Alias" description={aliasChanged ? "Sends and automations that use the old alias will stop finding this template. Update them first." : "What sends and automations reference, e.g. template: welcome."}>
             {(a) => <Input {...a} value={f.alias} onChange={(e) => setF({ ...f, alias: e.target.value })} required className="font-mono" />}
           </Field>
-          <Field label="Stream" description="Marketing templates get the unsubscribe footer and need the workspace postal address.">
+          <Field label="Stream" description="Marketing templates get the unsubscribe footer automatically.">
             {(a) => <Select {...a} value={f.stream} onChange={(e) => setF({ ...f, stream: e.target.value })}><option value="transactional">Transactional</option><option value="marketing">Marketing</option></Select>}
           </Field>
           {error && <ErrorState error={error} />}
